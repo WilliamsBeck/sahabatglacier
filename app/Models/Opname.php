@@ -69,7 +69,9 @@ class Opname extends Model
         if (!$hasAny) return null; // setup awal, boleh
 
         $d        = \Carbon\Carbon::parse($txDate);
-        $prevMonth = $d->copy()->subMonth();
+        // startOfMonth dulu supaya subMonth tidak overflow saat tanggal = 31
+        // (mis. 31 Juli - 1 bulan = "31 Juni" yang tidak ada → overflow ke 1 Juli).
+        $prevMonth = $d->copy()->startOfMonth()->subMonth();
         $month    = (int) $prevMonth->month;
         $year     = (int) $prevMonth->year;
 

@@ -62,7 +62,10 @@
       "Bash(/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysqldump.exe -u root mixue_inventory)",
       "Bash(/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe -u root -e 'CREATE DATABASE IF NOT EXISTS glacier CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;')",
       "Bash(/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe -u root glacier)",
-      "Bash(/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe -u root -e 'SHOW TABLES FROM glacier;')"
+      "Bash(/c/laragon/bin/mysql/mysql-8.4.3-winx64/bin/mysql.exe -u root -e 'SHOW TABLES FROM glacier;')",
+      "Bash(git --no-pager diff --stat)",
+      "Bash(php -l app/Http/Controllers/OrderPlanningController.php)",
+      "Bash(php -l app/Http/Controllers/Inventory/MutationController.php)"
     ]
   }
 }

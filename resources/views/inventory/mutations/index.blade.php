@@ -36,6 +36,7 @@
                     <option value="purchase_supplier"  {{ request('type') === 'purchase_supplier'  ? 'selected' : '' }}>Pembelian Supplier Lokal</option>
                     <option value="sale_internal"      {{ request('type') === 'sale_internal'      ? 'selected' : '' }}>Pembelian Internal</option>
                     <option value="sale_external"      {{ request('type') === 'sale_external'      ? 'selected' : '' }}>Pembelian Eksternal</option>
+                    <option value="sale_external_out"  {{ request('type') === 'sale_external_out'  ? 'selected' : '' }}>Penjualan Eksternal</option>
                 </select>
             </div>
             <div class="col">
@@ -105,19 +106,24 @@
                             'purchase_supplier' => ['Pembelian Supplier Lokal', 'bg-info text-dark'],
                             'sale_internal'     => ['Pembelian Internal',       'bg-primary'],
                             'sale_external'     => ['Pembelian Eksternal',      'bg-primary'],
+                            'sale_external_out' => ['Penjualan Eksternal',      'bg-warning text-dark'],
                             'opening_stock'     => ['Input Stok Awal',          'bg-secondary'],
                         ];
                         $tc = $typeConfig[$mut->type] ?? [$mut->type, 'bg-secondary'];
 
-                        // Pengirim: supplier (untuk pembelian) atau source store (untuk transfer/sale)
-                        if ($mut->isPurchase()) {
+                        // Pengirim: pihak luar (Pembelian Eksternal) / supplier (pembelian) / toko asal
+                        if ($mut->external_sender) {
+                            $pengirim = e($mut->external_sender);
+                        } elseif ($mut->isPurchase()) {
                             $pengirim = $mut->supplier->name ?? '<span class="text-muted">—</span>';
                         } else {
                             $pengirim = $mut->sourceStore->name ?? '<span class="text-muted">—</span>';
                         }
 
-                        // Penerima: destination store
-                        $penerima = $mut->destinationStore->name ?? '<span class="text-muted">—</span>';
+                        // Penerima: pihak luar (Penjualan Eksternal) / toko tujuan
+                        $penerima = $mut->external_receiver
+                            ? e($mut->external_receiver)
+                            : ($mut->destinationStore->name ?? '<span class="text-muted">—</span>');
                     @endphp
                     <tr>
                         {{-- No SJ --}}

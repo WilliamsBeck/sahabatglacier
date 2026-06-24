@@ -180,7 +180,7 @@
                                 // Pecah saldo ke Dus / Pack / unit dasar — konsisten dgn Saldo Stok
                                 $pkg  = $stock->ingredient->packagings->first();
                                 $unit = $stock->ingredient->unit_base;
-                                $bal  = (float) $stock->stock_balance;
+                                $bal  = (float) ($stock->sealed_balance ?? $stock->stock_balance);
                                 $ptb  = $pkg && $pkg->pack_to_base  > 0 ? (float) $pkg->pack_to_base : 0;
                                 $ctb  = $pkg && $pkg->crate_to_pack > 0 ? $pkg->crate_to_pack * $ptb : 0;
 
@@ -192,7 +192,9 @@
                                 $parts = [];
                                 if ($dus)  $parts[] = $dus  . ' Dus';
                                 if ($pack) $parts[] = $pack . ' Pack';
-                                if ($rem >= 0.5 || empty($parts)) {
+                                // Cukup Dus & Pack — sisa gram/pcs eceran diabaikan.
+                                // Satuan dasar hanya dipakai untuk bahan tanpa kemasan (tak ada Dus/Pack).
+                                if (empty($parts)) {
                                     $parts[] = number_format($rem, 0, ',', '.') . ' ' . $unit;
                                 }
                             @endphp

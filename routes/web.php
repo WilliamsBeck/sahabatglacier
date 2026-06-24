@@ -32,7 +32,6 @@ use App\Http\Controllers\Reports\WasteAnalysisController;
 use App\Http\Controllers\Reports\RekapController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\NotificationController;
-use App\Http\Controllers\ForecastingController;
 use App\Http\Controllers\OrderPlanningController;
 
 // AUTH
@@ -68,6 +67,9 @@ Route::middleware(['auth'])->group(function () {
         Route::post('import/{entity}/preview', [MasterImportController::class, 'preview'])->name('import.preview');
         Route::post('import/{entity}/commit',  [MasterImportController::class, 'commit'])->name('import.commit');
         // Bundle multi-sheet (mis. Bahan + Kemasan + Komposisi dalam 1 file)
+        Route::get('export/{entity}', [MasterImportController::class, 'exportData'])->name('export');
+        Route::get('export-bundle/{bundle}', [MasterImportController::class, 'bundleExportData'])->name('export-bundle');
+
         Route::get('import-bundle/{bundle}/template', [MasterImportController::class, 'bundleTemplate'])->name('import-bundle.template');
         Route::post('import-bundle/{bundle}/preview', [MasterImportController::class, 'bundlePreview'])->name('import-bundle.preview');
         Route::post('import-bundle/{bundle}/commit',  [MasterImportController::class, 'bundleCommit'])->name('import-bundle.commit');
@@ -139,6 +141,8 @@ Route::middleware(['auth'])->group(function () {
         Route::post('hpp/unlock', [HppController::class, 'unlock'])->name('hpp.unlock');
         Route::get('hpp/compare', [HppController::class, 'compare'])->name('hpp.compare');
         Route::get('hpp/trend', [HppTrendController::class, 'index'])->name('hpp.trend');
+        Route::get('hpp/cone-cup', [HppController::class, 'coneCup'])->name('hpp.cone-cup');
+        Route::post('hpp/cone-cup/save', [HppController::class, 'saveOverfill'])->name('hpp.cone-cup.save');
         Route::get('hpp/export', [HppController::class, 'export'])->name('hpp.export');
     });
 
@@ -186,10 +190,6 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/order-planning', [OrderPlanningController::class, 'index'])->name('order-planning.index');
         Route::get('/order-planning/export', [OrderPlanningController::class, 'export'])->name('order-planning.export');
     });
-
-    // FORECASTING
-    Route::get('/forecasting', [ForecastingController::class, 'index'])->name('forecasting.index');
-    Route::post('/forecasting/calculate', [ForecastingController::class, 'calculate'])->name('forecasting.calculate');
 
     // API INTERNAL (AJAX)
     Route::prefix('api-internal')->name('api.')->group(function () {

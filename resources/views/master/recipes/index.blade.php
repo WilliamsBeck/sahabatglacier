@@ -6,7 +6,10 @@
         <h1 class="page-title">Resep Menu</h1>
         <p class="page-subtitle">Versi resep aktif menentukan HPP per periode</p>
     </div>
-    <a href="{{ route('master.recipes.create') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> Tambah Resep</a>
+    <div class="d-flex gap-2 flex-wrap justify-content-end align-items-start">
+        @include('master.partials.import-buttons', ['entity' => 'recipes', 'label' => 'Resep Menu'])
+        <a href="{{ route('master.recipes.create') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> Tambah Resep</a>
+    </div>
 </div>
 <div class="card mb-3"><div class="card-body py-2">
     <form method="GET" class="row g-2 align-items-center">

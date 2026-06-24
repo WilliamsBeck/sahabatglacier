@@ -63,6 +63,93 @@ class FifoService
     }
 
     /**
+     * pack_to_base untuk sebuah kemasan. 0 = bahan tanpa kemasan (tak ada konsep "pack").
+     */
+    private static function packToBaseFor(?int $packagingId): float
+    {
+        if ($packagingId === null) return 0.0;
+        return (float) (IngredientPackaging::where('id', $packagingId)->value('pack_to_base') ?? 0);
+    }
+
+    /**
+     * Eceran (pcs/gr = pack terbuka) dari opname approved TERAKHIR untuk (toko, bahan, kemasan).
+     * Dipakai untuk MENGABAIKAN eceran di stok yang ditampilkan/ditransfer (pack segel saja).
+     * Catatan: HANYA untuk display/validasi barang keluar — saldo FIFO TIDAK diubah.
+     */
+    public static function opnameLoose(int $storeId, int $ingredientId, ?int $packagingId): float
+    {
+        if ($packagingId === null) return 0.0;
+        $lastOpnameId = \App\Models\Opname::where('store_id', $storeId)->where('status', 'approved')
+            ->orderByDesc('opname_date')->orderByDesc('id')->value('id');
+        if (!$lastOpnameId) return 0.0;
+        return (float) (\App\Models\OpnameItem::where('opname_id', $lastOpnameId)
+            ->where('ingredient_id', $ingredientId)->where('packaging_id', $packagingId)
+            ->where('physical_base', '>', 0)->value('physical_base') ?? 0);
+    }
+
+    /**
+     * Potong stok dalam PACK UTUH saja (barang keluar: transfer & penjualan eksternal).
+     * Sisa gram (< 1 pack = "pack terbuka") di sebuah batch DILEWATI — tetap tinggal di
+     * toko untuk dipakai produksi harian. Bahan tanpa kemasan → jatuh ke mode per-gram.
+     */
+    public static function deductWholePacks(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): void
+    {
+        $ptb = self::packToBaseFor($packagingId);
+        if ($ptb <= 0) { self::deduct($storeId, $ingredientId, $qty, $packagingId); return; }
+
+        $packsNeeded = (int) round($qty / $ptb);
+        foreach (self::getFifoItems($storeId, $ingredientId, $packagingId) as $item) {
+            if ($packsNeeded <= 0) break;
+            $wholePacks = (int) floor((float) $item->remaining_qty / $ptb); // pack UTUH di batch ini
+            if ($wholePacks <= 0) continue;                                  // cuma sisa gram → lewati
+            $take = min($wholePacks, $packsNeeded);
+            $item->decrement('remaining_qty', $take * $ptb);
+            $packsNeeded -= $take;
+        }
+    }
+
+    /**
+     * Biaya FIFO untuk qty tertentu, dihitung PACK UTUH per batch (sejajar deductWholePacks).
+     * Dipakai untuk menilai harga modal transfer/penjualan eksternal.
+     */
+    public static function getCostWholePacks(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): float
+    {
+        $ptb = self::packToBaseFor($packagingId);
+        if ($ptb <= 0) return self::getCost($storeId, $ingredientId, $qty, $packagingId);
+
+        $items = self::getFifoItems($storeId, $ingredientId, $packagingId);
+        if ($items->isEmpty()) return self::getCost($storeId, $ingredientId, $qty, $packagingId);
+
+        $packsNeeded = (int) round($qty / $ptb);
+        $totalCost   = 0.0;
+        foreach ($items as $item) {
+            if ($packsNeeded <= 0) break;
+            $wholePacks = (int) floor((float) $item->remaining_qty / $ptb);
+            if ($wholePacks <= 0) continue;
+            $take = min($wholePacks, $packsNeeded);
+            $totalCost += $take * $ptb * (float) $item->price_per_base;
+            $packsNeeded -= $take;
+        }
+        return $totalCost;
+    }
+
+    /**
+     * Stok TERSEDIA untuk barang keluar = PACK SEGEL = FIFO − eceran opname terakhir,
+     * lalu dibulatkan ke pack utuh. Pack terbuka (eceran) tidak bisa ditransfer/dijual.
+     * Dipakai untuk validasi & tampilan transfer/penjualan eksternal. (Konsisten Saldo Stok.)
+     */
+    public static function availableWholePacksBase(int $storeId, int $ingredientId, ?int $packagingId = null): float
+    {
+        $items = self::getFifoItems($storeId, $ingredientId, $packagingId);
+        $total = (float) $items->sum('remaining_qty');
+        $ptb   = self::packToBaseFor($packagingId);
+        if ($ptb <= 0) return $total;
+
+        $sealed = max(0.0, $total - self::opnameLoose($storeId, $ingredientId, $packagingId));
+        return floor($sealed / $ptb) * $ptb;
+    }
+
+    /**
      * Hitung ulang remaining_qty semua batch di toko ini dari nol.
      * Dipanggil setelah menghapus mutation yang sudah confirmed,
      * supaya remaining_qty tidak under-count akibat deduction yang sudah dihapus.
@@ -77,21 +164,22 @@ class FifoService
         ->where('ingredient_id', $ingredientId)
         ->update(['remaining_qty' => DB::raw('total_in_base')]);
 
-        // 2. Ambil semua outgoing dari toko ini (sale & transfer), urut dari terlama
-        //    INCLUDE sale_external juga supaya FIFO tidak under-deduct.
+        // 2. Ambil semua outgoing dari toko ini (barang keluar), urut dari terlama:
+        //    transfer internal (sale_internal) & penjualan eksternal (sale_external_out).
+        //    (sale_external = barang MASUK, tidak memotong sumber.)
         $deductions = MutationItem::whereHas('mutation', fn($q) =>
             $q->where('source_store_id', $storeId)
               ->where('status', 'confirmed')
-              ->whereIn('type', ['sale_internal', 'sale_external'])
+              ->whereIn('type', ['sale_internal', 'sale_external_out'])
         )
         ->where('ingredient_id', $ingredientId)
         ->orderBy('id')
         ->get(['total_in_base', 'packaging_id']);
 
-        // 3. Re-apply deductions dari mutation (sale/transfer), filter per packaging
-        foreach ($deductions as $ded) {
-            self::deduct($storeId, $ingredientId, (float) $ded->total_in_base, $ded->packaging_id ?: null);
-        }
+        // 3. Deduksi transfer/penjualan (PACK UTUH) DITERAPKAN PALING AKHIR (lihat step 7b).
+        //    Alasannya: transfer mengambil pack utuh dari stok pasca-pemakaian-harian.
+        //    Kalau diterapkan sebelum pemakaian harian, pembagian batch jadi berbeda dengan
+        //    confirm real-time (mis. sisa gram batch lama keliru ikut terpakai dulu).
 
         // 4. Re-apply deductions dari daily usage (pencatatan harian)
         //    HANYA tanggal yang sudah DIKONFIRMASI yang dideduksi dari FIFO.
@@ -180,6 +268,13 @@ class FifoService
         foreach ($opnameNeg as $adj) {
             $qty = abs((float) $adj->variance);
             if ($qty > 0.001) self::deduct($storeId, $ingredientId, $qty, $adj->packaging_id ?: null);
+        }
+
+        // 7b. Deduksi transfer/penjualan eksternal — PACK UTUH, diterapkan PALING AKHIR
+        //     (setelah semua konsumsi) supaya hasilnya sama dengan confirm real-time:
+        //     transfer mengambil pack utuh dari stok yang tersisa pasca-pemakaian.
+        foreach ($deductions as $ded) {
+            self::deductWholePacks($storeId, $ingredientId, (float) $ded->total_in_base, $ded->packaging_id ?: null);
         }
 
         // 8. Sync store_stocks.stock_balance

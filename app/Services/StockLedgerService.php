@@ -19,10 +19,13 @@ class StockLedgerService
         int    $referenceId,
         string $notes = ''
     ): StockLedger {
-        // Ambil saldo terakhir
+        // Ambil saldo terakhir. Tiebreaker by id: beberapa entri sering dibuat dalam
+        // loop yang sama (created_at identik sampai detik) — tanpa urutan id, saldo
+        // terakhir bisa terambil dari entri yang salah → balance_after melenceng.
         $lastBalance = StockLedger::where('store_id', $storeId)
             ->where('ingredient_id', $ingredientId)
-            ->latest('created_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->value('balance_after') ?? 0;
 
         $newBalance = $lastBalance + $qtyChange;

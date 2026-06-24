@@ -101,14 +101,15 @@ class MutationController extends Controller
     public function store(Request $request)
     {
         $needsDest   = in_array($request->type, ['purchase_zhisheng','purchase_supplier','sale_internal','sale_external']);
-        $needsSource = in_array($request->type, ['sale_internal']);
+        $needsSource = in_array($request->type, ['sale_internal','sale_external_out']);
 
         $request->validate([
-            'type'                   => 'required|in:purchase_zhisheng,purchase_supplier,sale_internal,sale_external',
+            'type'                   => 'required|in:purchase_zhisheng,purchase_supplier,sale_internal,sale_external,sale_external_out',
             'destination_store_id'   => ($needsDest   ? 'required' : 'nullable').'|exists:stores,id',
             'source_store_id'        => ($needsSource ? 'required' : 'nullable').'|exists:stores,id',
             'supplier_id'            => 'nullable|exists:suppliers,id',
             'external_sender'        => 'nullable|string|max:255|required_if:type,sale_external',
+            'external_receiver'      => 'nullable|string|max:255|required_if:type,sale_external_out',
             'invoice_no'             => 'nullable|string|max:255|unique:mutations,invoice_no',
             'transaction_date'       => 'required|date',
             'delivery_date'          => 'nullable|date|after_or_equal:transaction_date',
@@ -124,6 +125,7 @@ class MutationController extends Controller
             'destination_store_id.required' => 'Toko penerima wajib dipilih.',
             'source_store_id.required'      => 'Toko pengirim wajib dipilih.',
             'external_sender.required_if'   => 'Pengirim wajib diisi untuk Pembelian Eksternal.',
+            'external_receiver.required_if' => 'Penerima/pembeli wajib diisi untuk Penjualan Eksternal.',
             'invoice_no.unique'             => 'No. SJ sudah dipakai di mutasi lain. Gunakan nomor yang berbeda.',
             'delivery_date.required'        => 'Tanggal penerimaan wajib diisi untuk pembelian.',
             'delivery_date.after_or_equal'  => 'Tanggal penerimaan tidak boleh lebih awal dari tanggal pengiriman.',
@@ -135,20 +137,18 @@ class MutationController extends Controller
             return back()->withInput()->withErrors(['destination_store_id' => 'Toko pengirim dan toko penerima tidak boleh sama.']);
         }
 
-        // Validasi: qty tidak boleh melebihi stok toko pengirim
-        $needsStockCheck = in_array($request->type, ['sale_internal']);
+        // Validasi: qty tidak boleh melebihi stok toko pengirim (transfer internal & penjualan eksternal)
+        $needsStockCheck = in_array($request->type, ['sale_internal','sale_external_out']);
         if ($needsStockCheck && $request->source_store_id) {
             $overErrors = [];
             foreach ($request->items as $i => $item) {
-                // Stok tersedia PER KEMASAN di toko pengirim (bukan total bahan)
-                $available = MutationItem::whereHas('mutation', fn($q) =>
-                        $q->where('destination_store_id', $request->source_store_id)
-                          ->where('status', 'confirmed'))
-                    ->where('ingredient_id', $item['ingredient_id'])
-                    ->when(!empty($item['packaging_id']),
-                        fn($q) => $q->where('packaging_id', $item['packaging_id']),
-                        fn($q) => $q->whereNull('packaging_id'))
-                    ->sum('remaining_qty');
+                // Stok tersedia untuk barang keluar = PACK UTUH saja (sisa gram/pack terbuka
+                // tidak ikut dihitung), PER KEMASAN di toko pengirim.
+                $available = FifoService::availableWholePacksBase(
+                    (int) $request->source_store_id,
+                    (int) $item['ingredient_id'],
+                    !empty($item['packaging_id']) ? (int) $item['packaging_id'] : null
+                );
 
                 $requested = $this->convertToBase($item);
                 if ($requested > $available + 0.001) {
@@ -202,6 +202,7 @@ class MutationController extends Controller
                 'source_store_id'      => $request->source_store_id,
                 'supplier_id'          => $supplierId,
                 'external_sender'      => $request->type === 'sale_external' ? $request->external_sender : null,
+                'external_receiver'    => $request->type === 'sale_external_out' ? $request->external_receiver : null,
                 'invoice_no'           => $request->invoice_no,
                 'transaction_date'     => $request->transaction_date,
                 'delivery_date'        => $request->delivery_date,
@@ -277,6 +278,7 @@ class MutationController extends Controller
                                    . '|date|after_or_equal:transaction_date',
             'invoice_no'        => 'nullable|string|max:255|unique:mutations,invoice_no,' . $mutation->id,
             'external_sender'   => 'nullable|string|max:255',
+            'external_receiver' => 'nullable|string|max:255',
             'notes'             => 'nullable|string',
             'items'             => 'required|array|min:1',
             'items.*.item_id'   => 'required|exists:mutation_items,id',
@@ -309,7 +311,9 @@ class MutationController extends Controller
                 'invoice_no'       => $request->invoice_no,
                 'notes'            => $request->notes,
             ] + ($mutation->type === 'sale_external' && $request->filled('external_sender')
-                    ? ['external_sender' => $request->external_sender] : []));
+                    ? ['external_sender' => $request->external_sender] : [])
+              + ($mutation->type === 'sale_external_out' && $request->filled('external_receiver')
+                    ? ['external_receiver' => $request->external_receiver] : []));
 
             foreach ($request->items as $itemData) {
                 $item = $mutation->items->firstWhere('id', $itemData['item_id']);
@@ -366,6 +370,26 @@ class MutationController extends Controller
                 ->with('error', MonthLockService::lockMessage($txMonth, $txYear));
         }
 
+        // ── Lock periode oleh opname / snapshot HPP ──────────────────────────────
+        // Hanya mutasi CONFIRMED yang memengaruhi FIFO/valuasi historis. Bila
+        // tanggalnya sudah ditutup opname approved atau snapshot HPP, menghapusnya
+        // akan merusak stok & valuasi yang sudah dibekukan → blokir (konsisten dgn
+        // store()/confirm()/update()). Draft tidak menyentuh stok, tetap boleh dihapus.
+        if ($mutation->status === 'confirmed') {
+            $lockDate = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+            $lc = \Carbon\Carbon::parse($lockDate);
+            foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
+                if (\App\Models\Opname::isDateLocked((int)$sid, $lockDate)) {
+                    return redirect()->route('inventory.mutations.show', $mutation)
+                        ->with('error', \App\Models\Opname::lockMessageFor((int)$sid));
+                }
+                if (\App\Models\HppSnapshot::isDateLocked((int)$sid, $lockDate)) {
+                    return redirect()->route('inventory.mutations.show', $mutation)
+                        ->with('error', \App\Models\HppSnapshot::lockMessageFor((int)$sid, $lc->month, $lc->year));
+                }
+            }
+        }
+
         DB::transaction(function () use ($mutation) {
             // Jika sudah confirmed, hapus ledger dan hitung ulang saldo stok
             if ($mutation->status === 'confirmed') {
@@ -402,28 +426,37 @@ class MutationController extends Controller
                 }
             }
 
-            // Kumpulkan data untuk FIFO recalculate SEBELUM items dihapus
-            // (sale/transfer yang mendeduct stok dari source store)
+            // Kumpulkan data untuk FIFO recalculate SEBELUM items dihapus.
+            // Dua arah:
+            //  - source store: sale_internal mendeduct stok dari toko pengirim.
+            //  - destination store: pembelian / opening_stock / sale_external adalah
+            //    batch MASUK. Menghapusnya membuat batch hilang, sehingga remaining_qty
+            //    batch lain (yang menyerap deduksi) jadi basi → WAJIB recalc juga.
+            // Pakai key unik supaya tidak recalc ganda untuk pasangan yang sama.
             $fifoRecalcPairs = [];
-            if (
-                $mutation->status === 'confirmed' &&
-                $mutation->source_store_id &&
-                in_array($mutation->type, ['sale_internal'])
-            ) {
+            if ($mutation->status === 'confirmed') {
                 $mutation->loadMissing('items');
                 foreach ($mutation->items as $item) {
-                    $fifoRecalcPairs[] = [
-                        'store_id'      => $mutation->source_store_id,
-                        'ingredient_id' => $item->ingredient_id,
-                    ];
+                    if ($mutation->source_store_id && in_array($mutation->type, ['sale_internal','sale_external_out'])) {
+                        $fifoRecalcPairs[$mutation->source_store_id . '-' . $item->ingredient_id] = [
+                            'store_id'      => $mutation->source_store_id,
+                            'ingredient_id' => $item->ingredient_id,
+                        ];
+                    }
+                    if ($mutation->destination_store_id) {
+                        $fifoRecalcPairs[$mutation->destination_store_id . '-' . $item->ingredient_id] = [
+                            'store_id'      => $mutation->destination_store_id,
+                            'ingredient_id' => $item->ingredient_id,
+                        ];
+                    }
                 }
             }
 
             $mutation->items()->delete();
             $mutation->delete();
 
-            // Hitung ulang FIFO remaining_qty untuk source store
-            // (dilakukan SETELAH delete supaya deduction yang dihapus tidak ikut terhitung)
+            // Hitung ulang FIFO remaining_qty untuk toko terdampak
+            // (dilakukan SETELAH delete supaya batch/deduksi yang dihapus tidak ikut terhitung)
             foreach ($fifoRecalcPairs as $pair) {
                 FifoService::recalculate($pair['store_id'], $pair['ingredient_id']);
             }
@@ -558,6 +591,19 @@ class MutationController extends Controller
 
         $batches = $query->get(['id', 'price_per_base', 'remaining_qty', 'packaging_id']);
 
+        // Buang ECERAN opname terakhir (pack segel saja, FIFO tertua dulu, per kemasan) —
+        // konsisten dgn Saldo Stok. Eceran = pack terbuka, tidak bisa ditransfer/dijual.
+        foreach ($batches->groupBy(fn($b) => $b->packaging_id ?: 0) as $pkgKey => $grp) {
+            $rem = FifoService::opnameLoose($storeId, $ingredient->id, $pkgKey ? (int) $pkgKey : null);
+            foreach ($grp as $b) {
+                if ($rem <= 0) break;
+                $cut = min((float) $b->remaining_qty, $rem);
+                $b->remaining_qty = (float) $b->remaining_qty - $cut;
+                $rem -= $cut;
+            }
+        }
+        $batches = $batches->filter(fn($b) => (float) $b->remaining_qty > 0)->values();
+
         if ($batches->isEmpty()) {
             return response()->json([
                 'avg_price_per_base' => 0,
@@ -623,14 +669,28 @@ class MutationController extends Controller
         ->where('remaining_qty','>',0)
         ->get(['ingredient_id','remaining_qty','packaging_id']);
 
-        $data = $items->groupBy('ingredient_id')->map(function ($g) {
-            // Qty per packaging_id (NULL → key 0)
+        // Eceran (pcs/gr) opname terakhir per (bahan, kemasan) — untuk DIABAIKAN (pack segel saja).
+        $lastOpId = \App\Models\Opname::where('store_id',$store->id)->where('status','approved')
+            ->orderByDesc('opname_date')->orderByDesc('id')->value('id');
+        $looseMap = $lastOpId
+            ? \App\Models\OpnameItem::where('opname_id',$lastOpId)->whereNotNull('packaging_id')
+                ->where('physical_base','>',0)->get(['ingredient_id','packaging_id','physical_base'])
+                ->mapWithKeys(fn($i)=>[$i->ingredient_id.'-'.$i->packaging_id => (float)$i->physical_base])->all()
+            : [];
+
+        $data = $items->groupBy('ingredient_id')->map(function ($g) use ($looseMap) {
+            $ingId = (int) $g->first()->ingredient_id;
+            // Qty per packaging_id (NULL → key 0), ECERAN opname dibuang (pack segel saja)
             $perPackaging = $g->groupBy(fn($r) => $r->packaging_id ?: 0)
-                ->map(fn($pg) => (float) $pg->sum('remaining_qty'));
+                ->map(function ($pg, $pkgKey) use ($looseMap, $ingId) {
+                    $total = (float) $pg->sum('remaining_qty');
+                    $loose = (float) ($looseMap[$ingId . '-' . $pkgKey] ?? 0);
+                    return max(0.0, $total - $loose);
+                });
             return [
-                'qty'           => (float) $g->sum('remaining_qty'),
+                'qty'           => (float) $perPackaging->sum(),
                 'packagings'    => $g->pluck('packaging_id')->filter()->unique()->values(),
-                'per_packaging' => $perPackaging, // {pkg_id: qty_base}
+                'per_packaging' => $perPackaging, // {pkg_id: qty_base SEGEL}
             ];
         });
 

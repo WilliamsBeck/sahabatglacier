@@ -2,7 +2,7 @@
 namespace App\Http\Controllers\Inventory;
 
 use App\Http\Controllers\Controller;
-use App\Models\{StoreStock, Store, Ingredient, IngredientCategory, MutationItem, DailyUsage};
+use App\Models\{StoreStock, Store, Ingredient, IngredientCategory, MutationItem, DailyUsage, Opname, OpnameItem};
 use Illuminate\Http\Request;
 
 class StockController extends Controller
@@ -51,6 +51,21 @@ class StockController extends Controller
             ->orderBy('id')
             ->get(['id', 'ingredient_id', 'packaging_id', 'price_per_base', 'remaining_qty'])
             ->groupBy('ingredient_id');
+
+        // ── Eceran (pcs/gr) dari opname approved TERAKHIR — untuk DIABAIKAN di Saldo Stok ──
+        // Saldo Stok hanya memantau Dus+Pack UTUH; eceran (pack terbuka) tidak dihitung.
+        // INI DISPLAY-ONLY: saldo FIFO & HPP TIDAK diubah (HPP tetap hitung eceran). Mengubah
+        // FIFO akan mencemari system_qty/variance opname berikutnya — jadi cukup dikurangi di
+        // tampilan saja. key = "ingredient_id-packaging_id".
+        $lastOpnameId = Opname::where('store_id', $selectedId)->where('status', 'approved')
+            ->orderByDesc('opname_date')->orderByDesc('id')->value('id');
+        $looseMap = $lastOpnameId
+            ? OpnameItem::where('opname_id', $lastOpnameId)
+                ->whereNotNull('packaging_id')->where('physical_base', '>', 0)
+                ->get(['ingredient_id', 'packaging_id', 'physical_base'])
+                ->mapWithKeys(fn($i) => [$i->ingredient_id . '-' . $i->packaging_id => (float) $i->physical_base])
+                ->all()
+            : [];
 
         // ── Days of Supply: anchor di tanggal terakhir dikonfirmasi ─────────
         // Window N hari MUNDUR dari last_confirmed_date, bukan dari hari ini.
@@ -109,7 +124,7 @@ class StockController extends Controller
         // penjualan keluar
         foreach (MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('source_store_id', $selectedId)->where('status', 'confirmed')
-                      ->whereIn('type', ['sale_internal', 'sale_external']))
+                      ->whereIn('type', ['sale_internal', 'sale_external_out']))
                 ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) as t')
                 ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
             $k = $kkey($r->ingredient_id, $r->packaging_id);
@@ -154,19 +169,37 @@ class StockController extends Controller
 
         $rows = collect();
 
-        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays) use ($receivedMap, $demandMap) {
-            $remainingQty = $pkgBatches->sum('remaining_qty');
-            $pkgAvgPrice  = $remainingQty > 0
-                ? $pkgBatches->sum(fn($b) => $b->remaining_qty * $b->price_per_base) / $remainingQty
-                : 0;
-
-            // Saldo bertanda: kalau dipakai melebihi stok → MINUS; selain itu FIFO remaining.
-            $k         = $ing->id . '-' . ($pkg?->id ?: 0);
-            $signed    = ($receivedMap[$k] ?? 0) - ($demandMap[$k] ?? 0);
-            $pkgBalance = $signed < -0.001 ? $signed : $remainingQty;
-
+        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays) use ($receivedMap, $demandMap, $looseMap) {
             $ptb         = $pkg && $pkg->pack_to_base > 0 ? (float)$pkg->pack_to_base : 0;
             $crateToBase = $pkg ? $pkg->crate_to_pack * $ptb : 0;
+
+            // SALDO STOK = pantau Dus+Pack UTUH. Eceran (pcs/gr) dari opname TERAKHIR DIABAIKAN
+            // — dikurangi dari batch TERTUA dulu (FIFO; pkgBatches sudah urut id), dari qty &
+            // harga. FIFO & HPP TIDAK diubah (display-only); HPP tetap menghitung eceran.
+            $k     = $ing->id . '-' . ($pkg?->id ?: 0);
+            $loose = $ptb > 0 ? (float) ($looseMap[$k] ?? 0) : 0.0;
+            $rem   = $loose;
+            $sealedBatches = collect();
+            foreach ($pkgBatches as $b) {
+                $bq     = (float) $b->remaining_qty;
+                $cut    = min($bq, $rem);            // buang porsi eceran dari batch ini
+                $rem   -= $cut;
+                $sealed = $bq - $cut;
+                if ($sealed > 0) {
+                    $sealedBatches->push((object) [
+                        'remaining_qty'  => $sealed,
+                        'price_per_base' => (float) $b->price_per_base,
+                    ]);
+                }
+            }
+            $wholeBase   = (float) $sealedBatches->sum('remaining_qty');
+            $pkgAvgPrice = $wholeBase > 0
+                ? $sealedBatches->sum(fn($b) => $b->remaining_qty * $b->price_per_base) / $wholeBase
+                : 0;
+
+            // Saldo bertanda: kalau dipakai melebihi stok → MINUS; selain itu pack utuh (segel).
+            $signed    = ($receivedMap[$k] ?? 0) - ($demandMap[$k] ?? 0);
+            $pkgBalance = $signed < -0.001 ? $signed : $wholeBase;
 
             // Pecah ke Dus/Pack — tangani negatif (hitung pada nilai mutlak, beri tanda)
             $neg = $pkgBalance < 0; $absBal = abs($pkgBalance);
@@ -184,7 +217,7 @@ class StockController extends Controller
             // Price layers (untuk tooltip & nilai). Dikelompokkan per HARGA/DUS BULAT
             // (round price_per_base × ctb) — bukan price_per_base mentah 8-desimal —
             // supaya batch ber-harga-sama menyatu & tidak ada selisih desimal gajelas.
-            $priceLayers = $pkgBatches
+            $priceLayers = $sealedBatches
                 ->groupBy(fn($b) => $crateToBase > 0
                     ? (int) round((float) $b->price_per_base * $crateToBase)
                     : (int) round((float) $b->price_per_base * ($ptb ?: 1)))

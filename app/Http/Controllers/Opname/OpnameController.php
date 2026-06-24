@@ -98,7 +98,7 @@ class OpnameController extends Controller
 
             $remainingByPkg = MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $request->store_id)->where('status', 'confirmed')
-                      ->whereDate('transaction_date', '<=', $date)
+                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$date])
                 )
                 ->whereIn('packaging_id', $pkgIds)
                 ->selectRaw('packaging_id, SUM(remaining_qty) as total_remaining')
@@ -110,7 +110,7 @@ class OpnameController extends Controller
             if ($ingNoPkg->isNotEmpty()) {
                 $remainingByIng = MutationItem::whereHas('mutation', fn($q) =>
                         $q->where('destination_store_id', $request->store_id)->where('status', 'confirmed')
-                          ->whereDate('transaction_date', '<=', $date)
+                          ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$date])
                     )
                     ->whereIn('ingredient_id', $ingNoPkg->pluck('id')->all())
                     ->whereNull('packaging_id')
@@ -225,7 +225,7 @@ class OpnameController extends Controller
         $remainingByPkg = $pkgIds
             ? MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereDate('transaction_date', '<=', $opnameDate)
+                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$opnameDate])
                 )
                 ->whereIn('packaging_id', $pkgIds)
                 ->selectRaw('packaging_id, SUM(remaining_qty) as total_remaining')
@@ -253,7 +253,7 @@ class OpnameController extends Controller
         $remainingByIng = $ingNoPkg->isNotEmpty()
             ? MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereDate('transaction_date', '<=', $opnameDate)
+                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$opnameDate])
                 )
                 ->whereIn('ingredient_id', $ingNoPkg->pluck('id')->all())
                 ->whereNull('packaging_id')

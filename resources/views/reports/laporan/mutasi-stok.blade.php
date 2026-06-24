@@ -44,6 +44,7 @@
                     <option value="internal_in"  {{ $tipe === 'internal_in'  ? 'selected' : '' }}>Internal Masuk</option>
                     <option value="internal_out" {{ $tipe === 'internal_out' ? 'selected' : '' }}>Internal Keluar</option>
                     <option value="eksternal" {{ $tipe === 'eksternal' ? 'selected' : '' }}>Pembelian Eksternal</option>
+                    <option value="penjualan_eksternal" {{ $tipe === 'penjualan_eksternal' ? 'selected' : '' }}>Penjualan Eksternal</option>
                     <option value="zhisheng"  {{ $tipe === 'zhisheng'  ? 'selected' : '' }}>Zhisheng</option>
                     <option value="supplier" {{ $tipe === 'supplier' ? 'selected' : '' }}>Supplier</option>
                 </select>
@@ -65,6 +66,7 @@ $tabs = [
     'internal_in'  => ['label' => 'Internal Masuk'],
     'internal_out' => ['label' => 'Internal Keluar'],
     'eksternal'    => ['label' => 'Eksternal'],
+    'penjualan_eksternal' => ['label' => 'Penjualan Eksternal'],
     'zhisheng'     => ['label' => 'Zhisheng'],
     'supplier'     => ['label' => 'Supplier'],
 ];

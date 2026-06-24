@@ -18,6 +18,11 @@
                 <i class="bi bi-bar-chart-steps me-1"></i>Perbandingan Toko
             </a>
         </li>
+        <li class="nav-item">
+            <a class="nav-link {{ $currentHppTab === 'cone-cup' ? 'active' : '' }}" href="{{ route('sales.hpp.cone-cup') }}">
+                <i class="bi bi-cup-straw me-1"></i>Cone &amp; Cup
+            </a>
+        </li>
     </ul>
     </div>
     <div class="d-flex align-items-center gap-2 flex-wrap">@yield('hpp_actions')</div>

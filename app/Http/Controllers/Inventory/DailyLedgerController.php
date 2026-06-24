@@ -99,12 +99,12 @@ class DailyLedgerController extends Controller
             )->get();
 
         // ── Penjualan/transfer: keluar dari toko ini ───────────────
-        $saleItems = MutationItem::with('mutation:id,transaction_date,type')
+        $saleItems = MutationItem::with('mutation:id,transaction_date,delivery_date,type')
             ->whereHas('mutation', fn($q) => $q
                 ->where('source_store_id', $storeId)
                 ->where('status', 'confirmed')
-                ->whereBetween('transaction_date', [$startDate, $endDate])
-                ->whereIn('type', ['sale_internal', 'sale_external'])
+                ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$startDate, $endDate])
+                ->whereIn('type', ['sale_internal', 'sale_external_out'])
             )->get();
 
         // ── Daily usages (manual input) ────────────────────────────
@@ -141,8 +141,8 @@ class DailyLedgerController extends Controller
                 ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
                 ->where('m.source_store_id', $storeId)
                 ->where('m.status', 'confirmed')
-                ->where('m.transaction_date', '<', $startDate)
-                ->whereIn('m.type', ['sale_internal','sale_external'])
+                ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
+                ->whereIn('m.type', ['sale_internal','sale_external_out'])
                 ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
                 ->groupBy('mi.ingredient_id')
                 ->pluck('total', 'ingredient_id');
@@ -365,7 +365,9 @@ class DailyLedgerController extends Controller
         foreach ($saleItems as $item) {
             $ingId  = $item->ingredient_id;
             if (!isset($tableData[$ingId])) continue;
-            $day    = (int)$item->mutation->transaction_date->format('j');
+            // Tanggal pengakuan stok keluar = delivery_date (fallback transaction_date),
+            // konsisten dengan sisi pembelian & dengan FIFO/StockLedger.
+            $day    = (int)(($item->mutation->delivery_date ?? $item->mutation->transaction_date)->format('j'));
             $pkgKey = (string)($item->packaging_id ?? $defaultPkgByIng[$ingId] ?? 'null');
             $tableData[$ingId]['days'][$day]['int_out'][$pkgKey] =
                 ($tableData[$ingId]['days'][$day]['int_out'][$pkgKey] ?? 0) + (float)$item->total_in_base;
@@ -454,7 +456,7 @@ class DailyLedgerController extends Controller
             }
             foreach (MutationItem::whereHas('mutation', fn($q) =>
                         $q->where('source_store_id', $storeId)->where('status', 'confirmed')
-                          ->whereIn('type', ['sale_internal', 'sale_external']))
+                          ->whereIn('type', ['sale_internal', 'sale_external_out']))
                     ->whereIn('ingredient_id', $ingIds)
                     ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
                     ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
@@ -945,29 +947,29 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->whereBetween('m.transaction_date', [$startDate, $endDate])
-            ->select('mi.ingredient_id', 'm.transaction_date', \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', 'm.transaction_date')
+            ->whereBetween(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$startDate, $endDate])
+            ->select('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date) as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
+            ->groupBy('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date)'))
             ->get();
 
         $monthOut = \DB::table('mutation_items as mi')
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.source_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->whereBetween('m.transaction_date', [$startDate, $endDate])
-            ->whereIn('m.type', ['sale_internal','sale_external'])
-            ->select('mi.ingredient_id', 'm.transaction_date', \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', 'm.transaction_date')
+            ->whereBetween(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$startDate, $endDate])
+            ->whereIn('m.type', ['sale_internal','sale_external_out'])
+            ->select('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date) as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
+            ->groupBy('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date)'))
             ->get();
 
         $inMap  = []; // [ingId][day] = base in
         $outMap = []; // [ingId][day] = base out
         foreach ($monthIn as $row) {
-            $d = (int) Carbon::parse($row->transaction_date)->format('j');
+            $d = (int) Carbon::parse($row->recog_date)->format('j');
             $inMap[$row->ingredient_id][$d] = ($inMap[$row->ingredient_id][$d] ?? 0) + (float)$row->total;
         }
         foreach ($monthOut as $row) {
-            $d = (int) Carbon::parse($row->transaction_date)->format('j');
+            $d = (int) Carbon::parse($row->recog_date)->format('j');
             $outMap[$row->ingredient_id][$d] = ($outMap[$row->ingredient_id][$d] ?? 0) + (float)$row->total;
         }
 
@@ -1031,7 +1033,7 @@ class DailyLedgerController extends Controller
     {
         // Cek opname end_month bulan sebelumnya
         $prev = Carbon::parse($startDate)->subMonth();
-        $prevOpname = Opname::with('items')
+        $prevOpname = Opname::with('items.packaging')
             ->where('store_id', $storeId)
             ->where('period_month', $prev->month)
             ->where('period_year',  $prev->year)
@@ -1040,10 +1042,21 @@ class DailyLedgerController extends Controller
             ->first();
 
         if ($prevOpname) {
+            // Stok awal HANYA dus+pack (abaikan eceran pcs/gr) — KONSISTEN dgn tampilan
+            // Pencatatan Harian & Saldo Stok. Fallback physical_qty utk bahan tanpa kemasan.
+            $packedBase = function ($i) {
+                $pkg = $i->packaging;
+                $ctb = $pkg ? (float)$pkg->crate_to_pack * (float)$pkg->pack_to_base : 0;
+                $ptb = $pkg ? (float)$pkg->pack_to_base : 0;
+                $qty = ($ctb > 0 ? (int)($i->physical_crate ?? 0) * $ctb : 0)
+                     + ($ptb > 0 ? (int)($i->physical_pack  ?? 0) * $ptb : 0);
+                if ($qty <= 0 && !$pkg) $qty = round((float)$i->physical_qty, 4);
+                return (float)$qty;
+            };
             // SUM per ingredient_id — bahan dengan >1 kemasan punya >1 baris opname
             return $prevOpname->items
                 ->groupBy('ingredient_id')
-                ->map(fn($grp) => $grp->sum(fn($i) => (float)$i->physical_qty))
+                ->map(fn($grp) => $grp->sum($packedBase))
                 ->all();
         }
 
@@ -1052,7 +1065,7 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->where('m.transaction_date', '<', $startDate)
+            ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
             ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id');
@@ -1061,8 +1074,8 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.source_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->where('m.transaction_date', '<', $startDate)
-            ->whereIn('m.type', ['sale_internal','sale_external'])
+            ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
+            ->whereIn('m.type', ['sale_internal','sale_external_out'])
             ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id');
@@ -1141,8 +1154,9 @@ class DailyLedgerController extends Controller
 
                     $pkgId = $defaultPkgMap[$ingId] ?? null;
 
-                    if ($val === null || $val === '') {
-                        // Cell kosong → hapus existing kalau ada
+                    if ($val === null || $val === '' || (is_numeric($val) && (float)$val == 0.0)) {
+                        // Cell kosong ATAU 0 → hapus existing kalau ada (jangan simpan baris
+                        // qty=0; konsisten dengan input manual yang menghapus saat qty=0).
                         $deleted = DailyUsage::where('store_id', $storeId)
                             ->where('ingredient_id', $ingId)
                             ->where('packaging_id', $pkgId)

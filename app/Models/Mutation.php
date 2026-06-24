@@ -7,7 +7,7 @@ class Mutation extends Model
 {
     protected $fillable = [
         'reference_no', 'type', 'source_store_id', 'destination_store_id',
-        'supplier_id', 'external_sender', 'invoice_no', 'transaction_date', 'delivery_date',
+        'supplier_id', 'external_sender', 'external_receiver', 'invoice_no', 'transaction_date', 'delivery_date',
         'status', 'notes', 'created_by', 'confirmed_by',
     ];
 
@@ -76,6 +76,7 @@ class Mutation extends Model
             'opening_stock'      => 'Input Stok Awal',
             'sale_internal'      => 'Pembelian Internal',
             'sale_external'      => 'Pembelian Eksternal',
+            'sale_external_out'  => 'Penjualan Eksternal',
             default              => $this->type,
         };
     }
@@ -87,6 +88,13 @@ class Mutation extends Model
 
     public function isSale(): bool
     {
-        return in_array($this->type, ['sale_internal', 'sale_external']);
+        return in_array($this->type, ['sale_internal', 'sale_external', 'sale_external_out']);
+    }
+
+    // Mutasi yang MEMOTONG stok toko sumber (barang keluar): transfer internal &
+    // penjualan eksternal. (sale_external = barang MASUK, tidak memotong sumber.)
+    public function deductsFromSource(): bool
+    {
+        return in_array($this->type, ['sale_internal', 'sale_external_out']);
     }
 }

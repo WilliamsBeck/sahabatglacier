@@ -83,6 +83,10 @@
                     <tr><td class="text-muted">Pengirim</td>
                         <td>{{ $mutation->external_sender }}</td></tr>
                     @endif
+                    @if($mutation->external_receiver)
+                    <tr><td class="text-muted">Penjualan ke</td>
+                        <td>{{ $mutation->external_receiver }}</td></tr>
+                    @endif
                     <tr><td class="text-muted">No. SJ</td>
                         <td>{{ $mutation->invoice_no ?? '-' }}</td></tr>
                     <tr><td class="text-muted">Tgl Pengiriman</td>
@@ -158,6 +162,9 @@
                                 <th class="text-center">Pack</th>
                                 <th class="text-center">Pcs/Gr</th>
                                 <th class="text-end">Harga/Dus</th>
+                                @if($mutation->type === 'sale_external_out')
+                                <th class="text-end">Harga Jual/Base</th>
+                                @endif
                                 <th class="text-end">Subtotal</th>
                             </tr>
                         </thead>
@@ -176,13 +183,16 @@
                                 <td class="text-center">{{ $item->qty_pack ?: '-' }}</td>
                                 <td class="text-center">{{ $item->qty_base ? number_format($item->qty_base, 0, ',', '.') : '-' }}</td>
                                 <td class="text-end">{{ $hargaDus ? 'Rp '.number_format($hargaDus, 0, ',', '.') : '-' }}</td>
+                                @if($mutation->type === 'sale_external_out')
+                                <td class="text-end">{{ ($item->selling_price_per_base ?? 0) > 0 ? 'Rp '.number_format($item->selling_price_per_base, 0, ',', '.') : '-' }}</td>
+                                @endif
                                 <td class="text-end fw-semibold">Rp {{ number_format($item->cost_subtotal, 0, ',', '.') }}</td>
                             </tr>
                             @endforeach
                         </tbody>
                         <tfoot>
                             <tr class="table-light fw-bold">
-                                <td colspan="5" class="text-end">Total Nilai</td>
+                                <td colspan="{{ $mutation->type === 'sale_external_out' ? 6 : 5 }}" class="text-end">Total Nilai</td>
                                 <td class="text-end text-primary">Rp {{ number_format($grandTotal, 0, ',', '.') }}</td>
                             </tr>
                         </tfoot>

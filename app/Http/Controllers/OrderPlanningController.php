@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
-use App\Models\{DailyUsage, Ingredient, IngredientCategory, IngredientPackaging, Opname, OpnameItem, Store, StoreStock};
+use App\Models\{Ingredient, IngredientCategory, IngredientPackaging, Opname, OpnameItem, Store, StoreStock};
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -12,7 +12,9 @@ class OrderPlanningController extends Controller
     {
         $stores   = auth()->user()->accessibleStores();
         $storeIds = auth()->user()->accessibleStoreIds();
-        $defaultRef = now()->subMonth();
+        // startOfMonth dulu agar tidak overflow saat hari ini tgl 29–31
+        // (mis. 31 Mei - 1 bulan = "31 April" → meleset ke 1 Mei).
+        $defaultRef = now()->startOfMonth()->subMonth();
 
         // Daftar opname approved per toko (untuk dropdown sumber stok)
         $opnamesByStore = Opname::whereIn('store_id', $storeIds)
@@ -150,117 +152,100 @@ class OrderPlanningController extends Controller
         $refEnd    = Carbon::create($refYear, $refMonth, 1)->endOfMonth()->toDateString();
         $daysInRef = Carbon::create($refYear, $refMonth, 1)->daysInMonth;
 
-        $usageSums = DailyUsage::where('store_id', $storeId)
-            ->whereBetween('usage_date', [$refStart, $refEnd])
-            ->where('qty_pack', '>', 0)
-            ->whereExists(fn($q) => $q
-                ->from('daily_confirmations')
-                ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
-                ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date')
-            )
-            ->groupBy('ingredient_id')
-            ->selectRaw('ingredient_id, SUM(qty_pack) as total_pack, COUNT(DISTINCT usage_date) as active_days')
-            ->get()
-            ->keyBy('ingredient_id');
+        $usageSums   = collect();
+        $usageSource = 'hpp'; // sumber TUNGGAL: HPP Aktual (pencatatan harian tidak dipakai)
 
-        // ── Fallback HPP Aktual ───────────────────────────────────────────────
-        // Jika tidak ada pencatatan harian yang dikonfirmasi, hitung konsumsi dari:
-        // konsumsi_base = stok_awal (opname bulan lalu) + pembelian_bulan_ini - stok_akhir (opname bulan ini)
-        $usageSource = 'daily'; // untuk info di view
+        // ── Konsumsi acuan = HPP AKTUAL ───────────────────────────────────────
+        // konsumsi_base = SO Awal + pembelian − transfer keluar − SO Akhir.
+        // Identik dengan HppController (HPP Aktual). WAJIB ada SO Awal (opname akhir
+        // bulan lalu) DAN SO Akhir (opname akhir bulan referensi) yang sudah approved.
+        $prevPeriod    = Carbon::create($refYear, $refMonth, 1)->subMonth();
+        $openingOpname = Opname::where('store_id', $storeId)
+            ->where('period_month', $prevPeriod->month)
+            ->where('period_year',  $prevPeriod->year)
+            ->where('period_type',  'end_month')
+            ->where('status',       'approved')
+            ->first();
+        $closingOpname = Opname::where('store_id', $storeId)
+            ->where('period_month', $refMonth)
+            ->where('period_year',  $refYear)
+            ->where('period_type',  'end_month')
+            ->where('status',       'approved')
+            ->first();
+
+        // HPP Aktual butuh SO Awal & SO Akhir. Bila salah satu belum ada → stop.
+        if (!$openingOpname || !$closingOpname) {
+            $missing = [];
+            if (!$openingOpname) $missing[] = 'SO Awal (opname akhir ' . $prevPeriod->isoFormat('MMMM Y') . ')';
+            if (!$closingOpname) $missing[] = 'SO Akhir (opname akhir ' . Carbon::create($refYear, $refMonth, 1)->isoFormat('MMMM Y') . ')';
+            return compact('store', 'orderDate', 'deliveryDate', 'coverageEnd', 'daysToCover',
+                'leadTimeDays', 'refMonth', 'refYear', 'daysInRef', 'bufferPct',
+                'stockSource', 'selectedOpname', 'usageSource')
+                + ['tableData' => [],
+                   'message' => 'HPP Aktual belum bisa dihitung untuk bulan referensi ini — lengkapi & approve '
+                       . implode(' dan ', $missing) . ' terlebih dahulu.'];
+        }
+
+        // SO Awal & SO Akhir per ingredient (base). 1 bahan bisa >1 baris kemasan → SUM.
+        $openingMap = OpnameItem::where('opname_id', $openingOpname->id)
+            ->get(['ingredient_id', 'physical_qty'])
+            ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('physical_qty'));
+        $closingMap = OpnameItem::where('opname_id', $closingOpname->id)
+            ->get(['ingredient_id', 'physical_qty'])
+            ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('physical_qty'));
+
+        // Pembelian / barang masuk bulan referensi (base) per ingredient
+        $purchaseMap = DB::table('mutation_items as mi')
+            ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
+            ->where('m.destination_store_id', $storeId)
+            ->where('m.status', 'confirmed')
+            ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
+            ->whereIn('m.type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external'])
+            ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
+            ->groupBy('mi.ingredient_id')
+            ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
+
+        // Transfer keluar (base) — toko ini sebagai sumber (sama dgn HPP Aktual)
+        $salesOutMap = DB::table('mutation_items as mi')
+            ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
+            ->where('m.source_store_id', $storeId)
+            ->where('m.status', 'confirmed')
+            ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
+            ->whereIn('m.type', ['sale_internal', 'sale_external_out'])
+            ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
+            ->groupBy('mi.ingredient_id')
+            ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
+
+        // Konsumsi per ingredient. Kemasan pertama (id terkecil) agar konsisten dgn tabel.
+        $allIngIds = $openingMap->keys()->merge($closingMap->keys())
+            ->merge($purchaseMap->keys())->unique();
+        $pkgMap = IngredientPackaging::whereIn('ingredient_id', $allIngIds)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->get()->groupBy('ingredient_id')->map(fn($g) => $g->first());
+
+        foreach ($allIngIds as $ingId) {
+            $pkg = $pkgMap[$ingId] ?? null;
+            if (!$pkg || $pkg->pack_to_base <= 0) continue;
+
+            // Identik dengan HPP Aktual: SO Awal + masuk − transfer keluar − SO Akhir
+            $consumBase = ($openingMap[$ingId] ?? 0.0) + ($purchaseMap[$ingId] ?? 0.0)
+                        - ($salesOutMap[$ingId] ?? 0.0) - ($closingMap[$ingId] ?? 0.0);
+            if ($consumBase <= 0) continue;
+
+            $usageSums->put($ingId, (object)[
+                'ingredient_id' => $ingId,
+                'total_pack'    => $consumBase / $pkg->pack_to_base,
+                'active_days'   => $daysInRef, // konsumsi sebulan → dibagi rata
+            ]);
+        }
+
         if ($usageSums->isEmpty()) {
-            $prevPeriod   = Carbon::create($refYear, $refMonth, 1)->subMonth();
-            $openingOpname = Opname::where('store_id', $storeId)
-                ->where('period_month', $prevPeriod->month)
-                ->where('period_year',  $prevPeriod->year)
-                ->where('period_type',  'end_month')
-                ->where('status',       'approved')
-                ->first();
-            $closingOpname = Opname::where('store_id', $storeId)
-                ->where('period_month', $refMonth)
-                ->where('period_year',  $refYear)
-                ->where('period_type',  'end_month')
-                ->where('status',       'approved')
-                ->first();
-
-            if ($openingOpname || $closingOpname) {
-                // Stok awal per ingredient (base) dari opname bulan sebelumnya.
-                // Jumlahkan per ingredient (1 bahan bisa punya >1 baris kemasan).
-                $openingMap = $openingOpname
-                    ? OpnameItem::where('opname_id', $openingOpname->id)
-                        ->get(['ingredient_id', 'physical_qty'])
-                        ->groupBy('ingredient_id')
-                        ->map(fn($g) => (float)$g->sum('physical_qty'))
-                    : collect();
-
-                // Stok akhir per ingredient (base) dari opname bulan ini
-                $closingMap = $closingOpname
-                    ? OpnameItem::where('opname_id', $closingOpname->id)
-                        ->get(['ingredient_id', 'physical_qty'])
-                        ->groupBy('ingredient_id')
-                        ->map(fn($g) => (float)$g->sum('physical_qty'))
-                    : collect();
-
-                // Pembelian / barang masuk bulan ini (base) per ingredient
-                $purchaseMap = DB::table('mutation_items as mi')
-                    ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
-                    ->where('m.destination_store_id', $storeId)
-                    ->where('m.status', 'confirmed')
-                    ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
-                    ->whereIn('m.type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external'])
-                    ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
-                    ->groupBy('mi.ingredient_id')
-                    ->pluck('total', 'ingredient_id')
-                    ->map(fn($v) => (float)$v);
-
-                // Transfer keluar (base) per ingredient — toko ini sebagai sumber.
-                // Sama dengan HPP Aktual: konsumsi mengurangi transfer keluar.
-                $salesOutMap = DB::table('mutation_items as mi')
-                    ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
-                    ->where('m.source_store_id', $storeId)
-                    ->where('m.status', 'confirmed')
-                    ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
-                    ->where('m.type', 'sale_internal')
-                    ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
-                    ->groupBy('mi.ingredient_id')
-                    ->pluck('total', 'ingredient_id')
-                    ->map(fn($v) => (float)$v);
-
-                // Hitung konsumsi per ingredient.
-                // Gunakan kemasan pertama (id terkecil) agar konsisten dgn tabel.
-                $allIngIds = $openingMap->keys()->merge($closingMap->keys())->unique();
-                $pkgMap = IngredientPackaging::whereIn('ingredient_id', $allIngIds)
-                    ->where('is_active', true)
-                    ->orderBy('id')
-                    ->get()->groupBy('ingredient_id')->map(fn($g) => $g->first());
-
-                foreach ($allIngIds as $ingId) {
-                    $pkg = $pkgMap[$ingId] ?? null;
-                    if (!$pkg || $pkg->pack_to_base <= 0) continue;
-
-                    $opening    = $openingMap[$ingId]  ?? 0.0;
-                    $closing    = $closingMap[$ingId]  ?? 0.0;
-                    $purchases  = $purchaseMap[$ingId] ?? 0.0;
-                    $salesOut   = $salesOutMap[$ingId] ?? 0.0;
-                    // Identik dengan HPP Aktual: opening + masuk − transfer keluar − closing
-                    $consumBase = $opening + $purchases - $salesOut - $closing;
-                    if ($consumBase <= 0) continue;
-
-                    $consumPack = $consumBase / $pkg->pack_to_base;
-                    $usageSums->put($ingId, (object)[
-                        'ingredient_id' => $ingId,
-                        'total_pack'    => $consumPack,
-                        'active_days'   => $daysInRef, // asumsi full bulan
-                    ]);
-                }
-                $usageSource = 'hpp';
-            }
-
-            if ($usageSums->isEmpty()) {
-                return compact('store', 'orderDate', 'deliveryDate', 'coverageEnd', 'daysToCover',
-                    'leadTimeDays', 'refMonth', 'refYear', 'daysInRef', 'bufferPct',
-                    'stockSource', 'selectedOpname')
-                    + ['tableData' => [], 'message' => 'Tidak ada data konsumsi (pencatatan harian maupun opname) untuk bulan referensi yang dipilih.'];
-            }
+            return compact('store', 'orderDate', 'deliveryDate', 'coverageEnd', 'daysToCover',
+                'leadTimeDays', 'refMonth', 'refYear', 'daysInRef', 'bufferPct',
+                'stockSource', 'selectedOpname', 'usageSource')
+                + ['tableData' => [],
+                   'message' => 'Tidak ada konsumsi tercatat di bulan referensi (HPP Aktual = 0 untuk semua bahan).'];
         }
 
         // Urutan sama dengan SO / pencatatan harian: kategori sort_order → ingredient id

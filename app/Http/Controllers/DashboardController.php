@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
-use App\Models\{StoreStock, Store, WasteLog, WasteLogItem, ProductionLog, DailyUsage, AuditLog, Ingredient};
+use App\Models\{StoreStock, Store, WasteLog, WasteLogItem, ProductionLog, DailyUsage, AuditLog, Ingredient, Opname, OpnameItem};
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -56,8 +56,25 @@ class DashboardController extends Controller
             ->get()
             ->keyBy(fn($r) => $r->store_id . '-' . $r->ingredient_id);
 
+        // Eceran (pcs/gr) dari opname approved TERAKHIR per toko — untuk DIABAIKAN di tampilan
+        // (konsisten dgn halaman Saldo Stok). DISPLAY-ONLY: stock_balance/DOS tidak diubah.
+        // key = "store-ingredient-packaging".
+        $lastOps = Opname::whereIn('store_id', $storeIds)->where('status', 'approved')
+            ->orderByDesc('opname_date')->orderByDesc('id')->get(['id', 'store_id'])
+            ->groupBy('store_id')->map(fn($g) => $g->first()->id);
+        $opIdToStore = $lastOps->flip(); // opname_id => store_id
+        $looseMap = [];
+        if ($lastOps->isNotEmpty()) {
+            foreach (OpnameItem::whereIn('opname_id', $lastOps->values())
+                    ->whereNotNull('packaging_id')->where('physical_base', '>', 0)
+                    ->get(['opname_id', 'ingredient_id', 'packaging_id', 'physical_base']) as $oi) {
+                $sid = $opIdToStore[$oi->opname_id] ?? null;
+                if ($sid) $looseMap[$sid . '-' . $oi->ingredient_id . '-' . $oi->packaging_id] = (float) $oi->physical_base;
+            }
+        }
+
         $lowStocks = $parStocks
-            ->map(function ($ss) use ($usageSums, $storeConfigs) {
+            ->map(function ($ss) use ($usageSums, $storeConfigs, $looseMap) {
                 $key   = $ss->store_id . '-' . $ss->ingredient_id;
                 $usage = $usageSums[$key] ?? null;
                 if (!$usage) return null;
@@ -81,6 +98,11 @@ class DashboardController extends Controller
                 $ss->lead_time_days   = $leadTimeDays;
                 $ss->order_cycle_days = $orderCycleDays;
                 $ss->dos_status       = $ss->dosStatus($dos, $leadTimeDays, $orderCycleDays);
+                // Sisa stok TAMPIL = stok − eceran opname terakhir (Dus+Pack segel saja).
+                // DOS tetap pakai stock_balance penuh (eceran = stok riil yg dipakai).
+                $pid   = $pkg?->id;
+                $loose = $pid ? ($looseMap[$ss->store_id . '-' . $ss->ingredient_id . '-' . $pid] ?? 0) : 0;
+                $ss->sealed_balance = max(0, (float) $ss->stock_balance - $loose);
                 return $ss;
             })
             ->filter(fn($ss) => $ss && in_array($ss->dos_status, ['critical', 'warning']))
@@ -136,10 +158,18 @@ class DashboardController extends Controller
         $monthEnd    = $chartPeriod->copy()->endOfMonth()->toDateString();
         $daysInMonth = $chartPeriod->daysInMonth;
 
-        // Daftar bahan untuk dropdown (yang pernah dipakai bulan ini)
+        // Daftar bahan untuk dropdown (yang pernah dipakai bulan ini).
+        // HARUS pakai filter konfirmasi yang SAMA dengan grafik di bawah — kalau tidak,
+        // pemakaian draft (belum dikonfirmasi) ikut muncul di dropdown padahal grafiknya
+        // kosong saat dipilih.
         $usedIngredientIds = DailyUsage::whereIn('store_id', $storeIds)
             ->whereBetween('usage_date', [$monthStart, $monthEnd])
             ->where('qty_pack', '>', 0)
+            ->whereExists(fn($q) => $q
+                ->from('daily_confirmations')
+                ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date')
+            )
             ->distinct()->pluck('ingredient_id');
         $chartIngredients = Ingredient::whereIn('id', $usedIngredientIds)
             ->orderBy('name')->get(['id', 'name', 'unit_base']);

@@ -234,6 +234,57 @@ class MasterImportService
         return ['new' => $new, 'update' => $update];
     }
 
+    /**
+     * Commit KHUSUS resep: kelompokkan baris per menu jadi satu recipe_group_id (UUID),
+     * isi created_by dari super admin, store global (null). Mengganti resep lama menu itu.
+     * @return array ['new'=>int,'update'=>int]
+     */
+    public function commitRecipes(array $cfg, string $filePath): array
+    {
+        $parsed = $this->parse($cfg, $filePath);
+        if ($parsed['summary']['error'] > 0) {
+            throw new \RuntimeException('Masih ada baris yang error; impor dibatalkan.');
+        }
+
+        $userId = \App\Models\User::where('role', 'super_admin')->value('id')
+            ?? \App\Models\User::value('id');
+        if (!$userId) {
+            throw new \RuntimeException('Belum ada akun pengguna. Buat akun admin dulu sebelum impor resep.');
+        }
+
+        $new = 0; $update = 0;
+        DB::transaction(function () use ($parsed, $userId, &$new, &$update) {
+            // Kelompokkan baris valid per menu_id
+            $byMenu = [];
+            foreach ($parsed['rows'] as $row) {
+                if ($row['status'] === 'error') continue;
+                $byMenu[$row['attrs']['menu_id']][] = $row['attrs'];
+            }
+            foreach ($byMenu as $menuId => $items) {
+                // Resep global menu ini diganti utuh (hapus lalu tulis ulang sebagai 1 versi).
+                $existed = \App\Models\Recipe::where('menu_id', $menuId)->whereNull('store_id')->exists();
+                \App\Models\Recipe::where('menu_id', $menuId)->whereNull('store_id')->delete();
+
+                $gid = (string) \Illuminate\Support\Str::uuid();
+                foreach ($items as $a) {
+                    \App\Models\Recipe::create([
+                        'menu_id'         => $menuId,
+                        'store_id'        => null,
+                        'recipe_group_id' => $gid,
+                        'ingredient_id'   => $a['ingredient_id'],
+                        'qty_usage'       => $a['qty_usage'],
+                        'unit'            => $a['unit'],
+                        'effective_from'  => $a['effective_from'] ?? now()->toDateString(),
+                        'created_by'      => $userId,
+                    ]);
+                    $existed ? $update++ : $new++;
+                }
+            }
+        });
+
+        return ['new' => $new, 'update' => $update];
+    }
+
     /** Data array untuk template (header + baris contoh). */
     public function templateData(array $cfg): array
     {

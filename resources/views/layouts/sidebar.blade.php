@@ -1,6 +1,10 @@
 <nav class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-        <span class="brand-icon">❄️</span>
+        @if(file_exists(public_path('images/logo.png')))
+            <img src="{{ asset('images/logo.png') }}" alt="Glacier" class="brand-logo">
+        @else
+            <span class="brand-icon">❄️</span>
+        @endif
         <span class="brand-text">Glacier</span>
     </div>
 

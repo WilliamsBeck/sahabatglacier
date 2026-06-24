@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Exports\ArrayExport;
 use App\Exports\MultiSheetExport;
 use App\Services\MasterImportService;
+use App\Services\MasterExportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -13,7 +14,24 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class MasterImportController extends Controller
 {
-    public function __construct(private MasterImportService $service) {}
+    public function __construct(
+        private MasterImportService $service,
+        private MasterExportService $export,
+    ) {}
+
+    /** Unduh DATA nyata satu entitas (header = template) → siap diimpor ulang. */
+    public function exportData(string $entity)
+    {
+        $cfg = $this->cfgOrFail($entity);
+        return Excel::download(new ArrayExport($this->export->rows($cfg)), "{$entity}_data.xlsx");
+    }
+
+    /** Unduh DATA bundle multi-sheet (Bahan + Kemasan + Komposisi). */
+    public function bundleExportData(string $bundle)
+    {
+        $cfg = $this->bundleOrFail($bundle);
+        return Excel::download(new MultiSheetExport($this->export->bundleRows($cfg)), "{$bundle}_data.xlsx");
+    }
 
     private function cfgOrFail(string $entity): array
     {
@@ -69,7 +87,9 @@ class MasterImportController extends Controller
         }
 
         try {
-            $res = $this->service->commit($cfg, Storage::path($rel));
+            $res = $entity === 'recipes'
+                ? $this->service->commitRecipes($cfg, Storage::path($rel))
+                : $this->service->commit($cfg, Storage::path($rel));
         } catch (\Throwable $e) {
             return redirect()->route($cfg['route_index'])
                 ->withErrors(['import' => $e->getMessage()]);

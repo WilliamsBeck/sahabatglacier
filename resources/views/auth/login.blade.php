@@ -65,6 +65,10 @@
             font-size: 1.3rem;
             backdrop-filter: blur(6px);
         }
+        .brand .brand-logo {
+            height: 44px; width: auto; display: block;
+            object-fit: contain;
+        }
 
         .hero { position: relative; z-index: 1; max-width: 380px; }
         .hero h1 {
@@ -257,7 +261,11 @@
 
     <div class="left-top">
         <div class="brand">
-            <span class="ico">❄️</span> Glacier
+            @if(file_exists(public_path('images/logo.png')))
+                <img src="{{ asset('images/logo.png') }}" alt="Glacier" class="brand-logo"> Glacier
+            @else
+                <span class="ico">❄️</span> Glacier
+            @endif
         </div>
     </div>
 

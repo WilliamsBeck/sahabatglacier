@@ -6,6 +6,7 @@ use App\Models\IngredientComposition;
 use App\Models\IngredientPackaging;
 use App\Models\Menu;
 use App\Models\MenuCategory;
+use App\Models\Recipe;
 use App\Models\Store;
 use App\Models\Supplier;
 
@@ -148,8 +149,9 @@ return [
             ['header' => 'ingredient',     'field' => 'ingredient',     'rules' => 'required', 'required' => true],
             ['header' => 'packaging_name', 'field' => 'packaging_name', 'rules' => 'required|string|max:100', 'required' => true],
             ['header' => 'supplier',       'field' => 'supplier',       'rules' => 'nullable'],
-            ['header' => 'crate_to_pack',  'field' => 'crate_to_pack',  'rules' => 'required|integer|min:1', 'cast' => 'int', 'required' => true],
-            ['header' => 'pack_to_base',   'field' => 'pack_to_base',   'rules' => 'required|integer|min:1', 'cast' => 'int', 'required' => true],
+            // Desimal diizinkan: kolom DB menyimpan pecahan (mis. pack_to_base 277,7778).
+            ['header' => 'crate_to_pack',  'field' => 'crate_to_pack',  'rules' => 'required|numeric|gt:0', 'cast' => 'float', 'required' => true],
+            ['header' => 'pack_to_base',   'field' => 'pack_to_base',   'rules' => 'required|numeric|gt:0', 'cast' => 'float', 'required' => true],
         ],
         'relations' => [
             'ingredient' => ['model' => Ingredient::class, 'match' => 'name', 'target' => 'ingredient_id', 'nullable' => false, 'label' => 'Bahan'],
@@ -176,6 +178,29 @@ return [
         ],
         'sample_rows' => [
             ['Teh Seduh', 'Bubuk Teh', 5],
+        ],
+    ],
+
+    // Resep memakai COMMIT khusus (commitRecipes) karena perlu recipe_group_id (UUID)
+    // & created_by. Kolom di bawah dipakai untuk template, ekspor, validasi & pratinjau.
+    'recipes' => [
+        'label'       => 'Resep Menu',
+        'model'       => Recipe::class,
+        'route_index' => 'master.recipes.index',
+        'unique_by'   => ['menu_id', 'ingredient_id'],
+        'columns'     => [
+            ['header' => 'menu',           'field' => 'menu',           'rules' => 'required', 'required' => true],
+            ['header' => 'ingredient',     'field' => 'ingredient',     'rules' => 'required', 'required' => true],
+            ['header' => 'qty_usage',      'field' => 'qty_usage',      'rules' => 'required|numeric|gt:0', 'cast' => 'float', 'required' => true],
+            ['header' => 'unit',           'field' => 'unit',           'rules' => 'required|string|max:20', 'required' => true, 'lower' => true],
+            ['header' => 'effective_from', 'field' => 'effective_from', 'rules' => 'nullable|date'],
+        ],
+        'relations' => [
+            'menu'       => ['model' => Menu::class,       'match' => 'name', 'target' => 'menu_id',       'nullable' => false, 'label' => 'Menu'],
+            'ingredient' => ['model' => Ingredient::class, 'match' => 'name', 'target' => 'ingredient_id', 'nullable' => false, 'label' => 'Bahan'],
+        ],
+        'sample_rows' => [
+            ['Es Teh Manis', 'Gula Pasir', 15, 'gram', ''],
         ],
     ],
 

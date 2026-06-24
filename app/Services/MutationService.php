@@ -41,17 +41,20 @@ class MutationService
                     FifoService::recalculate($mutation->destination_store_id, $ingredientId);
 
                 } elseif ($mutation->isSale()) {
-                    // sale_internal: deduct dari toko pengirim (ada di sistem)
-                    if ($mutation->type === 'sale_internal' && $mutation->source_store_id) {
+                    // Barang KELUAR dari toko sumber: transfer internal (sale_internal)
+                    // & penjualan eksternal (sale_external_out). sale_external (masuk)
+                    // tidak punya source_store_id → tidak memotong sumber.
+                    if ($mutation->deductsFromSource() && $mutation->source_store_id) {
                         StockLedgerService::record(
                             $mutation->source_store_id, $ingredientId,
                             $date, 'sale_deduction', -$qty,
                             'Mutation', $mutation->id,
                             "Ref: {$mutation->reference_no}"
                         );
-                        FifoService::deduct($mutation->source_store_id, $ingredientId, $qty, $item->packaging_id ?: null);
+                        FifoService::deductWholePacks($mutation->source_store_id, $ingredientId, $qty, $item->packaging_id ?: null);
                     }
-                    // Kedua tipe: tambahkan stok ke toko penerima
+                    // Tambahkan stok ke toko penerima jika ada (sale_internal & sale_external masuk).
+                    // sale_external_out tidak punya penerima → tidak menambah stok ke mana pun.
                     if ($mutation->destination_store_id) {
                         StockLedgerService::record(
                             $mutation->destination_store_id, $ingredientId,

@@ -42,13 +42,16 @@
                     <label class="form-label fw-semibold">Tipe Mutasi <span class="text-danger">*</span></label>
                     <select name="type" id="typeSelect" class="form-select" required onchange="handleTypeChange()">
                         <option value="">— Pilih Tipe —</option>
-                        <optgroup label="Pembelian dari Supplier">
+                        <optgroup label="Supplier">
                             <option value="purchase_zhisheng" {{ old('type') === 'purchase_zhisheng' ? 'selected' : '' }}>Pembelian Pusat</option>
                             <option value="purchase_supplier" {{ old('type') === 'purchase_supplier' ? 'selected' : '' }}>Pembelian Supplier Lokal</option>
                         </optgroup>
-                        <optgroup label="Pembelian dari Toko">
+                        <optgroup label="Internal">
                             <option value="sale_internal"  {{ old('type') === 'sale_internal'  ? 'selected' : '' }}>Pembelian Internal</option>
-                            <option value="sale_external"  {{ old('type') === 'sale_external'  ? 'selected' : '' }}>Pembelian Eksternal</option>
+                        </optgroup>
+                        <optgroup label="Eksternal">
+                            <option value="sale_external"     {{ old('type') === 'sale_external'     ? 'selected' : '' }}>Pembelian Eksternal</option>
+                            <option value="sale_external_out" {{ old('type') === 'sale_external_out' ? 'selected' : '' }}>Penjualan Eksternal</option>
                         </optgroup>
                     </select>
                 </div>
@@ -92,6 +95,12 @@
                     <label class="form-label fw-semibold">Pengirim <span class="text-danger">*</span></label>
                     <input type="text" name="external_sender" id="inputExtSender" class="form-control"
                            placeholder="Nama pengirim / toko luar" value="{{ old('external_sender') }}">
+                </div>
+
+                <div class="col-md-3 d-none" id="wrapExtReceiver">
+                    <label class="form-label fw-semibold">Penjualan ke <span class="text-danger">*</span></label>
+                    <input type="text" name="external_receiver" id="inputExtReceiver" class="form-control"
+                           placeholder="Nama penerima / pembeli luar" value="{{ old('external_receiver') }}">
                 </div>
 
                 <div class="col-md-3" id="wrapInvoice">
@@ -223,6 +232,10 @@ var packagingCache  = {};
 var stockPriceCache = {};
 var storeStockCache = {};
 
+// Tipe yang MEMOTONG stok toko sumber (barang keluar) & memakai harga modal dari
+// toko pengirim: transfer internal (sale_internal) & penjualan eksternal (sale_external_out).
+function isSourceSale(t){ return t === 'sale_internal' || t === 'sale_external_out'; }
+
 // Rebuild isi dropdown supplier sesuai tipe mutasi
 function rebuildSupplierSelect(mutationType) {
     var select = document.getElementById('supplierSelect');
@@ -255,12 +268,16 @@ function handleTypeChange() {
     var isPurchase = type.startsWith('purchase') || type === 'opening_stock';
     var isOpening  = type === 'opening_stock';
 
-    // Toko Pengirim: hanya tampil untuk Pembelian Internal (beli dari toko lain)
-    var showSource = type === 'sale_internal';
+    // Toko Pengirim tampil untuk transfer internal & penjualan eksternal (keduanya keluar dari toko sumber)
+    var showSource = isSourceSale(type);
 
-    // Untuk sale_external (Pembelian Eksternal Toko): hanya toko penerima yang ada di sistem
     document.getElementById('wrapSource').classList.toggle('d-none', !showSource);
-    document.getElementById('wrapDest').classList.toggle('d-none', false); // selalu tampil
+    // Penjualan Eksternal = barang KELUAR ke pihak luar → tidak ada toko penerima.
+    var noDest  = (type === 'sale_external_out');
+    var destSel = document.getElementById('destStoreSelect');
+    document.getElementById('wrapDest').classList.toggle('d-none', noDest);
+    destSel.required = !noDest;
+    if (noDest) destSel.value = '';
 
     // Label dinamis
     var labelDest   = document.getElementById('labelDest');
@@ -292,21 +309,24 @@ function handleTypeChange() {
     if (showSupplier) {
         rebuildSupplierSelect(type);
     }
-    // Field "Pengirim" hanya untuk Pembelian Eksternal (diketik manual)
+    // Field "Pengirim" hanya untuk Pembelian Eksternal (barang masuk, diketik manual)
     document.getElementById('wrapExtSender').classList.toggle('d-none', type !== 'sale_external');
+    // Field "Penjualan ke" hanya untuk Penjualan Eksternal (barang keluar)
+    document.getElementById('wrapExtReceiver').classList.toggle('d-none', type !== 'sale_external_out');
 
     document.getElementById('wrapInvoice').classList.toggle('d-none', isOpening);
     document.getElementById('wrapDelivery').classList.toggle('d-none', isOpening);
 
+    // Harga Jual per item HANYA untuk Penjualan Eksternal
     document.querySelectorAll('.sale-price').forEach(function(el) {
-        el.classList.add('d-none'); // sale price field tidak relevan lagi
+        el.classList.toggle('d-none', type !== 'sale_external_out');
     });
 
     // Rebuild daftar bahan sesuai tipe
     rebuildAllIngredientSelects();
 
-    // Tampilkan / sembunyikan info harga stok toko pengirim
-    if (type === 'sale_internal') {
+    // Tampilkan / sembunyikan info harga stok toko pengirim (transfer internal & penjualan eksternal)
+    if (isSourceSale(type)) {
         refreshAllStockPriceInfo();
     } else {
         document.querySelectorAll('.stock-price-info').forEach(function(el) {
@@ -367,7 +387,7 @@ function onSourceStoreChange() {
     // Fetch stock summary dulu, lalu rebuild ingredient options
     fetchStoreStock(storeId, function() {
         rebuildAllIngredientSelects();
-        if (type === 'sale_internal') refreshAllStockPriceInfo();
+        if (isSourceSale(type)) refreshAllStockPriceInfo();
     });
 }
 
@@ -397,7 +417,7 @@ function getFilteredIngredients() {
             return i.packagings.some(function(p) { return p.supplier_id == suppId; });
         });
     }
-    if (['sale_internal'].includes(type) && storeId) {
+    if (isSourceSale(type) && storeId) {
         var stock = storeStockCache[storeId];
         if (stock) {
             return ingredientData.filter(function(i) {
@@ -418,7 +438,7 @@ function getFilteredPackagings(ingId) {
     if ((type === 'purchase_zhisheng' || type === 'purchase_supplier') && suppSelect && suppSelect.value) {
         return ing.packagings.filter(function(p) { return p.supplier_id == suppSelect.value; });
     }
-    if (['sale_internal'].includes(type)) {
+    if (isSourceSale(type)) {
         var storeId = document.getElementById('sourceStoreSelect').value;
         var stock   = storeId ? storeStockCache[storeId] : null;
         if (stock && stock[ingId]) {
@@ -462,7 +482,7 @@ function showAvailableQty(idx, ingId) {
     var qtyInfo = document.querySelector('#row-' + idx + ' .qty-available-info');
     if (!qtyInfo) return;
 
-    if (!['sale_internal'].includes(type) || !storeId || !ingId) {
+    if (!isSourceSale(type) || !storeId || !ingId) {
         qtyInfo.classList.add('d-none'); return;
     }
     var stock = storeStockCache[storeId];
@@ -532,7 +552,7 @@ function checkRowStock(idx) {
     var storeId = document.getElementById('sourceStoreSelect')?.value;
     // Recalc harga FIFO setiap qty berubah
     calcFifoPriceForQty(idx);
-    if (!['sale_internal','sale_external'].includes(type) || !storeId) return;
+    if (!isSourceSale(type) || !storeId) return;
 
     var row     = document.querySelector('#row-' + idx);
     var infoBox = row?.querySelector('.qty-available-info');
@@ -550,6 +570,8 @@ function checkRowStock(idx) {
         : (parseFloat((stock[ingId] || {}).qty) || 0);
     var ctb = parseFloat(row.dataset.crateToBase || 0);
     var ptb = parseFloat(row.dataset.packToBase  || 0);
+    // Barang keluar hanya boleh pack utuh → stok tersedia di-floor ke pack (samakan dgn server)
+    if (ptb > 0) available = Math.floor(available / ptb) * ptb;
 
     var qtyC = parseFloat(row.querySelector('input[name$="[qty_crate]"]')?.value) || 0;
     var qtyP = parseFloat(row.querySelector('input[name$="[qty_pack]"]')?.value)  || 0;
@@ -599,7 +621,7 @@ function checkRowStock(idx) {
 function onIngredientChange(ingId, idx) {
     loadPackagings(ingId, idx);
     var type = document.getElementById('typeSelect').value;
-    if (type === 'sale_internal') { // transfer internal saja yg ambil harga dari stok sumber
+    if (isSourceSale(type)) { // transfer internal saja yg ambil harga dari stok sumber
         fetchStockPrice(ingId, idx);
     } else {
         var info = document.querySelector('#row-' + idx + ' .stock-price-info');
@@ -704,7 +726,7 @@ function fetchStockPrice(ingId, idx) {
 // Hitung harga FIFO berdasarkan qty yang diinput — konsumsi batch dari tertua ke terbaru
 function calcFifoPriceForQty(idx) {
     var type = document.getElementById('typeSelect').value;
-    if (type !== 'sale_internal') return; // harga FIFO hanya utk transfer internal
+    if (!isSourceSale(type)) return; // harga FIFO utk transfer internal & penjualan eksternal
 
     var row = document.querySelector('#row-' + idx);
     if (!row || !row._fifoBatches || row._fifoBatches.length === 0) return;
@@ -726,21 +748,29 @@ function calcFifoPriceForQty(idx) {
         return;
     }
 
-    // Konsumsi FIFO: ambil dari batch tertua dulu, lanjut ke batch berikutnya
-    var remaining  = requestedBase;
-    var totalCost  = 0;
+    // Konsumsi PACK UTUH: ambil dari batch tertua dulu; sisa gram (< 1 pack) tiap
+    // batch DILEWATI — konsisten dengan FifoService::deductWholePacks di server.
+    var ptbLocal    = ptb > 0 ? ptb : 1;
+    var packsNeeded = Math.round(requestedBase / ptbLocal);
+    var totalCost   = 0;
+    var packsTaken  = 0;
     for (var i = 0; i < batches.length; i++) {
-        var consume = Math.min(remaining, batches[i].remaining_qty);
-        totalCost  += consume * batches[i].price_per_base;
-        remaining  -= consume;
-        if (remaining <= 0) break;
+        if (packsNeeded <= 0) break;
+        var wholePacks = Math.floor(batches[i].remaining_qty / ptbLocal);
+        if (wholePacks <= 0) continue;        // batch cuma sisa gram → lewati
+        var take = Math.min(wholePacks, packsNeeded);
+        totalCost  += take * ptbLocal * batches[i].price_per_base;
+        packsNeeded -= take;
+        packsTaken  += take;
     }
-    // Jika qty melebihi total stok, sisa pakai harga batch terakhir
-    if (remaining > 0) {
-        totalCost += remaining * batches[batches.length - 1].price_per_base;
+    // Kalau pack utuh kurang, sisa pakai harga batch terakhir (estimasi)
+    if (packsNeeded > 0 && batches.length > 0) {
+        totalCost  += packsNeeded * ptbLocal * batches[batches.length - 1].price_per_base;
+        packsTaken += packsNeeded;
     }
 
-    var blendedPriceBase  = totalCost / requestedBase;
+    var consumedBase      = packsTaken * ptbLocal;
+    var blendedPriceBase  = consumedBase > 0 ? totalCost / consumedBase : 0;
     var blendedPriceCrate = Math.round(blendedPriceBase * ctb);
     onBatchSelect(idx, blendedPriceCrate);
 }
@@ -869,7 +899,7 @@ function onPackagingChange(idx) {
     }
     // Fetch batch price hanya untuk transfer internal (mengurangi stok toko sumber).
     // Pembelian eksternal = stok MASUK, harga diketik manual → jangan fetch/timpa.
-    if (type === 'sale_internal' && ingInput && ingInput.value) {
+    if (isSourceSale(type) && ingInput && ingInput.value) {
         fetchStockPrice(ingInput.value, idx);
     }
     // Tipe Pembelian → auto-fill Harga/Dus dari pembelian terakhir GLOBAL (semua toko, per kemasan).
@@ -1120,7 +1150,7 @@ document.getElementById('mutasiForm').addEventListener('submit', function(e) {
     if (!validateDateOrder()) { e.preventDefault(); return; }
     var type    = document.getElementById('typeSelect').value;
     var storeId = document.getElementById('sourceStoreSelect') ? document.getElementById('sourceStoreSelect').value : null;
-    if (!['sale_internal'].includes(type) || !storeId) return;
+    if (!isSourceSale(type) || !storeId) return;
     var stock = storeStockCache[storeId];
     if (!stock) return;
 

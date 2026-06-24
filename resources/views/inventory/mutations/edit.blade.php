@@ -66,6 +66,12 @@
                     <input type="text" name="external_sender" class="form-control" value="{{ old('external_sender', $mutation->external_sender) }}">
                 </div>
                 @endif
+                @if($mutation->type === 'sale_external_out')
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Penjualan ke</label>
+                    <input type="text" name="external_receiver" class="form-control" value="{{ old('external_receiver', $mutation->external_receiver) }}">
+                </div>
+                @endif
 
                 {{-- No. SJ --}}
                 <div class="col-md-3">

@@ -334,6 +334,7 @@ class LaporanController extends Controller
         $typeMap = [
             'pi'        => ['sale_internal'],
             'eksternal' => ['sale_external'],
+            'penjualan_eksternal' => ['sale_external_out'],
             'zhisheng'  => ['purchase_zhisheng'],
             'supplier'  => ['purchase_supplier'],
         ];
@@ -356,7 +357,7 @@ class LaporanController extends Controller
             } elseif ($tipe !== 'semua' && isset($typeMap[$tipe])) {
                 $query->whereIn('type', $typeMap[$tipe]);
             } else {
-                $query->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external', 'opening_stock']);
+                $query->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external', 'sale_external_out', 'opening_stock']);
             }
 
             $rows       = $query->orderBy('transaction_date')->get();
@@ -380,6 +381,7 @@ class LaporanController extends Controller
         $typeMap = [
             'pi'        => ['sale_internal'],
             'eksternal' => ['sale_external'],
+            'penjualan_eksternal' => ['sale_external_out'],
             'zhisheng'  => ['purchase_zhisheng'],
             'supplier'  => ['purchase_supplier'],
         ];

@@ -127,6 +127,12 @@ class WasteLogController extends Controller
         if (\App\Models\Opname::isDateLocked((int)$request->store_id, $request->waste_date)) {
             return back()->withInput()->with('error', \App\Models\Opname::lockMessageFor((int)$request->store_id));
         }
+        // Lock periode oleh snapshot HPP (konsisten dengan mutasi & pencatatan harian)
+        $wc = \Carbon\Carbon::parse($request->waste_date);
+        if (\App\Models\HppSnapshot::isDateLocked((int)$request->store_id, $request->waste_date)) {
+            return back()->withInput()->with('error',
+                \App\Models\HppSnapshot::lockMessageFor((int)$request->store_id, $wc->month, $wc->year));
+        }
 
         try {
         DB::transaction(function () use ($request) {
@@ -414,6 +420,13 @@ class WasteLogController extends Controller
             || \App\Models\Opname::isDateLocked($log->store_id, $log->waste_date->format('Y-m-d'))) {
             return back()->withInput()->with('error', \App\Models\Opname::lockMessageFor($log->store_id));
         }
+        // Lock periode oleh snapshot HPP (tanggal lama maupun baru)
+        $wc = \Carbon\Carbon::parse($request->waste_date);
+        if (\App\Models\HppSnapshot::isDateLocked($log->store_id, $request->waste_date)
+            || \App\Models\HppSnapshot::isDateLocked($log->store_id, $log->waste_date->format('Y-m-d'))) {
+            return back()->withInput()->with('error',
+                \App\Models\HppSnapshot::lockMessageFor($log->store_id, $wc->month, $wc->year));
+        }
 
         try {
         DB::transaction(function () use ($request, $log) {
@@ -616,6 +629,18 @@ class WasteLogController extends Controller
 
     public function destroy(WasteLog $log)
     {
+        // Lock periode oleh opname / snapshot HPP: menghapus waste di periode tertutup
+        // akan men-recalc FIFO dan mengubah stok historis yang sudah dibekukan → blokir.
+        $wd = $log->waste_date->format('Y-m-d');
+        $wc = $log->waste_date;
+        if (\App\Models\Opname::isDateLocked($log->store_id, $wd)) {
+            return back()->with('error', \App\Models\Opname::lockMessageFor($log->store_id));
+        }
+        if (\App\Models\HppSnapshot::isDateLocked($log->store_id, $wd)) {
+            return back()->with('error',
+                \App\Models\HppSnapshot::lockMessageFor($log->store_id, $wc->month, $wc->year));
+        }
+
         DB::transaction(function () use ($log) {
             $storeId = $log->store_id;
             $ingIds  = $log->items->pluck('ingredient_id')->unique()->all();

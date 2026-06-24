@@ -181,7 +181,7 @@ class HppController extends Controller
         $salesOutValMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('source_store_id', $storeId)->where('status', 'confirmed')
                   ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
-                  ->where('type', 'sale_internal'))
+                  ->whereIn('type', ['sale_internal', 'sale_external_out']))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'cost_subtotal'])
             ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('cost_subtotal'));
         $purchaseMap = MutationItem::whereHas('mutation', fn($q) =>
@@ -193,7 +193,7 @@ class HppController extends Controller
         $salesOutMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('source_store_id', $storeId)->where('status', 'confirmed')
                   ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
-                  ->where('type', 'sale_internal'))
+                  ->whereIn('type', ['sale_internal', 'sale_external_out']))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'total_in_base'])
             ->groupBy('ingredient_id')->map(fn($g) => $g->sum('total_in_base'));
 
@@ -417,6 +417,89 @@ class HppController extends Controller
             'periodType' => $periodType,
             'locked'   => false,
         ]));
+    }
+
+    // ── Sub-tab CONE & CUP: rekonsiliasi selisih pemakaian ──────────────────────
+    // Selisih (Terpakai aktual − Terjual ideal) dipecah: Rusak (waste) + Overfill
+    // (manual) + Tak terjelaskan. Cakupan: bahan kategori 'cup' + Ice Cream Cone.
+    public function coneCup(Request $request)
+    {
+        $storeIds = auth()->user()->accessibleStoreIds();
+        $month    = (int)($request->month ?? now()->month);
+        $year     = (int)($request->year  ?? now()->year);
+        $stores   = auth()->user()->accessibleStores();
+        $storeId  = $request->store_id ?? ($storeIds[0] ?? null);
+
+        $coneCup = \App\Models\Ingredient::where('category', 'cup')
+            ->orWhere('name', 'like', '%cone%')
+            ->orderByRaw("category = 'cup' DESC")   // cup dulu, lalu cone
+            ->orderBy('id')->get(['id', 'name', 'category']);
+
+        $rows = collect();
+        if ($storeId && in_array($storeId, $storeIds)) {
+            // Terjual (ideal) & Terpakai (aktual) — reuse perhitungan HPP.
+            $hpp     = $this->calcHppForStore((int)$storeId, $month, $year, 'end_month');
+            $hppById = $hpp ? $hpp['ingredientRows']->keyBy(fn($r) => $r->ingredient->id) : collect();
+
+            // Rusak = total qty waste bahan ini di periode.
+            $monthStart = Carbon::create($year, $month, 1)->startOfMonth()->toDateString();
+            $monthEnd   = Carbon::create($year, $month, 1)->endOfMonth()->toDateString();
+            $rusakMap = \App\Models\WasteLogItem::query()
+                ->join('waste_logs', 'waste_logs.id', '=', 'waste_log_items.waste_log_id')
+                ->where('waste_logs.store_id', $storeId)
+                ->whereBetween('waste_logs.waste_date', [$monthStart, $monthEnd])
+                ->whereIn('waste_log_items.ingredient_id', $coneCup->pluck('id'))
+                ->groupBy('waste_log_items.ingredient_id')
+                ->selectRaw('waste_log_items.ingredient_id, SUM(waste_log_items.source_qty) as rusak')
+                ->pluck('rusak', 'waste_log_items.ingredient_id');
+
+            // Overfill manual.
+            $overfillMap = \App\Models\ConeCupOverfill::where('store_id', $storeId)
+                ->where('month', $month)->where('year', $year)
+                ->pluck('qty', 'ingredient_id');
+
+            $rows = $coneCup->map(function ($ing) use ($hppById, $rusakMap, $overfillMap) {
+                $h        = $hppById[$ing->id] ?? null;
+                $terjual  = $h ? (float) $h->ideal_base : 0.0;
+                $terpakai = ($h && $h->actual_base !== null) ? (float) $h->actual_base : 0.0;
+                $selisih  = $terpakai - $terjual;                 // + = boros
+                $rusak    = (float) ($rusakMap[$ing->id] ?? 0);
+                $overfill = (float) ($overfillMap[$ing->id] ?? 0);
+                return (object)[
+                    'ingredient'  => $ing,
+                    'terjual'     => $terjual,
+                    'terpakai'    => $terpakai,
+                    'selisih'     => $selisih,
+                    'rusak'       => $rusak,
+                    'overfill'    => $overfill,
+                    'unexplained' => $selisih - $rusak - $overfill,
+                ];
+            });
+        }
+
+        return view('sales.hpp-cone-cup', compact('stores', 'storeId', 'month', 'year', 'rows'));
+    }
+
+    // Simpan overfill manual (per toko/bulan/bahan).
+    public function saveOverfill(Request $request)
+    {
+        $request->validate([
+            'store_id'   => 'required|exists:stores,id',
+            'month'      => 'required|integer|between:1,12',
+            'year'       => 'required|integer|min:2020',
+            'overfill'   => 'nullable|array',
+            'overfill.*' => 'nullable|numeric|min:0',
+        ]);
+        abort_unless(in_array((int)$request->store_id, auth()->user()->accessibleStoreIds()), 403);
+
+        foreach ($request->overfill ?? [] as $ingId => $qty) {
+            \App\Models\ConeCupOverfill::updateOrCreate(
+                ['store_id' => (int)$request->store_id, 'ingredient_id' => (int)$ingId,
+                 'month' => (int)$request->month, 'year' => (int)$request->year],
+                ['qty' => (float)($qty ?: 0), 'created_by' => auth()->id()]
+            );
+        }
+        return back()->with('success', 'Overfill cone & cup tersimpan.');
     }
 
     // Ubah snapshot JSON kembali ke struktur yang dipakai view (Collection + objek).
