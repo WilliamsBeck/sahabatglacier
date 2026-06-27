@@ -126,27 +126,27 @@
                                     </div>
                                 </div>
 
+                                @php $availableStores = $stores->filter(fn($s) => !in_array($s->id, $assignedStores)); @endphp
+                                @if($availableStores->isNotEmpty())
                                 <form method="POST" action="{{ route('master.users.assign-store', $user) }}" class="mb-5 p-4 border rounded-4 bg-light bg-opacity-50">
                                     @csrf
-                                    <label class="form-label">Berikan Otorisasi Toko Baru</label>
-                                    <div class="row g-3">
-                                        <div class="col-md-9">
-                                            <select name="store_id" class="form-select" required>
-                                                <option value="">— Cari dan Pilih Toko yang Tersedia —</option>
-                                                @foreach($stores as $s)
-                                                    @if(!in_array($s->id, $assignedStores))
-                                                        <option value="{{ $s->id }}">{{ $s->name }} ({{ $s->store_code }}) — {{ $s->area }}</option>
-                                                    @endif
-                                                @endforeach
-                                            </select>
+                                    <label class="form-label fw-semibold">Pilih Toko untuk Ditambahkan</label>
+                                    <div class="border rounded bg-white p-2 mb-3" style="max-height:220px;overflow-y:auto">
+                                        @foreach($availableStores as $s)
+                                        <div class="form-check p-2 border-bottom">
+                                            <input class="form-check-input" type="checkbox" name="store_ids[]" value="{{ $s->id }}" id="store_{{ $s->id }}">
+                                            <label class="form-check-label w-100" for="store_{{ $s->id }}">
+                                                <span class="fw-semibold">{{ $s->name }}</span>
+                                                <span class="text-muted small ms-2">({{ $s->store_code }}) — {{ $s->area }}</span>
+                                            </label>
                                         </div>
-                                        <div class="col-md-3">
-                                            <button type="submit" class="btn btn-primary w-100 fw-bold h-100" style="border-radius: 14px;">
-                                                <i class="bi bi-plus-lg me-1"></i>Tambah
-                                            </button>
-                                        </div>
+                                        @endforeach
                                     </div>
+                                    <button type="submit" class="btn btn-primary fw-bold px-4" style="border-radius: 14px;">
+                                        <i class="bi bi-plus-lg me-1"></i>Tambah yang Dipilih
+                                    </button>
                                 </form>
+                                @endif
                                 
                                 <div class="mt-2">
                                     <h6 class="fw-bold text-dark mb-3 px-1" style="font-size: 1rem;">Daftar Toko Terotorisasi ({{ $user->stores->count() }})</h6>

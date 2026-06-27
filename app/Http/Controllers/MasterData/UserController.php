@@ -78,11 +78,13 @@ class UserController extends Controller
 
     public function assignStore(Request $request, User $user)
     {
-        $request->validate(['store_id' => 'required|exists:stores,id']);
-        if (!$user->stores()->where('stores.id', $request->store_id)->exists()) {
-            $user->stores()->attach($request->store_id, ['assigned_at' => now()]);
+        $request->validate(['store_ids' => 'required|array', 'store_ids.*' => 'exists:stores,id']);
+        $existing = $user->stores()->pluck('stores.id')->toArray();
+        $toAttach = array_diff($request->store_ids, $existing);
+        if ($toAttach) {
+            $user->stores()->attach(array_fill_keys($toAttach, ['assigned_at' => now()]));
         }
-        return back()->with('success', 'Toko berhasil di-assign.');
+        return back()->with('success', count($toAttach) . ' toko berhasil di-assign.');
     }
     public function revokeStore(User $user, Store $store)
     {
