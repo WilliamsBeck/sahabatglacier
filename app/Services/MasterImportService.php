@@ -239,9 +239,9 @@ class MasterImportService
      * isi created_by dari super admin, store global (null). Mengganti resep lama menu itu.
      * @return array ['new'=>int,'update'=>int]
      */
-    public function commitRecipes(array $cfg, string $filePath): array
+    public function commitRecipes(array $cfg, string $filePath, ?string $sheet = null): array
     {
-        $parsed = $this->parse($cfg, $filePath);
+        $parsed = $this->parse($cfg, $filePath, $sheet);
         if ($parsed['summary']['error'] > 0) {
             throw new \RuntimeException('Masih ada baris yang error; impor dibatalkan.');
         }
@@ -371,8 +371,14 @@ class MasterImportService
         $result = [];
         DB::transaction(function () use ($bundle, $filePath, &$result) {
             foreach ($bundle['members'] as $slug => $sheet) {
-                $cfg    = $this->config($slug);
-                $parsed = $this->parse($cfg, $filePath, $sheet); // relasi resolve dari DB (member sebelumnya sudah tersimpan)
+                $cfg = $this->config($slug);
+                // Resep pakai commitRecipes (butuh recipe_group_id)
+                if ($slug === 'recipes') {
+                    $result[$slug] = $this->commitRecipes($cfg, $filePath, $sheet);
+                    $result[$slug]['label'] = $cfg['label'];
+                    continue;
+                }
+                $parsed = $this->parse($cfg, $filePath, $sheet);
                 if ($parsed['summary']['error'] > 0) {
                     throw new \RuntimeException("Sheet '{$sheet}' masih ada baris error; impor dibatalkan.");
                 }

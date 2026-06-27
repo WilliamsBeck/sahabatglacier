@@ -9,7 +9,7 @@
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
         @unless(auth()->user()->role === 'admin_area')
-        @include('master.partials.import-buttons', ['entity' => 'menus', 'label' => 'Menu', 'exportUrl' => route('master.export-bundle', 'menu-resep')])
+        @include('master.partials.import-bundle-buttons', ['bundle' => 'menu-resep', 'label' => 'Menu & Resep', 'exportUrl' => route('master.export-bundle', 'menu-resep')])
         <a href="{{ route('master.menus.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Tambah Menu
         </a>
