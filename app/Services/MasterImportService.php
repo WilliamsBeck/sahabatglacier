@@ -336,23 +336,24 @@ class MasterImportService
      */
     public function parseBundle(array $bundle, string $filePath): array
     {
-        // 1) Kumpulkan nama bahan valid dari sheet Bahan (untuk pending lookup)
-        $ingSlug   = 'ingredients';
-        $ingSheet  = $bundle['members'][$ingSlug];
-        $ingParsed = $this->parse($this->config($ingSlug), $filePath, $ingSheet);
-        $pendingIngredients = collect($ingParsed['rows'])
-            ->where('status', '!=', 'error')
-            ->pluck('attrs.name')->filter()->values()->all();
-        $pending = [\App\Models\Ingredient::class => $pendingIngredients];
+        $pending  = [];
 
-        // 2) Parse tiap member (Bahan sudah diparse; sisanya pakai pending)
-        $members  = [];
-        $hasError = false;
+        // Untuk bundle bahan: build pending ingredients dari sheet Bahan
+        if (isset($bundle['members']['ingredients'])) {
+            $ingSlug   = 'ingredients';
+            $ingSheet  = $bundle['members'][$ingSlug];
+            $ingParsed = $this->parse($this->config($ingSlug), $filePath, $ingSheet);
+            $pendingIngredients = collect($ingParsed['rows'])
+                ->where('status', '!=', 'error')
+                ->pluck('attrs.name')->filter()->values()->all();
+            $pending = [\App\Models\Ingredient::class => $pendingIngredients];
+        }
+
+        $members   = [];
+        $hasError  = false;
         $totalSave = 0;
         foreach ($bundle['members'] as $slug => $sheet) {
-            $parsed = $slug === $ingSlug
-                ? $ingParsed
-                : $this->parse($this->config($slug), $filePath, $sheet, $pending);
+            $parsed = $this->parse($this->config($slug), $filePath, $sheet, $pending);
             if ($parsed['summary']['error'] > 0) $hasError = true;
             $totalSave += $parsed['summary']['new'] + $parsed['summary']['update'];
             $members[$slug] = ['cfg' => $this->config($slug), 'sheet' => $sheet, 'parsed' => $parsed];
