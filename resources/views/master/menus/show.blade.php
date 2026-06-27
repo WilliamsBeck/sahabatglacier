@@ -8,9 +8,11 @@
         <p class="page-subtitle">Detail menu (hanya lihat)</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        @unless(auth()->user()->role === 'admin_area')
         <a href="{{ route('master.menus.edit', $menu) }}" class="btn btn-primary">
             <i class="bi bi-pencil me-1"></i> Edit &amp; Resep
         </a>
+        @endunless
         <a href="{{ route('master.menus.index') }}" class="btn btn-outline-secondary btn-sm btn-back">
             <i class="bi bi-arrow-left me-1"></i>Kembali
         </a>
