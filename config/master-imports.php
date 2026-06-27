@@ -187,7 +187,7 @@ return [
         'label'       => 'Resep Menu',
         'model'       => Recipe::class,
         'route_index' => 'master.recipes.index',
-        'unique_by'   => ['menu_id', 'ingredient_id'],
+        'unique_by'   => ['recipe_group_id', 'ingredient_id'],
         'columns'     => [
             ['header' => 'menu',           'field' => 'menu',           'rules' => 'required', 'required' => true],
             ['header' => 'ingredient',     'field' => 'ingredient',     'rules' => 'required', 'required' => true],

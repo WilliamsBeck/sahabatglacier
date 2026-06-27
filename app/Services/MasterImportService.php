@@ -301,11 +301,18 @@ class MasterImportService
             'bahan' => [
                 'label'       => 'Bahan, Kemasan & Komposisi',
                 'route_index' => 'master.ingredients.index',
-                // Urutan penting: yang diacu (bahan) diproses lebih dulu.
                 'members' => [
                     'ingredients'             => 'Bahan',
                     'packagings'              => 'Kemasan',
                     'ingredient-compositions' => 'Komposisi',
+                ],
+            ],
+            'menu-resep' => [
+                'label'       => 'Menu & Resep',
+                'route_index' => 'master.menus.index',
+                'members' => [
+                    'menus'   => 'Menu',
+                    'recipes' => 'Resep',
                 ],
             ],
         ];

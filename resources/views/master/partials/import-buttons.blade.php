@@ -6,7 +6,7 @@
     <a href="{{ route('master.import.template', $entity) }}" class="btn btn-outline-success">
         <i class="bi bi-file-earmark-arrow-down me-1"></i> Download Template
     </a>
-    <a href="{{ route('master.export', $entity) }}" class="btn btn-outline-secondary">
+    <a href="{{ $exportUrl ?? route('master.export', $entity) }}" class="btn btn-outline-secondary">
         <i class="bi bi-database-down me-1"></i> Export Data
     </a>
     <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#{{ $modalId }}">
