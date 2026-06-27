@@ -14,7 +14,7 @@ class StoreController extends Controller
         });
         if ($request->area) $query->where('area', $request->area);
         if ($request->status !== null && $request->status !== '') $query->where('is_active', $request->status);
-        $stores = $query->orderBy('store_code')->paginate(20);
+        $stores = $query->orderByRaw('CAST(store_code AS UNSIGNED)')->paginate(20);
         $areas  = Store::distinct()->pluck('area');
         return view('master.stores.index', compact('stores','areas'));
     }
