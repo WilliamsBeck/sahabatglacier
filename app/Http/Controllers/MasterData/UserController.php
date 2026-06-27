@@ -14,7 +14,7 @@ class UserController extends Controller
     }
     public function create()
     {
-        $stores = Store::where('is_active', true)->orderBy('name')->get();
+        $stores = Store::where('is_active', true)->orderByRaw('CAST(store_code AS UNSIGNED)')->get();
         return view('master.users.form', compact('stores'));
     }
     public function store(Request $request)
@@ -35,7 +35,7 @@ class UserController extends Controller
     }
     public function edit(User $user)
     {
-        $stores = Store::where('is_active', true)->orderBy('name')->get();
+        $stores = Store::where('is_active', true)->orderByRaw('CAST(store_code AS UNSIGNED)')->get();
         $user->load('stores');
         $assignedStores = $user->stores->pluck('id')->toArray();
         return view('master.users.form', compact('user', 'stores', 'assignedStores'));
