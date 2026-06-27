@@ -130,11 +130,14 @@
                                 @if($availableStores->isNotEmpty())
                                 <form method="POST" action="{{ route('master.users.assign-store', $user) }}" class="mb-5 p-4 border rounded-4 bg-light bg-opacity-50">
                                     @csrf
-                                    <label class="form-label fw-semibold">Pilih Toko untuk Ditambahkan</label>
-                                    <div class="border rounded bg-white p-2 mb-3" style="max-height:220px;overflow-y:auto">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <label class="form-label fw-semibold mb-0">Pilih Toko untuk Ditambahkan</label>
+                                        <a href="#" class="small" onclick="toggleAllStores(this);return false;">Pilih Semua</a>
+                                    </div>
+                                    <div class="border rounded bg-white mb-3" id="storeChecklistBox">
                                         @foreach($availableStores as $s)
-                                        <div class="form-check p-2 border-bottom">
-                                            <input class="form-check-input" type="checkbox" name="store_ids[]" value="{{ $s->id }}" id="store_{{ $s->id }}">
+                                        <div class="form-check px-3 py-2 border-bottom">
+                                            <input class="form-check-input store-cb" type="checkbox" name="store_ids[]" value="{{ $s->id }}" id="store_{{ $s->id }}">
                                             <label class="form-check-label w-100" for="store_{{ $s->id }}">
                                                 <span class="fw-semibold">{{ $s->name }}</span>
                                                 <span class="text-muted small ms-2">({{ $s->store_code }}) — {{ $s->area }}</span>
@@ -145,6 +148,14 @@
                                     <button type="submit" class="btn btn-primary fw-bold px-4" style="border-radius: 14px;">
                                         <i class="bi bi-plus-lg me-1"></i>Tambah yang Dipilih
                                     </button>
+                                    <script>
+                                    function toggleAllStores(el) {
+                                        const cbs = document.querySelectorAll('.store-cb');
+                                        const allChecked = [...cbs].every(c => c.checked);
+                                        cbs.forEach(c => c.checked = !allChecked);
+                                        el.textContent = allChecked ? 'Pilih Semua' : 'Batal Semua';
+                                    }
+                                    </script>
                                 </form>
                                 @endif
                                 
