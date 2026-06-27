@@ -134,15 +134,15 @@
                                         <label class="form-label fw-semibold mb-0">Pilih Toko untuk Ditambahkan</label>
                                         <a href="#" class="small" onclick="toggleAllStores(this);return false;">Pilih Semua</a>
                                     </div>
-                                    <div class="border rounded bg-white mb-3" id="storeChecklistBox">
+                                    <div class="border rounded bg-white mb-3" id="storeChecklistBox" style="max-height:350px;overflow-y:auto">
                                         @foreach($availableStores as $s)
-                                        <div class="form-check px-3 py-2 border-bottom">
-                                            <input class="form-check-input store-cb" type="checkbox" name="store_ids[]" value="{{ $s->id }}" id="store_{{ $s->id }}">
-                                            <label class="form-check-label w-100" for="store_{{ $s->id }}">
+                                        <label class="d-flex align-items-center gap-2 px-3 py-2 border-bottom w-100 cursor-pointer" for="store_{{ $s->id }}" style="cursor:pointer">
+                                            <input class="store-cb flex-shrink-0" type="checkbox" name="store_ids[]" value="{{ $s->id }}" id="store_{{ $s->id }}">
+                                            <span>
                                                 <span class="fw-semibold">{{ $s->name }}</span>
                                                 <span class="text-muted small ms-2">({{ $s->store_code }}) — {{ $s->area }}</span>
-                                            </label>
-                                        </div>
+                                            </span>
+                                        </label>
                                         @endforeach
                                     </div>
                                     <button type="submit" class="btn btn-primary fw-bold px-4" style="border-radius: 14px;">
