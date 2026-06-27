@@ -8,6 +8,7 @@
         <p class="page-subtitle">Manajemen master data bahan</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        @unless(auth()->user()->role === 'admin_area')
         <a href="{{ route('master.import-bundle.template', 'bahan') }}" class="btn btn-outline-success">
             <i class="bi bi-file-earmark-arrow-down me-1"></i> Download Template
         </a>
@@ -20,6 +21,7 @@
         <a href="{{ route('master.ingredients.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Tambah Bahan
         </a>
+        @endunless
         <div class="modal fade" id="importBundleModal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog">
                 <form method="POST" action="{{ route('master.import-bundle.preview', 'bahan') }}" enctype="multipart/form-data">
@@ -121,9 +123,11 @@
                         <td>
                             <x-action-menu>
                                 <x-action-view :href="route('master.ingredients.show', $ing)" />
+                                @unless(auth()->user()->role === 'admin_area')
                                 <x-action-edit :href="route('master.ingredients.edit', $ing)" />
                                 <x-action-delete :action="route('master.ingredients.destroy', $ing)"
                                                  confirm="Hapus bahan baku ini?" />
+                                @endunless
                             </x-action-menu>
                         </td>
                     </tr>

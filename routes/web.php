@@ -43,6 +43,13 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+    // Master data read-only untuk admin_area (bahan baku & menu/resep saja)
+    Route::middleware(['role:admin_area'])->prefix('master')->name('master.')->group(function () {
+        Route::resource('ingredients', IngredientController::class)->only(['index', 'show']);
+        Route::resource('menus', MenuController::class)->only(['index', 'show']);
+        Route::resource('recipes', RecipeController::class)->only(['index', 'show']);
+    });
+
     Route::middleware(['role:super_admin'])->prefix('master')->name('master.')->group(function () {
         Route::resource('stores', StoreController::class);
         Route::resource('suppliers', SupplierController::class);

@@ -35,6 +35,18 @@
                 <a href="{{ route('master.users.index') }}" class="sidebar-link sub-link"><i
                         class="bi bi-people"></i><span>User</span></a>
             </div>
+        @elseif(auth()->user()->role === 'admin_area')
+            <a href="#masterMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
+                <i class="bi bi-database"></i>
+                <span>Master Data</span>
+                <i class="bi bi-chevron-down ms-auto small"></i>
+            </a>
+            <div class="collapse" id="masterMenu">
+                <a href="{{ route('master.ingredients.index') }}" class="sidebar-link sub-link"><i
+                        class="bi bi-box-seam"></i><span>Bahan Baku</span></a>
+                <a href="{{ route('master.menus.index') }}" class="sidebar-link sub-link"><i
+                        class="bi bi-cup-straw"></i><span>Menu & Resep</span></a>
+            </div>
         @endif
 
 

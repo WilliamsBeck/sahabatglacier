@@ -8,10 +8,12 @@
         <p class="page-subtitle">Manajemen master data menu dan varian resep</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        @unless(auth()->user()->role === 'admin_area')
         @include('master.partials.import-buttons', ['entity' => 'menus', 'label' => 'Menu'])
         <a href="{{ route('master.menus.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Tambah Menu
         </a>
+        @endunless
     </div>
 </div>
 
@@ -79,9 +81,11 @@
                         <td>
                             <x-action-menu>
                                 <x-action-view :href="route('master.menus.show', $menu)" />
+                                @unless(auth()->user()->role === 'admin_area')
                                 <x-action-edit :href="route('master.menus.edit', $menu)" label="Edit & Resep" />
                                 <x-action-delete :action="route('master.menus.destroy', $menu)"
                                                  confirm="Hapus menu ini beserta semua resepnya?" />
+                                @endunless
                             </x-action-menu>
                         </td>
                     </tr>

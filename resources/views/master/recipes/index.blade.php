@@ -7,8 +7,10 @@
         <p class="page-subtitle">Versi resep aktif menentukan HPP per periode</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end align-items-start">
+        @unless(auth()->user()->role === 'admin_area')
         @include('master.partials.import-buttons', ['entity' => 'recipes', 'label' => 'Resep Menu'])
         <a href="{{ route('master.recipes.create') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> Tambah Resep</a>
+        @endunless
     </div>
 </div>
 <div class="card mb-3"><div class="card-body py-2">
@@ -72,6 +74,7 @@
                     @endforeach
                 </td>
                 <td class="align-top small text-soft">{{ $first->createdBy->name ?? '-' }}</td>
+                @unless(auth()->user()->role === 'admin_area')
                 <td class="align-top">
                     <x-action-menu>
                         <li>
@@ -81,6 +84,7 @@
                         </li>
                     </x-action-menu>
                 </td>
+                @endunless
             </tr>
             @empty
             <tr><td colspan="6" class="py-4 text-soft text-center">Belum ada resep</td></tr>
