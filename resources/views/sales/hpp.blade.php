@@ -159,7 +159,6 @@
                 <div class="card-body">
                     <div class="mb-1" style="color:rgba(255,255,255,.7);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Selisih HPP (Ideal − Aktual)</div>
                     <div class="fs-5 fw-bold" style="color:#fff;">{{ $summary->selisih_hpp >= 0 ? '+' : '' }}{{ $rp($summary->selisih_hpp) }}</div>
-                    <div class="mt-1" style="color:rgba(255,255,255,.85);font-size:.8rem;">{{ $summary->selisih_hpp < 0 ? 'Boros' : ($summary->selisih_hpp > 0 ? 'Efisien' : 'Sesuai') }}</div>
                 </div>
             </div>
         @else
