@@ -395,7 +395,7 @@
                                     @if($r->hpp_ideal > 0)
                                         {{ $rp($r->hpp_ideal) }}
                                     @else
-                                        <span class="text-warning small">Harga belum ada</span>
+                                        <span class="text-muted small">—</span>
                                     @endif
                                 </td>
 
