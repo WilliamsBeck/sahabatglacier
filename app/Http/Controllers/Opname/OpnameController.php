@@ -971,7 +971,7 @@ class OpnameController extends Controller
         // ── Row 3: Header — A=RowKey(hidden), B=Nama, C=Kemasan, D-F=FISIK, G=Harga/Dus, H=Catatan
         $ws->setCellValue('A3', 'ID');
         $ws->setCellValue('B3', 'Nama Bahan');
-        $ws->setCellValue('C3', 'Kemasan');
+        $ws->setCellValue('C3', 'Pack/Dus');
         $ws->setCellValue('D3', 'FISIK Dus');
         $ws->setCellValue('E3', 'FISIK Pack');
         $ws->setCellValue('F3', 'FISIK Gr/Pcs');
@@ -998,7 +998,7 @@ class OpnameController extends Controller
             $pkg      = $item->packaging;
             $ctb      = $pkg ? (float)$pkg->crate_to_pack : 0;
             $ptb      = $pkg ? (float)$pkg->pack_to_base  : 0;
-            $pkgLabel = $pkg ? $pkg->packaging_name : ($item->ingredient?->unit_base ?? '-');
+            $pkgLabel = ($pkg && $ctb > 0) ? (int)$ctb : ($item->ingredient?->unit_base ?? '-');
 
             // Stok Sistem breakdown
             $sysTotal = (float)$item->system_qty;
@@ -1114,7 +1114,7 @@ class OpnameController extends Controller
         // Baris 3: header — A=RowKey(hidden), B=Nama Bahan, C=Kemasan, D-F=FISIK, G=Harga/Dus, H=Catatan
         $ws->setCellValue('A3', 'ID');
         $ws->setCellValue('B3', 'Nama Bahan');
-        $ws->setCellValue('C3', 'Kemasan');
+        $ws->setCellValue('C3', 'Pack/Dus');
         $ws->setCellValue('D3', 'FISIK Dus ✏');
         $ws->setCellValue('E3', 'FISIK Pack ✏');
         $ws->setCellValue('F3', 'FISIK Gr/Pcs ✏');
@@ -1132,7 +1132,7 @@ class OpnameController extends Controller
         foreach ($rows as $r) {
             $ws->setCellValueByColumnAndRow(1, $rowNum, $r['row_key']);
             $ws->setCellValueByColumnAndRow(2, $rowNum, $r['name']);
-            $ws->setCellValueByColumnAndRow(3, $rowNum, $r['pkg_label'] ?? ($r['unit_base'] ?? '-'));
+            $ws->setCellValueByColumnAndRow(3, $rowNum, ($r['crate_to_pack'] ?? 0) > 0 ? $r['crate_to_pack'] : ($r['unit_base'] ?? '-'));
             $ws->setCellValueByColumnAndRow(4, $rowNum, ''); // FISIK Dus
             $ws->setCellValueByColumnAndRow(5, $rowNum, ''); // FISIK Pack
             $ws->setCellValueByColumnAndRow(6, $rowNum, ''); // FISIK Gr/Pcs
