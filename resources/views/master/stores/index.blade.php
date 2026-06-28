@@ -50,7 +50,7 @@
         <table class="table table-index table-balanced mb-0">
             <thead>
                 <tr>
-                    <th width="48">#</th>
+                    <th width="48" style="white-space:nowrap">#</th>
                     <th class="col-name">Toko</th>
                     <th>Kode</th>
                     <th>Area</th>
@@ -61,7 +61,7 @@
             <tbody>
                 @forelse($stores as $s)
                     <tr>
-                        <td class="text-soft">{{ $stores->firstItem() + $loop->index }}</td>
+                        <td class="text-soft" style="white-space:nowrap">{{ $stores->firstItem() + $loop->index }}</td>
                         <td class="col-name">
                             <span class="fw-medium">{{ $s->name }}</span>
                         </td>
