@@ -43,7 +43,7 @@
     $monthNames = ['','Januari','Februari','Maret','April','Mei','Juni','Juli',
                    'Agustus','September','Oktober','November','Desember'];
     $rp = fn($v) => 'Rp ' . number_format($v, 0, ',', '.');
-    $pct = fn($v) => $v !== null ? number_format($v, 1, ',', '.') . '%' : '—';
+    $pct = fn($v) => $v !== null ? number_format($v, 2, ',', '.') . '%' : '—';
 @endphp
 
 <p class="text-muted mb-3 small">Per Periode — HPP Ideal vs Aktual</p>
