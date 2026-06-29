@@ -458,9 +458,34 @@ class HppController extends Controller
                 ->where('month', $month)->where('year', $year)
                 ->pluck('qty', 'ingredient_id');
 
-            $rows = $coneCup->map(function ($ing) use ($hppById, $rusakMap, $overfillMap) {
+            // Terjual khusus CONE: hanya dihitung dari menu kategori "Ice Cone"
+            // (bukan dari menu lain yang resepnya kebetulan memakai cone, mis. Sundae).
+            $coneTerjualMap = [];
+            $coneIds = $coneCup->where('category', '!=', 'cup')->pluck('id')->all();
+            if ($coneIds) {
+                $iceConeMenuIds = \App\Models\Menu::whereHas('menuCategory',
+                        fn($q) => $q->where('name', 'like', '%cone%'))
+                    ->pluck('id')->all();
+                $salesByMenu = MonthlySale::where('store_id', $storeId)
+                    ->where('month', $month)->where('year', $year)
+                    ->where('period_type', 'end_month')
+                    ->whereIn('menu_id', $iceConeMenuIds ?: [0])
+                    ->pluck('total_sold', 'menu_id');
+                $coneRecipes = Recipe::whereIn('ingredient_id', $coneIds)
+                    ->whereIn('menu_id', $iceConeMenuIds ?: [0])
+                    ->whereNull('store_id')->get();
+                foreach ($coneRecipes as $rec) {
+                    $sold = (float) ($salesByMenu[$rec->menu_id] ?? 0);
+                    $coneTerjualMap[$rec->ingredient_id] =
+                        ($coneTerjualMap[$rec->ingredient_id] ?? 0) + $sold * (float) $rec->qty_usage;
+                }
+            }
+
+            $rows = $coneCup->map(function ($ing) use ($hppById, $rusakMap, $overfillMap, $coneTerjualMap) {
                 $h        = $hppById[$ing->id] ?? null;
-                $terjual  = $h ? (float) $h->ideal_base : 0.0;
+                $terjual  = array_key_exists($ing->id, $coneTerjualMap)
+                    ? (float) $coneTerjualMap[$ing->id]
+                    : ($h ? (float) $h->ideal_base : 0.0);
                 $terpakai = ($h && $h->actual_base !== null) ? (float) $h->actual_base : 0.0;
                 $selisih  = $terpakai - $terjual;                 // + = boros
                 $rusak    = (float) ($rusakMap[$ing->id] ?? 0);
