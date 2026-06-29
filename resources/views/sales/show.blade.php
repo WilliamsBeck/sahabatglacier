@@ -56,11 +56,22 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach($sales->sortBy('menu.name') as $sale)
+                        @php
+                            $grouped = $sales->sortBy([
+                                fn($a, $b) => ($a->menu->menuCategory->sort_order ?? 9999) <=> ($b->menu->menuCategory->sort_order ?? 9999),
+                                fn($a, $b) => ($a->menu->name ?? '') <=> ($b->menu->name ?? ''),
+                            ])->groupBy(fn($s) => $s->menu->menuCategory->name ?? 'Tanpa Kategori');
+                        @endphp
+                        @foreach($grouped as $catName => $items)
+                        <tr class="table-secondary">
+                            <td colspan="2" class="fw-bold small text-uppercase">{{ $catName }}</td>
+                        </tr>
+                        @foreach($items as $sale)
                         <tr>
                             <td class="fw-semibold">{{ $sale->menu->name }}</td>
                             <td class="text-end fw-bold">{{ number_format($sale->total_sold, 0, ',', '.') }} pcs</td>
                         </tr>
+                        @endforeach
                         @endforeach
                     </tbody>
                     <tfoot>

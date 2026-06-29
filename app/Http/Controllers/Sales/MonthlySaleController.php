@@ -167,7 +167,7 @@ class MonthlySaleController extends Controller
 
     private function groupSales(array $p)
     {
-        return MonthlySale::with('menu')
+        return MonthlySale::with('menu.menuCategory')
             ->where($p)->get();
     }
 
