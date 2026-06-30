@@ -707,6 +707,29 @@ class DailyLedgerController extends Controller
     // ═════════════════════════════════════════════════════════════════════════
     // EXPORT TEMPLATE EXCEL — Pemakaian Harian per bulan
     // ═════════════════════════════════════════════════════════════════════════
+    /**
+     * Parse kolom A template: "ingId-pkgId" → [ingId, pkgId].
+     * Format lama (hanya "ingId") tetap didukung → pakai kemasan default.
+     */
+    private function parseTemplateKey($raw, array $defaultPkgMap): array
+    {
+        $raw = trim((string) $raw);
+        if ($raw === '') return [null, null];
+        if (str_contains($raw, '-')) {
+            $parts = explode('-', $raw, 2);
+            $i = is_numeric($parts[0]) ? (int) $parts[0] : null;
+            $p = (isset($parts[1]) && is_numeric($parts[1]) && (int) $parts[1] > 0) ? (int) $parts[1] : null;
+            // pkgId 0/null → fallback default kemasan bahan tsb
+            if ($i !== null && $p === null) $p = $defaultPkgMap[$i] ?? null;
+            return [$i, $p];
+        }
+        if (is_numeric($raw)) {
+            $i = (int) $raw;
+            return [$i, $defaultPkgMap[$i] ?? null];
+        }
+        return [null, null];
+    }
+
     public function exportTemplate(Request $request)
     {
         $request->validate([
@@ -732,7 +755,8 @@ class DailyLedgerController extends Controller
             ->pluck('sort_order', 'ingredient_id')
             ->toArray();
 
-        $ingredients = Ingredient::where('ingredients.is_active', true)
+        $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
+            ->where('ingredients.is_active', true)
             ->where('type', '!=', 'semi_finished')
             ->get()
             ->sort(function ($a, $b) use ($catSort, $userOrder) {
@@ -747,12 +771,12 @@ class DailyLedgerController extends Controller
             })
             ->values();
 
-        // Ambil pemakaian existing untuk pre-fill
+        // Ambil pemakaian existing untuk pre-fill — keyed per (bahan × kemasan × hari)
         $existing = DailyUsage::where('store_id', $storeId)
             ->whereYear('usage_date', $year)
             ->whereMonth('usage_date', $month)
             ->get()
-            ->mapWithKeys(fn($u) => [$u->ingredient_id . '-' . (int)$u->usage_date->format('j') => (float)$u->qty_pack]);
+            ->mapWithKeys(fn($u) => [$u->ingredient_id . '-' . ($u->packaging_id ?: 0) . '-' . (int)$u->usage_date->format('j') => (float)$u->qty_pack]);
 
         // Build spreadsheet
         $spreadsheet = new Spreadsheet();
@@ -798,27 +822,38 @@ class DailyLedgerController extends Controller
             $sheet->getColumnDimension($this->columnLetter(3 + $d))->setWidth(7);
         }
 
-        // Data rows
+        // Data rows — SATU baris per (bahan × kemasan aktif). Bahan dengan >1 kemasan
+        // dapat beberapa baris; ID di kolom A = "ingId-pkgId" agar impor tahu kemasannya.
         $row = $headerRow + 1;
         foreach ($ingredients as $ing) {
-            $sheet->setCellValue("A{$row}", $ing->id);
-            $sheet->setCellValue("B{$row}", $ing->name);
-            $sheet->setCellValue("C{$row}", $ing->unit_base);
+            $pkgs  = $ing->packagings;
+            $multi = $pkgs->count() > 1;
+            $variants = $pkgs->isEmpty()
+                ? [[null, $ing->name]]
+                : $pkgs->map(fn($p) => [
+                    $p->id,
+                    $ing->name . ($multi ? ' [@' . (int) $p->crate_to_pack . ' pack]' : ''),
+                  ])->all();
 
-            // Pre-fill existing values
-            for ($d = 1; $d <= $daysInMonth; $d++) {
-                $key = $ing->id . '-' . $d;
-                if (isset($existing[$key])) {
-                    $col = $this->columnLetter(3 + $d);
-                    $sheet->setCellValue("{$col}{$row}", $existing[$key]);
+            foreach ($variants as [$pkgId, $label]) {
+                $key = $ing->id . '-' . ($pkgId ?: 0);
+                $sheet->setCellValueExplicit("A{$row}", $key, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+                $sheet->setCellValue("B{$row}", $label);
+                $sheet->setCellValue("C{$row}", $ing->unit_base);
+
+                for ($d = 1; $d <= $daysInMonth; $d++) {
+                    $pkKey = $ing->id . '-' . ($pkgId ?: 0) . '-' . $d;
+                    if (isset($existing[$pkKey])) {
+                        $col = $this->columnLetter(3 + $d);
+                        $sheet->setCellValue("{$col}{$row}", $existing[$pkKey]);
+                    }
                 }
+
+                $sheet->getStyle("A{$row}")->getFill()
+                    ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F3F4F6');
+
+                $row++;
             }
-
-            // Style kolom ID (abu-abu, readonly hint)
-            $sheet->getStyle("A{$row}")->getFill()
-                ->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F3F4F6');
-
-            $row++;
         }
 
         // Freeze pane (header + 3 kolom kiri)
@@ -974,48 +1009,54 @@ class DailyLedgerController extends Controller
         }
 
         // 3. Load ingredients map + packaging
-        $ingredientsData = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)])
+        $ingredientsData = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
             ->where('is_active', true)
             ->get()
             ->keyBy('id');
+        $defaultPkgMap = $ingredientsData->map(fn($i) => $i->packagings->first()?->id)->all();
 
-        // 4. Iterasi tiap baris dari Excel — replay chronologically
+        // 4. Agregasi pemakaian (base) per bahan per hari dari SEMUA baris (semua kemasan),
+        //    karena 1 bahan kini bisa punya >1 baris (per kemasan) — stok dipakai bersama.
+        $usageBaseByIngDay = [];
         $highestRow = $sheet->getHighestRow();
         for ($r = 5; $r <= $highestRow; $r++) {
-            $ingId = $sheet->getCell("A{$r}")->getValue();
-            if (!$ingId || !is_numeric($ingId)) continue;
-            $ingId = (int) $ingId;
+            [$ingId, $pkgId] = $this->parseTemplateKey($sheet->getCell("A{$r}")->getValue(), $defaultPkgMap);
+            if (!$ingId) continue;
             $ing = $ingredientsData[$ingId] ?? null;
             if (!$ing) continue;
 
-            $packaging = $ing->packagings->first();
-            $ptb = $packaging?->pack_to_base ?? 1;
+            $pkg = $pkgId ? $ing->packagings->firstWhere('id', $pkgId) : $ing->packagings->first();
+            $ptb = $pkg?->pack_to_base ?? 1;
 
+            for ($d = 1; $d <= $daysInMonth; $d++) {
+                $col = $this->columnLetter(3 + $d);
+                $val = $sheet->getCell("{$col}{$r}")->getValue();
+                if (!is_numeric($val)) continue;
+                $usageBaseByIngDay[$ingId][$d] = ($usageBaseByIngDay[$ingId][$d] ?? 0) + (float) $val * $ptb;
+            }
+        }
+
+        // 5. Replay kronologis per bahan
+        foreach ($usageBaseByIngDay as $ingId => $days) {
+            $ing = $ingredientsData[$ingId] ?? null;
+            if (!$ing) continue;
+            $ptbMain = $ing->packagings->first()?->pack_to_base ?? 1;
             $balance = $opening[$ingId] ?? 0;
 
             for ($d = 1; $d <= $daysInMonth; $d++) {
-                // Tambah stok masuk hari ini DULU (asumsi: in di pagi)
                 $balance += $inMap[$ingId][$d] ?? 0;
 
-                // Ambil usage dari Excel
-                $col = $this->columnLetter(3 + $d);
-                $val = $sheet->getCell("{$col}{$r}")->getValue();
-                $usagePack = is_numeric($val) ? (float)$val : 0;
-                $usageBase = $usagePack * $ptb;
-
-                // Out via mutasi
-                $outBase = $outMap[$ingId][$d] ?? 0;
-
+                $usageBase = $days[$d] ?? 0;
+                $outBase   = $outMap[$ingId][$d] ?? 0;
                 $totalConsumed = $usageBase + $outBase;
+
                 if ($totalConsumed > $balance + 0.001) {
-                    // Tidak cukup stok!
-                    $availPack = $ptb > 0 ? $balance / $ptb : $balance;
                     $issues[] = [
                         'ingredient' => $ing->name,
                         'unit'       => $ing->unit_base,
                         'day'        => $d,
-                        'usage_pack' => $usagePack,
-                        'avail_pack' => round($availPack, 2),
+                        'usage_pack' => round($ptbMain > 0 ? $usageBase / $ptbMain : $usageBase, 2),
+                        'avail_pack' => round($ptbMain > 0 ? $balance / $ptbMain : $balance, 2),
                         'avail_base' => round($balance, 2),
                         'usage_base' => round($usageBase, 2),
                     ];
@@ -1133,9 +1174,8 @@ class DailyLedgerController extends Controller
         \DB::beginTransaction();
         try {
             for ($r = $dataStartRow; $r <= $highestRow; $r++) {
-                $ingId = $sheet->getCell("A{$r}")->getValue();
-                if (!$ingId || !is_numeric($ingId)) continue;
-                $ingId = (int) $ingId;
+                [$ingId, $pkgId] = $this->parseTemplateKey($sheet->getCell("A{$r}")->getValue(), $defaultPkgMap);
+                if (!$ingId) continue;
                 if (!isset($validIngIds[$ingId])) {
                     $errors[] = "Baris {$r}: ID bahan {$ingId} tidak valid";
                     continue;
@@ -1151,8 +1191,6 @@ class DailyLedgerController extends Controller
                         $skipped++;
                         continue;
                     }
-
-                    $pkgId = $defaultPkgMap[$ingId] ?? null;
 
                     if ($val === null || $val === '' || (is_numeric($val) && (float)$val == 0.0)) {
                         // Cell kosong ATAU 0 → hapus existing kalau ada (jangan simpan baris
