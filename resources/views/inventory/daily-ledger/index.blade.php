@@ -457,11 +457,9 @@
                                 {{ $totalPack > 0 ? (int)$totalPack : '' }}
                             </td>
 
-                            {{-- Stok Akhir: bulan ini → per packaging; bulan lalu → hanya baris pertama --}}
-                            @if($isCurrentMonth)
-                                <td class="text-center td-closing-dus" style="background:#eafaf1">{!! $closing['dus'] ?: '<span class="text-muted opacity-50 small">-</span>' !!}</td>
-                                <td class="text-center td-closing-pack" style="background:#eafaf1">{!! $closing['pack'] ?: '<span class="text-muted opacity-50 small">-</span>' !!}</td>
-                            @elseif($isFirst)
+                            {{-- Stok Akhir: per kemasan bila stok awal per-kemasan (bulan berjalan
+                                 atau ada opname bulan lalu); hanya baris pertama bila pakai carry-over. --}}
+                            @if($isCurrentMonth || $prevOpname || $isFirst)
                                 <td class="text-center td-closing-dus" style="background:#eafaf1">{!! $closing['dus'] ?: '<span class="text-muted opacity-50 small">-</span>' !!}</td>
                                 <td class="text-center td-closing-pack" style="background:#eafaf1">{!! $closing['pack'] ?: '<span class="text-muted opacity-50 small">-</span>' !!}</td>
                             @else

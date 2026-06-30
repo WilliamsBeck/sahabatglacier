@@ -856,14 +856,11 @@ class OpnameController extends Controller
                     $ptb         = $pkg ? (float)$pkg->pack_to_base : 0;
                     $crateToBase = ($pkg && $pkg->crate_to_pack && $ptb) ? (float)$pkg->crate_to_pack * $ptb : 0;
 
-                    // Hanya porsi Dus + Pack yang masuk FIFO
-                    $physCrate = (int)($item->physical_crate ?? 0);
-                    $physPack  = (int)($item->physical_pack  ?? 0);
-                    $packedQty = ($crateToBase > 0 ? $physCrate * $crateToBase : 0)
-                               + ($ptb > 0        ? $physPack  * $ptb         : 0);
-                    // Fallback hanya untuk bahan tanpa kemasan; bila ada kemasan tapi
-                    // dus+pack = 0 (hanya pcs/gr longgar), abaikan (jangan masuk FIFO).
-                    if ($packedQty <= 0 && !$pkg) $packedQty = round($item->physical_qty, 4);
+                    // Rekonsiliasi FIFO ke FISIK TOTAL (Dus + Pack + eceran). Eceran (pack
+                    // terbuka) dikecualikan hanya di TAMPILAN Saldo Stok, BUKAN di FIFO.
+                    // Kalau eceran dibuang di sini juga, ia terhitung ganda → saldo kurang
+                    // saat fisik > sistem hanya karena eceran (mis. 17 pack + sisa eceran).
+                    $packedQty = round((float) $item->physical_qty, 4);
 
                     $delta = round($packedQty - $curr, 4);
                     if ($delta <= 0) continue;
