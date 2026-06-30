@@ -371,7 +371,7 @@
                     </div>
                     <div class="progress" style="height:6px;background:var(--surface-2)">
                         <div class="progress-bar" role="progressbar"
-                             style="width:{{ round(($w->total_loss / $topWasteMax) * 100) }}%;background:#DC2626"></div>
+                             style="width:{{ $topWasteMax > 0 ? round(($w->total_loss / $topWasteMax) * 100) : 0 }}%;background:#DC2626"></div>
                     </div>
                 </div>
                 @empty
