@@ -19,8 +19,8 @@ class CheckStoreAccess
                 ?? $request->input('destination_store_id')
                 ?? $request->input('source_store_id');
 
-        // Super admin bebas akses semua toko
-        if ($user->isSuperAdmin()) {
+        // Super admin & akun hanya-lihat bebas akses semua toko
+        if ($user->isSuperAdmin() || $user->isViewer()) {
             return $next($request);
         }
 

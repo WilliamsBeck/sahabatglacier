@@ -15,7 +15,7 @@
             <i class="bi bi-speedometer2"></i><span>Dashboard</span>
         </a>
 
-        @if(auth()->user()->isSuperAdmin())
+        @if(auth()->user()->isSuperAdmin() || auth()->user()->isViewer())
             <a href="#masterMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
                 <i class="bi bi-database"></i>
                 <span>Master Data</span>
@@ -114,7 +114,7 @@
                 class="sidebar-link sub-link"><i class="bi bi-cart-plus"></i><span>Rencana Order</span></a>
         </div>
 
-        @if(auth()->user()->isSuperAdmin())
+        @if(auth()->user()->isSuperAdmin() || auth()->user()->isViewer())
             <a href="#sistemMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
                 <i class="bi bi-shield-check"></i>
                 <span>Sistem</span>

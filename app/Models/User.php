@@ -32,10 +32,16 @@ class User extends Authenticatable
         return $this->role === 'admin_area';
     }
 
+    // Akun hanya-lihat (demo/dosen): bisa lihat semua, tidak bisa input apa pun.
+    public function isViewer(): bool
+    {
+        return $this->role === 'viewer';
+    }
+
     // Ambil toko yang bisa diakses user ini
     public function accessibleStores()
     {
-        if ($this->isSuperAdmin()) {
+        if ($this->isSuperAdmin() || $this->isViewer()) {
             return Store::where('is_active', true)->get();
         }
         return $this->stores()->where('is_active', true)->get();

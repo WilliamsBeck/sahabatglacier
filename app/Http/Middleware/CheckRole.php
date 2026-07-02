@@ -18,6 +18,11 @@ class CheckRole
             return redirect()->route('login');
         }
 
+        // Akun hanya-lihat boleh membuka semua halaman (aksi tulis diblok terpisah).
+        if (auth()->user()->isViewer()) {
+            return $next($request);
+        }
+
         if (!in_array(auth()->user()->role, $roles)) {
             abort(403, 'Anda tidak memiliki akses ke halaman ini.');
         }

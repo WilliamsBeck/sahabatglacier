@@ -24,7 +24,7 @@ class UserController extends Controller
             'username' => 'required|string|alpha_dash|unique:users,username',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|min:8|confirmed',
-            'role' => 'required|in:super_admin,admin_area',
+            'role' => 'required|in:super_admin,admin_area,viewer',
         ]);
         $data['password'] = Hash::make($data['password']);
         $user = User::create($data);
@@ -45,7 +45,7 @@ class UserController extends Controller
         $data = $request->validate([
             'name' => 'required|string',
             'email' => 'required|email|unique:users,email,' . $user->id,
-            'role' => 'required|in:super_admin,admin_area',
+            'role' => 'required|in:super_admin,admin_area,viewer',
             'password' => 'nullable|min:8|confirmed',
         ]);
         if (empty($data['password']))

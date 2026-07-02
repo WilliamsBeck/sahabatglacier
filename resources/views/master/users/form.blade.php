@@ -73,6 +73,7 @@
                                             <option value="">— Pilih Level Akses —</option>
                                             <option value="super_admin" {{ old('role', $user->role ?? '') === 'super_admin' ? 'selected' : '' }}>Super Admin (Akses Penuh Seluruh Toko)</option>
                                             <option value="admin_area" {{ old('role', $user->role ?? '') === 'admin_area' ? 'selected' : '' }}>Admin Area (Terbatas pada Toko yang Ditentukan)</option>
+                                            <option value="viewer" {{ old('role', $user->role ?? '') === 'viewer' ? 'selected' : '' }}>Hanya Lihat (Demo — Lihat Semua, Tidak Bisa Input)</option>
                                         </select>
                                     </div>
                                     
