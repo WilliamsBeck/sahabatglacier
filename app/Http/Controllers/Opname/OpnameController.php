@@ -567,7 +567,7 @@ class OpnameController extends Controller
             'packaging_id'  => 'nullable|exists:ingredient_packagings,id',
         ]);
 
-        OpnameItem::create([
+        $item = OpnameItem::create([
             'opname_id'     => $opname->id,
             'ingredient_id' => $request->ingredient_id,
             'packaging_id'  => $request->packaging_id ?: null,
@@ -575,6 +575,32 @@ class OpnameController extends Controller
             'physical_qty'  => 0,
             'variance'      => 0,
         ]);
+
+        // AJAX (tanpa reload): balas data baris baru agar bisa disisipkan di tempat.
+        if ($request->expectsJson() || $request->ajax()) {
+            $item->load('ingredient', 'packaging.supplier');
+            $pkg = $item->packaging;
+            $ctr = $pkg ? (int) $pkg->crate_to_pack : 0;
+            $batchNum = $opname->items()
+                ->where('ingredient_id', $item->ingredient_id)
+                ->where('packaging_id', $item->packaging_id)->count();
+            $multi = $opname->items()
+                ->where('ingredient_id', $item->ingredient_id)
+                ->distinct('packaging_id')->count('packaging_id') > 1;
+            $sup = ($pkg && $pkg->supplier && $pkg->supplier->type !== 'zhisheng') ? $pkg->supplier->name : null;
+            $label = collect([($multi && $ctr) ? '@ ' . $ctr . ' pack' : null, $sup, 'Batch ' . $batchNum])
+                ->filter()->implode(' · ');
+
+            return response()->json([
+                'id'            => $item->id,
+                'ingredient_id' => $item->ingredient_id,
+                'packaging_id'  => $item->packaging_id,
+                'ingredient'    => $item->ingredient->name,
+                'label'         => $label,
+                'crate_to_pack' => $ctr,
+                'pack_to_base'  => $pkg ? (float) $pkg->pack_to_base : 1,
+            ]);
+        }
 
         return back()->with('success', 'Baris batch baru ditambahkan.');
     }
@@ -592,6 +618,10 @@ class OpnameController extends Controller
         abort_if($count <= 1, 422, 'Tidak bisa menghapus baris terakhir untuk bahan ini.');
 
         $item->delete();
+
+        if (request()->expectsJson() || request()->ajax()) {
+            return response()->json(['ok' => true]);
+        }
         return back()->with('success', 'Baris batch dihapus.');
     }
 

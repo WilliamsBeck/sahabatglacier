@@ -234,6 +234,8 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         data-system="{{ $item->system_qty }}"
                         data-crate="{{ $ctrPack ?? 0 }}"
                         data-pack="{{ $packBase ?? 1 }}"
+                        data-ing="{{ $item->ingredient_id }}"
+                        data-pkg="{{ $item->packaging_id }}"
                         @if($isExtraBatch) style="background:rgba(255,193,7,.07)" @endif
                     >
                         <td style="width:260px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
@@ -332,24 +334,17 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         @if($opname->opname_mode === 'stok_awal' && $opname->status !== 'approved')
                         <td class="border-start text-center" style="width:36px;padding:2px 4px">
                             @if(!$isExtraBatch)
-                                {{-- Tombol tambah batch --}}
-                                <form method="POST" action="{{ route('opname.opnames.add-batch', $opname) }}" class="d-inline">
-                                    @csrf
-                                    <input type="hidden" name="ingredient_id" value="{{ $item->ingredient_id }}">
-                                    <input type="hidden" name="packaging_id" value="{{ $item->packaging_id }}">
-                                    <button type="submit" class="btn btn-outline-warning btn-sm px-1 py-0"
-                                            title="Tambah batch harga berbeda"
-                                            style="font-size:.75rem;line-height:1.4">+</button>
-                                </form>
+                                {{-- Tambah batch (AJAX, tanpa reload) --}}
+                                <button type="button" class="btn btn-outline-warning btn-sm px-1 py-0 js-add-batch"
+                                        data-ing="{{ $item->ingredient_id }}" data-pkg="{{ $item->packaging_id }}"
+                                        title="Tambah batch harga berbeda"
+                                        style="font-size:.75rem;line-height:1.4">+</button>
                             @else
-                                {{-- Tombol hapus batch --}}
-                                <form method="POST" action="{{ route('opname.opnames.items.destroy', [$opname, $item]) }}"
-                                      class="d-inline" data-confirm="Hapus batch ini?" data-confirm-type="error" data-confirm-danger="1" data-confirm-ok="Ya, hapus">
-                                    @csrf @method('DELETE')
-                                    <button type="submit" class="btn btn-outline-danger btn-sm px-1 py-0"
-                                            title="Hapus batch ini"
-                                            style="font-size:.75rem;line-height:1.4">×</button>
-                                </form>
+                                {{-- Hapus batch (AJAX, tanpa reload) --}}
+                                <button type="button" class="btn btn-outline-danger btn-sm px-1 py-0 js-del-batch"
+                                        data-id="{{ $item->id }}"
+                                        title="Hapus batch ini"
+                                        style="font-size:.75rem;line-height:1.4">×</button>
                             @endif
                         </td>
                         @endif
@@ -530,105 +525,177 @@ function nilaiPerKomponen(crate, pack, c, p, b, priceBase) {
     return Math.round(nilaiRaw(crate, pack, c, p, b, priceBase));
 }
 
+// Grand total dari semua baris
+function recomputeGrandTotal() {
+    var grandTotal = 0;
+    document.querySelectorAll('tr[data-id]').forEach(function(r) {
+        var nilaiEl = document.getElementById('nilai-' + r.dataset.id);
+        if (!nilaiEl) return;
+        var price = parseFloat(nilaiEl.dataset.price) || 0;
+        var cr    = parseFloat(r.dataset.crate) || 0;
+        var pk    = parseFloat(r.dataset.pack)  || 1;
+        var c2    = parseFloat(r.querySelector('[name$="[physical_crate]"]')?.value) || 0;
+        var p2    = parseFloat(r.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
+        var b2    = parseFloat(r.querySelector('[name$="[physical_base]"]')?.value)  || 0;
+        grandTotal += nilaiRaw(cr, pk, c2, p2, b2, price);
+    });
+    var gtCell = document.getElementById('grand-total');
+    if (gtCell) gtCell.textContent = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
+}
+
 // Saat user mengetik harga/dus, update data-price dan nilai fisik secara live
-document.querySelectorAll('.price-input').forEach(function(el) {
-    el.addEventListener('input', function() {
-        var row      = this.closest('tr');
-        var id       = row.dataset.id;
-        var crate    = parseFloat(row.dataset.crate) || 0;
-        var pack     = parseFloat(row.dataset.pack)  || 1;
-        var priceDus = parseFloat(this.value) || 0;
-        var priceBase = (crate > 0 && pack > 0) ? priceDus / (crate * pack) : priceDus;
+function priceInputHandler() {
+    var row      = this.closest('tr');
+    var id       = row.dataset.id;
+    var crate    = parseFloat(row.dataset.crate) || 0;
+    var pack     = parseFloat(row.dataset.pack)  || 1;
+    var priceDus = parseFloat(this.value) || 0;
+    var priceBase = (crate > 0 && pack > 0) ? priceDus / (crate * pack) : priceDus;
 
-        var nilaiCell = document.getElementById('nilai-' + id);
-        if (nilaiCell) {
-            nilaiCell.dataset.price = priceBase;
-            var c2 = parseFloat(row.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-            var p2 = parseFloat(row.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-            var b2 = parseFloat(row.querySelector('[name$="[physical_base]"]')?.value)  || 0;
-            var nilai = nilaiPerKomponen(crate, pack, c2, p2, b2, priceBase);
-            nilaiCell.textContent = priceBase > 0 ? 'Rp ' + nilai.toLocaleString('id-ID') : '—';
-        }
+    var nilaiCell = document.getElementById('nilai-' + id);
+    if (nilaiCell) {
+        nilaiCell.dataset.price = priceBase;
+        var c2 = parseFloat(row.querySelector('[name$="[physical_crate]"]')?.value) || 0;
+        var p2 = parseFloat(row.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
+        var b2 = parseFloat(row.querySelector('[name$="[physical_base]"]')?.value)  || 0;
+        var nilai = nilaiPerKomponen(crate, pack, c2, p2, b2, priceBase);
+        nilaiCell.textContent = priceBase > 0 ? 'Rp ' + nilai.toLocaleString('id-ID') : '—';
+    }
+    recomputeGrandTotal();
+}
 
-        // Grand total
-        var grandTotal = 0;
-        document.querySelectorAll('tr[data-id]').forEach(function(r) {
-            var nilaiEl = document.getElementById('nilai-' + r.dataset.id);
-            if (!nilaiEl) return;
-            var price = parseFloat(nilaiEl.dataset.price) || 0;
-            var cr    = parseFloat(r.dataset.crate) || 0;
-            var pk    = parseFloat(r.dataset.pack)  || 1;
-            var c2    = parseFloat(r.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-            var p2    = parseFloat(r.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-            var b2    = parseFloat(r.querySelector('[name$="[physical_base]"]')?.value)  || 0;
-            grandTotal += nilaiRaw(cr, pk, c2, p2, b2, price);
-        });
-        var gtCell = document.getElementById('grand-total');
-        if (gtCell) gtCell.textContent = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
+function opnameInputHandler() {
+    var row    = this.closest('tr');
+    var id     = row.dataset.id;
+    var crate  = parseFloat(row.dataset.crate) || 0;
+    var pack   = parseFloat(row.dataset.pack)  || 1;
+    var sysQty = parseFloat(row.dataset.system) || 0;
+
+    var c = parseFloat(row.querySelector('[name$="[physical_crate]"]')?.value) || 0;
+    var p = parseFloat(row.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
+    var b = parseFloat(row.querySelector('[name$="[physical_base]"]')?.value)  || 0;
+
+    var physBase = crate > 0 ? (c * crate * pack) + (p * pack) + b : (p * pack) + b;
+
+    var totalCell = document.getElementById('total-' + id);
+    if (totalCell) {
+        totalCell.textContent = crate > 0
+            ? (physBase / (crate * pack)).toFixed(2).replace('.', ',')
+            : physBase.toFixed(2).replace('.', ',');
+    }
+
+    // Selisih: hanya Dus + Pack (Pcs/Gr tidak dihitung)
+    var physNoPcs   = crate > 0 ? (c * crate * pack) + (p * pack) : (p * pack);
+    var sysRounded  = pack > 0 ? Math.floor(sysQty / pack) * pack : sysQty;
+    var varBase     = Math.round((physNoPcs - sysRounded) * 10000) / 10000;
+    var varText = fmtVar(varBase, crate, pack);
+    var varCell = document.getElementById('var-' + id);
+    if (varCell) {
+        varCell.textContent = varText;
+        varCell.className   = 'text-end border-start fw-bold ';
+        varCell.className  += varText === '0' ? 'text-muted' : (varBase < 0 ? 'text-danger' : 'text-success');
+    }
+
+    var nilaiCell = document.getElementById('nilai-' + id);
+    if (nilaiCell) {
+        var price = parseFloat(nilaiCell.dataset.price) || 0;
+        var nilai = nilaiPerKomponen(crate, pack, c, p, b, price);
+        nilaiCell.textContent = price > 0 ? 'Rp ' + nilai.toLocaleString('id-ID') : '—';
+    }
+    recomputeGrandTotal();
+}
+
+// Event delegation → berlaku juga untuk baris batch yang disisipkan via AJAX.
+var opnameTbody = document.querySelector('tr[data-id]') ? document.querySelector('tr[data-id]').closest('tbody') : null;
+if (opnameTbody) {
+    opnameTbody.addEventListener('input', function(e) {
+        if (e.target.classList.contains('price-input')) priceInputHandler.call(e.target);
+        else if (e.target.classList.contains('opname-input')) opnameInputHandler.call(e.target);
     });
-});
-
-document.querySelectorAll('.opname-input').forEach(function(el) {
-    el.addEventListener('input', function() {
-        var row    = this.closest('tr');
-        var id     = row.dataset.id;
-        var crate  = parseFloat(row.dataset.crate) || 0;
-        var pack   = parseFloat(row.dataset.pack)  || 1;
-        var sysQty = parseFloat(row.dataset.system) || 0;
-
-        var c = parseFloat(row.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-        var p = parseFloat(row.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-        var b = parseFloat(row.querySelector('[name$="[physical_base]"]')?.value)  || 0;
-
-        // Hitung total fisik dalam base unit
-        var physBase = crate > 0 ? (c * crate * pack) + (p * pack) + b : (p * pack) + b;
-
-        // Update total fisik (tampilkan dalam Dus)
-        var totalCell = document.getElementById('total-' + id);
-        if (totalCell) {
-            if (crate > 0) {
-                totalCell.textContent = (physBase / (crate * pack)).toFixed(2).replace('.', ',');
-            } else {
-                totalCell.textContent = physBase.toFixed(2).replace('.', ',');
-            }
-        }
-
-        // Selisih: hanya Dus + Pack (Pcs/Gr tidak dihitung)
-        var physNoPcs   = crate > 0 ? (c * crate * pack) + (p * pack) : (p * pack);
-        var sysRounded  = pack > 0 ? Math.floor(sysQty / pack) * pack : sysQty;
-        var varBase     = Math.round((physNoPcs - sysRounded) * 10000) / 10000;
-        var varText = fmtVar(varBase, crate, pack);
-        var varCell = document.getElementById('var-' + id);
-        if (varCell) {
-            varCell.textContent = varText;
-            varCell.className   = 'text-end border-start fw-bold ';
-            varCell.className  += varText === '0' ? 'text-muted' : (varBase < 0 ? 'text-danger' : 'text-success');
-        }
-
-        // Update nilai (harga × fisik) dan grand total
-        var nilaiCell = document.getElementById('nilai-' + id);
-        if (nilaiCell) {
-            var price = parseFloat(nilaiCell.dataset.price) || 0;
-            var nilai = nilaiPerKomponen(crate, pack, c, p, b, price);
-            nilaiCell.textContent = price > 0 ? 'Rp ' + nilai.toLocaleString('id-ID') : '—';
-        }
-
-        // Update grand total — hitung langsung dari semua input baris
-        var grandTotal = 0;
-        document.querySelectorAll('tr[data-id]').forEach(function(r) {
-            var nilaiEl = document.getElementById('nilai-' + r.dataset.id);
-            if (!nilaiEl) return;
-            var price = parseFloat(nilaiEl.dataset.price) || 0;
-            var cr    = parseFloat(r.dataset.crate) || 0;
-            var pk    = parseFloat(r.dataset.pack)  || 1;
-            var c2    = parseFloat(r.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-            var p2    = parseFloat(r.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-            var b2    = parseFloat(r.querySelector('[name$="[physical_base]"]')?.value)  || 0;
-            grandTotal += nilaiRaw(cr, pk, c2, p2, b2, price);
-        });
-        var gtCell = document.getElementById('grand-total');
-        if (gtCell) gtCell.textContent = 'Rp ' + Math.round(grandTotal).toLocaleString('id-ID');
+    opnameTbody.addEventListener('click', function(e) {
+        var add = e.target.closest('.js-add-batch');
+        if (add) { addBatchAjax(add); return; }
+        var del = e.target.closest('.js-del-batch');
+        if (del) { removeBatchAjax(del); return; }
     });
-});
+}
+
+// ── Tambah / hapus batch tanpa reload (AJAX) ──────────────────────────────
+var ADD_BATCH_URL = @json(route('opname.opnames.add-batch', $opname));
+var DEL_ITEM_URL  = @json(route('opname.opnames.items.destroy', [$opname, 'ITEMID']));
+var OPNAME_CSRF   = @json(csrf_token());
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function(m) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    });
+}
+
+function buildBatchRow(d) {
+    var tr = document.createElement('tr');
+    tr.dataset.id = d.id;
+    tr.dataset.system = 0;
+    tr.dataset.crate = d.crate_to_pack || 0;
+    tr.dataset.pack = d.pack_to_base || 1;
+    tr.dataset.ing = d.ingredient_id;
+    tr.dataset.pkg = d.packaging_id || '';
+    tr.style.background = 'rgba(255,193,7,.07)';
+    var n = 'items[' + d.id + ']';
+    tr.innerHTML =
+        '<td style="width:260px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          + '<span class="fw-semibold">' + escapeHtml(d.ingredient) + '</span>'
+          + '<small class="text-muted ms-1">' + escapeHtml(d.label) + '</small></td>'
+        + '<td class="border-start"><input type="number" name="' + n + '[physical_crate]" class="form-control form-control-sm opname-input" min="0" style="width:68px"></td>'
+        + '<td><input type="number" name="' + n + '[physical_pack]" class="form-control form-control-sm opname-input" min="0" style="width:68px"></td>'
+        + '<td><input type="number" name="' + n + '[physical_base]" class="form-control form-control-sm opname-input" min="0" step="1" style="width:72px"></td>'
+        + '<td class="text-center border-start"><span class="text-muted opacity-50 small">-</span></td>'
+        + '<td class="text-center"><span class="text-muted opacity-50 small">-</span></td>'
+        + '<td class="text-end border-start fw-bold text-muted" id="var-' + d.id + '"><span class="text-muted opacity-50 small">-</span></td>'
+        + '<td class="text-end border-start small text-muted"><input type="number" name="' + n + '[price_per_dus]" class="form-control form-control-sm text-end price-input" min="0" step="1" placeholder="—" style="width:90px;margin-left:auto" data-crate="' + (d.crate_to_pack || 0) + '" data-pack="' + (d.pack_to_base || 1) + '" data-item="' + d.id + '"></td>'
+        + '<td class="text-end border-start fw-semibold" id="nilai-' + d.id + '" data-price="0"><span class="text-muted opacity-50 small">-</span></td>'
+        + '<td class="border-start text-center" style="width:36px;padding:2px 4px"><button type="button" class="btn btn-outline-danger btn-sm px-1 py-0 js-del-batch" data-id="' + d.id + '" title="Hapus batch ini" style="font-size:.75rem;line-height:1.4">×</button></td>';
+    return tr;
+}
+
+function addBatchAjax(btn) {
+    var ing = btn.dataset.ing, pkg = btn.dataset.pkg || '';
+    btn.disabled = true;
+    fetch(ADD_BATCH_URL, {
+        method: 'POST',
+        headers: { 'X-CSRF-TOKEN': OPNAME_CSRF, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'ingredient_id=' + encodeURIComponent(ing) + '&packaging_id=' + encodeURIComponent(pkg)
+    }).then(function(res) {
+        if (!res.ok) throw new Error('gagal');
+        return res.json();
+    }).then(function(d) {
+        var tr = buildBatchRow(d);
+        // Sisipkan setelah baris TERAKHIR dari grup (bahan + kemasan) yang sama.
+        var last = btn.closest('tr');
+        document.querySelectorAll('tr[data-id]').forEach(function(r) {
+            if (r.dataset.ing === String(ing) && (r.dataset.pkg || '') === String(pkg)) last = r;
+        });
+        last.insertAdjacentElement('afterend', tr);
+    }).catch(function() {
+        alert('Gagal menambah batch. Coba lagi.');
+    }).finally(function() { btn.disabled = false; });
+}
+
+function removeBatchAjax(btn) {
+    if (!confirm('Hapus batch ini?')) return;
+    var id = btn.dataset.id;
+    btn.disabled = true;
+    fetch(DEL_ITEM_URL.replace('ITEMID', id), {
+        method: 'POST',
+        headers: { 'X-CSRF-TOKEN': OPNAME_CSRF, 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: '_method=DELETE'
+    }).then(function(res) {
+        if (!res.ok) throw new Error('gagal');
+        var tr = btn.closest('tr');
+        if (tr) tr.parentNode.removeChild(tr);
+        recomputeGrandTotal();
+    }).catch(function() {
+        alert('Gagal menghapus batch.');
+    }).finally(function() { btn.disabled = false; });
+}
 </script>
 @endpush
