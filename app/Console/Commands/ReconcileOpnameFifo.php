@@ -80,9 +80,7 @@ class ReconcileOpnameFifo extends Command
     private function resolveOpname(int $storeId): ?Opname
     {
         $q = Opname::where('store_id', $storeId)
-            ->where('period_type', 'end_month')
-            ->where('status', 'approved')
-            ->where('opname_mode', 'bulanan');
+            ->where('status', 'approved');
 
         if ($this->option('month') && $this->option('year')) {
             $q->where('period_month', (int) $this->option('month'))
@@ -99,22 +97,30 @@ class ReconcileOpnameFifo extends Command
         $apply = function () use ($opname, &$fixed) {
             $opening = null;
 
-            foreach ($opname->items as $item) {
-                if ((float) $item->physical_qty <= 0) continue;
+            // Kelompokkan per (bahan × kemasan) — bahan multi-batch punya >1 item,
+            // stoknya dijumlahkan dulu agar delta dihitung sekali (tidak dobel).
+            $groups = $opname->items->groupBy(fn ($i) => $i->ingredient_id . '-' . ($i->packaging_id ?: 0));
+
+            foreach ($groups as $group) {
+                $first = $group->first();
+                $ingId = $first->ingredient_id;
+                $pkgId = $first->packaging_id;
+                $target = (float) $group->sum('physical_qty');   // fisik TOTAL semua batch
+                if ($target <= 0) continue;
 
                 $curr = MutationItem::whereHas('mutation', fn ($q) => $q
                         ->where('destination_store_id', $opname->store_id)
                         ->where('status', 'confirmed'))
-                    ->where('ingredient_id', $item->ingredient_id)
-                    ->when($item->packaging_id,
-                        fn ($q) => $q->where('packaging_id', $item->packaging_id),
+                    ->where('ingredient_id', $ingId)
+                    ->when($pkgId,
+                        fn ($q) => $q->where('packaging_id', $pkgId),
                         fn ($q) => $q->whereNull('packaging_id'))
                     ->sum('remaining_qty');
 
-                $delta = round((float) $item->physical_qty - (float) $curr, 4);
+                $delta = round($target - (float) $curr, 4);
                 if ($delta <= 0) continue;
 
-                $name = $item->ingredient->name ?? ('#' . $item->ingredient_id);
+                $name = $first->ingredient->name ?? ('#' . $ingId);
                 $this->line("  + {$name} (delta {$delta})");
                 $fixed++;
 
@@ -131,16 +137,16 @@ class ReconcileOpnameFifo extends Command
 
                 MutationItem::create([
                     'mutation_id'            => $opening->id,
-                    'ingredient_id'          => $item->ingredient_id,
-                    'packaging_id'           => $item->packaging_id,
+                    'ingredient_id'          => $ingId,
+                    'packaging_id'           => $pkgId,
                     'qty_crate'              => 0,
                     'qty_pack'               => 0,
                     'qty_base'               => 0,
                     'total_in_base'          => $delta,
                     'remaining_qty'          => $delta,
-                    'price_per_base'         => (float) $item->price_per_base,
+                    'price_per_base'         => (float) $first->price_per_base,
                     'selling_price_per_base' => 0,
-                    'cost_subtotal'          => $delta * (float) $item->price_per_base,
+                    'cost_subtotal'          => $delta * (float) $first->price_per_base,
                 ]);
             }
 
