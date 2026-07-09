@@ -46,15 +46,24 @@ class AuditOpnameStock extends Command
                 $ctp = (float) $pkg->crate_to_pack;
                 $ptb = (float) $pkg->pack_to_base;
 
-                // Opname approved terakhir (semua batch) untuk ing+pkg ini
+                // Ambil id opname approved TERBARU yang memuat ing+pkg ini (tanpa subquery LIMIT).
+                $latestOpId = OpnameItem::query()
+                    ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
+                    ->where('opname_items.ingredient_id', $ing->id)
+                    ->where('opname_items.packaging_id', $pkg->id)
+                    ->where('opnames.store_id', $store->id)
+                    ->where('opnames.status', 'approved')
+                    ->orderByDesc('opnames.period_year')
+                    ->orderByDesc('opnames.period_month')
+                    ->orderByDesc('opnames.id')
+                    ->value('opname_items.opname_id');
+
+                if (!$latestOpId) continue;
+
+                // Semua batch dari opname terbaru itu untuk ing+pkg ini
                 $opItems = OpnameItem::where('ingredient_id', $ing->id)
                     ->where('packaging_id', $pkg->id)
-                    ->whereHas('opname', fn($q) => $q->where('store_id', $store->id)->where('status', 'approved'))
-                    ->whereIn('opname_id', function ($q) use ($store) {
-                        $q->select('id')->from('opnames')
-                          ->where('store_id', $store->id)->where('status', 'approved')
-                          ->orderByDesc('period_year')->orderByDesc('period_month')->orderByDesc('id')->limit(1);
-                    })
+                    ->where('opname_id', $latestOpId)
                     ->get();
 
                 if ($opItems->isEmpty()) continue;
