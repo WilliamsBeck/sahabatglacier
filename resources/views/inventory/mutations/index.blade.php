@@ -34,7 +34,7 @@
                     <option value="">Semua</option>
                     <option value="purchase_zhisheng"  {{ request('type') === 'purchase_zhisheng'  ? 'selected' : '' }}>Pembelian Pusat</option>
                     <option value="purchase_supplier"  {{ request('type') === 'purchase_supplier'  ? 'selected' : '' }}>Pembelian Supplier Lokal</option>
-                    <option value="sale_internal"      {{ request('type') === 'sale_internal'      ? 'selected' : '' }}>Pembelian Internal</option>
+                    <option value="sale_internal"      {{ request('type') === 'sale_internal'      ? 'selected' : '' }}>Penjualan Internal</option>
                     <option value="sale_external"      {{ request('type') === 'sale_external'      ? 'selected' : '' }}>Pembelian Eksternal</option>
                     <option value="sale_external_out"  {{ request('type') === 'sale_external_out'  ? 'selected' : '' }}>Penjualan Eksternal</option>
                 </select>
@@ -104,7 +104,7 @@
                         $typeConfig = [
                             'purchase_zhisheng' => ['Pembelian Pusat',          'bg-info text-dark'],
                             'purchase_supplier' => ['Pembelian Supplier Lokal', 'bg-info text-dark'],
-                            'sale_internal'     => ['Pembelian Internal',       'bg-primary'],
+                            'sale_internal'     => ['Penjualan Internal',       'bg-primary'],
                             'sale_external'     => ['Pembelian Eksternal',      'bg-primary'],
                             'sale_external_out' => ['Penjualan Eksternal',      'bg-warning text-dark'],
                             'opening_stock'     => ['Input Stok Awal',          'bg-secondary'],

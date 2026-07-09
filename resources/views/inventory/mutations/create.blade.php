@@ -47,7 +47,7 @@
                             <option value="purchase_supplier" {{ old('type') === 'purchase_supplier' ? 'selected' : '' }}>Pembelian Supplier Lokal</option>
                         </optgroup>
                         <optgroup label="Internal">
-                            <option value="sale_internal"  {{ old('type') === 'sale_internal'  ? 'selected' : '' }}>Pembelian Internal</option>
+                            <option value="sale_internal"  {{ old('type') === 'sale_internal'  ? 'selected' : '' }}>Penjualan Internal</option>
                         </optgroup>
                         <optgroup label="Eksternal">
                             <option value="sale_external"     {{ old('type') === 'sale_external'     ? 'selected' : '' }}>Pembelian Eksternal</option>

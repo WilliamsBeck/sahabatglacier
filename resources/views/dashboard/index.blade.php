@@ -293,7 +293,7 @@
         ];
         $mutTypes = [
             'purchase_zhisheng' => 'Pembelian Pusat', 'purchase_supplier' => 'Pembelian Supplier Lokal',
-            'opening_stock' => 'Input Stok Awal', 'sale_internal' => 'Pembelian Internal',
+            'opening_stock' => 'Input Stok Awal', 'sale_internal' => 'Penjualan Internal',
             'sale_external' => 'Pembelian Eksternal',
         ];
         $verbs = [
