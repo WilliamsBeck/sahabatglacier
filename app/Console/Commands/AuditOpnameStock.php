@@ -73,15 +73,27 @@ class AuditOpnameStock extends Command
                     ->sum('remaining_qty');
                 $fifoPacks = $ptb > 0 ? $fifo / $ptb : 0;
 
+                // Total masuk & batch rekonsiliasi (untuk deteksi over-add)
+                $received = MutationItem::where('ingredient_id', $ing->id)
+                    ->where('packaging_id', $pkg->id)
+                    ->whereHas('mutation', fn($q) => $q->where('destination_store_id', $store->id)->where('status', 'confirmed'))
+                    ->sum('total_in_base');
+                $reconAdd = MutationItem::where('ingredient_id', $ing->id)
+                    ->where('packaging_id', $pkg->id)
+                    ->whereHas('mutation', fn($q) => $q->where('destination_store_id', $store->id)
+                        ->where('status', 'confirmed')->where('notes', 'like', 'Reconcile FIFO opname%'))
+                    ->sum('total_in_base');
+
                 // Saldo Stok = (FIFO - eceran opname) dibulatkan ke pack utuh
                 $saldoBase  = max(0, $fifo - $opBase);
                 $saldoPacks = $ptb > 0 ? floor($saldoBase / $ptb) : 0;
 
+                $keluar = $received - $fifo;
                 $flag = (round($opWholePacks) != $saldoPacks) ? '  <<< TIDAK COCOK' : '';
                 $lines[] = sprintf(
-                    "   pkg[%s ctp=%s ptb=%s] opname: %sdus %spack %sbase (=%.0f pack utuh) | FIFO=%.0f (%.1f pack) | eceran=%.0f | Saldo=%s pack%s",
+                    "   pkg[%s ctp=%s ptb=%s] opname=%sdus %spack %sbase (=%.0f pack) | FIFO=%.0f (%.1f pack) | masuk=%.0f keluar=%.0f rekon+=%.0f | eceran=%.0f | Saldo=%s pack%s",
                     $pkg->packaging_name, $ctp, $ptb, $opDus, $opPack, $opBase,
-                    $opWholePacks, $fifo, $fifoPacks, $opBase, $saldoPacks, $flag
+                    $opWholePacks, $fifo, $fifoPacks, $received, $keluar, $reconAdd, $opBase, $saldoPacks, $flag
                 );
             }
             if ($lines) {
