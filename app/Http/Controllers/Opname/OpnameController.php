@@ -658,6 +658,46 @@ class OpnameController extends Controller
         $opname->load('items');
     }
 
+    /**
+     * Tambahkan baris untuk bahan/kemasan AKTIF yang belum ada di opname draft ini
+     * (mis. bahan baru dibuat setelah opname dibuat). Mengembalikan jumlah baris baru.
+     */
+    private function syncMissingItems(Opname $opname): int
+    {
+        if ($opname->status !== 'draft') return 0;
+
+        $req  = new \Illuminate\Http\Request([
+            'store_id' => $opname->store_id,
+            'date'     => $opname->opname_date->toDateString(),
+        ]);
+        $rows = collect(json_decode($this->systemQty($req)->getContent(), true));
+        if ($rows->isEmpty()) return 0;
+
+        $existing = $opname->items
+            ->map(fn($i) => $i->ingredient_id . '_' . ($i->packaging_id ?? ''))
+            ->flip();
+
+        $added = 0;
+        foreach ($rows as $r) {
+            $key = $r['ingredient_id'] . '_' . ($r['packaging_id'] ?? '');
+            if (isset($existing[$key])) continue;
+
+            $sys = round((float) ($r['system_qty'] ?? 0), 4);
+            OpnameItem::create([
+                'opname_id'     => $opname->id,
+                'ingredient_id' => $r['ingredient_id'],
+                'packaging_id'  => $r['packaging_id'] ?? null,
+                'system_qty'    => $sys,
+                'physical_qty'  => 0,
+                'variance'      => round(0 - $sys, 4),
+            ]);
+            $added++;
+        }
+
+        if ($added) $opname->load('items');
+        return $added;
+    }
+
      /*
      * Hitung ulang STOK SISTEM + variance dari data terkini (tombol manual).
      */
@@ -669,10 +709,14 @@ class OpnameController extends Controller
             return back()->with('error', MonthLockService::lockMessage($opname->period_month, $opname->period_year));
         }
 
+        // Tambahkan bahan/kemasan baru yang belum terdaftar di opname ini.
+        $added = $this->syncMissingItems($opname);
+        $extra = $added ? " {$added} bahan baru ditambahkan." : '';
+
         // Mode bulanan: refresh stok sistem dari transaksi terkini lalu hitung variance.
         if ($opname->opname_mode !== 'stok_awal') {
             $this->refreshDraftSystemQty($opname);
-            return back()->with('success', 'Stok sistem & variance disinkronkan dari data terkini.');
+            return back()->with('success', 'Stok sistem & variance disinkronkan dari data terkini.' . $extra);
         }
 
         // Mode stok_awal: cukup hitung ulang variance.
@@ -680,7 +724,7 @@ class OpnameController extends Controller
             $variance = round($item->physical_qty, 4) - round($item->system_qty, 4);
             $item->update(['variance' => round($variance, 4)]);
         }
-        return back()->with('success', 'Variance berhasil dihitung ulang.');
+        return back()->with('success', 'Variance berhasil dihitung ulang.' . $extra);
     }
 
     /**
@@ -758,8 +802,13 @@ class OpnameController extends Controller
             }
         });
 
+        // Tambahkan bahan/kemasan baru yang dibuat setelah opname ini dibuat.
+        $opname->refresh()->load('items');
+        $added = $this->syncMissingItems($opname);
+        $extra = $added ? " {$added} bahan baru ikut ditambahkan." : '';
+
         return redirect()->route('opname.opnames.edit', $opname)
-            ->with('success', 'Approve dibatalkan. Opname kembali ke draft & bisa diedit — jangan lupa Approve lagi setelah selesai.');
+            ->with('success', 'Approve dibatalkan. Opname kembali ke draft & bisa diedit — jangan lupa Approve lagi setelah selesai.' . $extra);
     }
 
     public function destroy(Opname $opname)
