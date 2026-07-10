@@ -72,7 +72,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                       data-confirm="Batalkan approve opname ini? Opname kembali ke draft & efek stoknya dibalikkan agar bisa diedit. Hanya bisa jika belum ada mutasi setelahnya. Jangan lupa Approve lagi setelah selesai."
                       data-confirm-type="warning" data-confirm-ok="Ya, batalkan approve">
                     @csrf
-                    <button class="btn btn-warning btn-sm"><i class="bi bi-pencil-square me-1"></i>Batalkan Approve (Edit)</button>
+                    <button class="btn btn-warning btn-sm"><i class="bi bi-pencil-square me-1"></i>Edit</button>
                 </form>
                 <button class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#modalHapusOpname">
                     <i class="bi bi-trash me-1"></i>Hapus
