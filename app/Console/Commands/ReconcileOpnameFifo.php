@@ -26,6 +26,7 @@ class ReconcileOpnameFifo extends Command
                             {--store= : Nama/ID toko (kosong = semua toko)}
                             {--month= : Bulan periode (kosong = opname end_month approved terbaru per toko)}
                             {--year= : Tahun periode}
+                            {--undo : Hapus SEMUA batch rekonsiliasi yang pernah dibuat lalu recalculate}
                             {--dry-run : Hanya menampilkan apa yang akan diubah, tanpa menyimpan}';
 
     protected $description = 'Rekonsiliasi FIFO ke stok fisik opname approved (perbaiki saldo stok yang kurang akibat eceran).';
@@ -33,6 +34,10 @@ class ReconcileOpnameFifo extends Command
     public function handle(): int
     {
         $dry = (bool) $this->option('dry-run');
+
+        if ($this->option('undo')) {
+            return $this->undoAll($dry);
+        }
 
         $stores = $this->resolveStores();
         if ($stores->isEmpty()) {
@@ -62,6 +67,68 @@ class ReconcileOpnameFifo extends Command
         $this->newLine();
         $this->info("Selesai. {$totalFixed} baris {$verb}.");
 
+        return self::SUCCESS;
+    }
+
+    /** Hapus semua batch rekonsiliasi (notes 'Reconcile FIFO opname%') & recalculate. */
+    private function undoAll(bool $dry): int
+    {
+        $muts = Mutation::where('type', 'opening_stock')
+            ->where('notes', 'like', 'Reconcile FIFO opname%')
+            ->with('items:id,mutation_id,ingredient_id')
+            ->get();
+
+        if ($muts->isEmpty()) {
+            $this->info('Tidak ada batch rekonsiliasi untuk dihapus.');
+            return self::SUCCESS;
+        }
+
+        // Kumpulkan (store, ingredient) terdampak untuk recalculate.
+        $affected = [];
+        foreach ($muts as $m) {
+            foreach ($m->items as $it) {
+                $affected[$m->destination_store_id . '-' . $it->ingredient_id] =
+                    [$m->destination_store_id, $it->ingredient_id];
+            }
+        }
+
+        // Batch opname (opening_stock auto-generated) yang menyimpan eceran di FIFO
+        // (qty_base > 0) dari kode lama — eceran dibuang agar FIFO = pack utuh saja.
+        $eceranBatches = \App\Models\MutationItem::whereHas('mutation', fn ($q) => $q
+                ->where('type', 'opening_stock')->where('notes', 'like', 'Auto-generated dari Opname%'))
+            ->where('qty_base', '>', 0)
+            ->with('mutation:id,destination_store_id')
+            ->get();
+
+        foreach ($eceranBatches as $b) {
+            $affected[$b->mutation->destination_store_id . '-' . $b->ingredient_id] =
+                [$b->mutation->destination_store_id, $b->ingredient_id];
+        }
+
+        $this->info(($dry ? '[dry-run] ' : '') . 'Hapus ' . $muts->count()
+            . ' mutasi rekonsiliasi + buang eceran dari ' . $eceranBatches->count()
+            . ' batch opname. ' . count($affected) . ' (toko×bahan) di-recalculate.');
+
+        if ($dry) return self::SUCCESS;
+
+        DB::transaction(function () use ($muts, $eceranBatches, $affected) {
+            foreach ($muts as $m) { $m->items()->delete(); $m->delete(); }
+
+            // Kurangi eceran dari batch opname: total_in_base & remaining turun sebesar qty_base.
+            foreach ($eceranBatches as $b) {
+                $ecer = (float) $b->qty_base;
+                $b->total_in_base = max(0, (float) $b->total_in_base - $ecer);
+                $b->remaining_qty = max(0, (float) $b->remaining_qty - $ecer);
+                $b->qty_base = 0;
+                $b->save();
+            }
+
+            foreach ($affected as [$sid, $ingId]) {
+                FifoService::recalculate((int) $sid, (int) $ingId);
+            }
+        });
+
+        $this->info('Selesai. Batch rekonsiliasi dihapus, eceran dibuang dari FIFO & recalculate.');
         return self::SUCCESS;
     }
 

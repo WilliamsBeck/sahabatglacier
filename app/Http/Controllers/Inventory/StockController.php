@@ -173,11 +173,12 @@ class StockController extends Controller
             $ptb         = $pkg && $pkg->pack_to_base > 0 ? (float)$pkg->pack_to_base : 0;
             $crateToBase = $pkg ? $pkg->crate_to_pack * $ptb : 0;
 
-            // SALDO STOK = pantau Dus+Pack UTUH. Eceran (pcs/gr) dari opname TERAKHIR DIABAIKAN
-            // — dikurangi dari batch TERTUA dulu (FIFO; pkgBatches sudah urut id), dari qty &
-            // harga. FIFO & HPP TIDAK diubah (display-only); HPP tetap menghitung eceran.
+            // SALDO STOK = pantau Dus+Pack UTUH. Eceran (pcs/gr) TIDAK dihitung: FIFO hanya
+            // berisi pack utuh (opname/pembelian), dan sisa pecahan pack apa pun otomatis
+            // dibuang oleh floor(remaining/ptb) di bawah. Tidak perlu dikurangi manual —
+            // pengurangan snapshot dari opname rawan meleset (multi-batch / setelah pemakaian).
             $k     = $ing->id . '-' . ($pkg?->id ?: 0);
-            $loose = $ptb > 0 ? (float) ($looseMap[$k] ?? 0) : 0.0;
+            $loose = 0.0;
             $rem   = $loose;
             $sealedBatches = collect();
             foreach ($pkgBatches as $b) {

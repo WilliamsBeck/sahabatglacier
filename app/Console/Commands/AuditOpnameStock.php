@@ -93,9 +93,8 @@ class AuditOpnameStock extends Command
                         ->where('status', 'confirmed')->where('notes', 'like', 'Reconcile FIFO opname%'))
                     ->sum('total_in_base');
 
-                // Saldo Stok = (FIFO - eceran opname) dibulatkan ke pack utuh
-                $saldoBase  = max(0, $fifo - $opBase);
-                $saldoPacks = $ptb > 0 ? floor($saldoBase / $ptb) : 0;
+                // Saldo Stok = floor(FIFO / ptb) — pack utuh, eceran otomatis terbuang.
+                $saldoPacks = $ptb > 0 ? floor($fifo / $ptb) : 0;
 
                 $keluar = $received - $fifo;
                 $flag = (round($opWholePacks) != $saldoPacks) ? '  <<< TIDAK COCOK' : '';

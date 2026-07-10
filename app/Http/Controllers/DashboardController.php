@@ -98,11 +98,9 @@ class DashboardController extends Controller
                 $ss->lead_time_days   = $leadTimeDays;
                 $ss->order_cycle_days = $orderCycleDays;
                 $ss->dos_status       = $ss->dosStatus($dos, $leadTimeDays, $orderCycleDays);
-                // Sisa stok TAMPIL = stok − eceran opname terakhir (Dus+Pack segel saja).
-                // DOS tetap pakai stock_balance penuh (eceran = stok riil yg dipakai).
-                $pid   = $pkg?->id;
-                $loose = $pid ? ($looseMap[$ss->store_id . '-' . $ss->ingredient_id . '-' . $pid] ?? 0) : 0;
-                $ss->sealed_balance = max(0, (float) $ss->stock_balance - $loose);
+                // FIFO hanya berisi pack utuh; eceran tidak masuk stok. Sisa stok tampil =
+                // stock_balance apa adanya (pecahan pack difloor saat ditampilkan per Dus/Pack).
+                $ss->sealed_balance = max(0, (float) $ss->stock_balance);
                 return $ss;
             })
             ->filter(fn($ss) => $ss && in_array($ss->dos_status, ['critical', 'warning']))

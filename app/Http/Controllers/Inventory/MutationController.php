@@ -591,17 +591,8 @@ class MutationController extends Controller
 
         $batches = $query->get(['id', 'price_per_base', 'remaining_qty', 'packaging_id']);
 
-        // Buang ECERAN opname terakhir (pack segel saja, FIFO tertua dulu, per kemasan) —
-        // konsisten dgn Saldo Stok. Eceran = pack terbuka, tidak bisa ditransfer/dijual.
-        foreach ($batches->groupBy(fn($b) => $b->packaging_id ?: 0) as $pkgKey => $grp) {
-            $rem = FifoService::opnameLoose($storeId, $ingredient->id, $pkgKey ? (int) $pkgKey : null);
-            foreach ($grp as $b) {
-                if ($rem <= 0) break;
-                $cut = min((float) $b->remaining_qty, $rem);
-                $b->remaining_qty = (float) $b->remaining_qty - $cut;
-                $rem -= $cut;
-            }
-        }
+        // Eceran (pcs/gr) sudah tidak masuk FIFO — jadi tidak perlu dibuang lagi di sini.
+        // Batch FIFO hanya berisi pack utuh; transfer/penjualan ambil pack utuh apa adanya.
         $batches = $batches->filter(fn($b) => (float) $b->remaining_qty > 0)->values();
 
         if ($batches->isEmpty()) {
@@ -678,15 +669,11 @@ class MutationController extends Controller
                 ->mapWithKeys(fn($i)=>[$i->ingredient_id.'-'.$i->packaging_id => (float)$i->physical_base])->all()
             : [];
 
-        $data = $items->groupBy('ingredient_id')->map(function ($g) use ($looseMap) {
-            $ingId = (int) $g->first()->ingredient_id;
-            // Qty per packaging_id (NULL → key 0), ECERAN opname dibuang (pack segel saja)
+        $data = $items->groupBy('ingredient_id')->map(function ($g) {
+            // Qty per packaging_id (NULL → key 0). FIFO hanya berisi pack utuh; eceran
+            // sudah tidak masuk stok, jadi tidak perlu dikurangi lagi.
             $perPackaging = $g->groupBy(fn($r) => $r->packaging_id ?: 0)
-                ->map(function ($pg, $pkgKey) use ($looseMap, $ingId) {
-                    $total = (float) $pg->sum('remaining_qty');
-                    $loose = (float) ($looseMap[$ingId . '-' . $pkgKey] ?? 0);
-                    return max(0.0, $total - $loose);
-                });
+                ->map(fn($pg) => (float) $pg->sum('remaining_qty'));
             return [
                 'qty'           => (float) $perPackaging->sum(),
                 'packagings'    => $g->pluck('packaging_id')->filter()->unique()->values(),
