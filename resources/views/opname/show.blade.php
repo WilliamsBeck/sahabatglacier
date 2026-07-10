@@ -35,7 +35,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
             {{ $opname->period_month }}/{{ $opname->period_year }}
         </p>
     </div>
-    <div class="d-flex gap-2 flex-wrap">
+    <div class="d-flex gap-2 flex-wrap align-items-center">
         <a href="{{ route('opname.opnames.index') }}" class="btn btn-outline-secondary btn-sm btn-back">
             <i class="bi bi-arrow-left me-1"></i>Kembali
         </a>
@@ -308,9 +308,11 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                             @endif
                         </td>
 
-                        {{-- Harga & Nilai --}}
+                        {{-- Harga & Nilai — bisa diisi/diedit untuk opname belum approved
+                             (stok_awal & bulanan). Bulanan: prefill dari harga FIFO bila ada,
+                             kosong bila belum ada harga → bisa diisi manual. --}}
                         <td class="text-end border-start small text-muted">
-                            @if($opname->opname_mode === 'stok_awal' && $opname->status !== 'approved')
+                            @if($opname->status !== 'approved')
                                 @php $hargaDusInput = $item->price_per_base > 0 && $ctrPack && $packBase
                                     ? round($item->price_per_base * $ctrPack * $packBase)
                                     : ($hargaDus > 0 ? round($hargaDus) : ''); @endphp
