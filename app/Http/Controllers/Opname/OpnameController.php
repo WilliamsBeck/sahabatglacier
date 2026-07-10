@@ -1001,7 +1001,10 @@ class OpnameController extends Controller
             $this->freezeItemPrices($opname);
         });
 
-        return back()->with('success', 'Opname disetujui. Stok otomatis disesuaikan.');
+        // Redirect eksplisit ke SHOW (bukan back()) — kalau approve dipicu dari halaman
+        // edit, back() akan membuka edit lagi padahal sudah approved → error 403.
+        return redirect()->route('opname.opnames.show', $opname)
+            ->with('success', 'Opname disetujui. Stok otomatis disesuaikan.');
     }
 
     // Kunci harga ke setiap opname item.
