@@ -308,11 +308,15 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                             @endif
                         </td>
 
-                        {{-- Harga & Nilai — bisa diisi/diedit untuk opname belum approved
-                             (stok_awal & bulanan). Bulanan: prefill dari harga FIFO bila ada,
-                             kosong bila belum ada harga → bisa diisi manual. --}}
+                        {{-- Harga & Nilai. stok_awal: harga selalu bisa diedit. bulanan: harga
+                             HANYA bisa diisi kalau KOSONG (belum ada harga FIFO); kalau sudah ada
+                             harga, tampil teks saja (koreksi harga dilakukan di transaksi pembelian). --}}
+                        @php
+                            $showPriceInput = $opname->status !== 'approved'
+                                && ($opname->opname_mode === 'stok_awal' || $hargaDus <= 0);
+                        @endphp
                         <td class="text-end border-start small text-muted">
-                            @if($opname->status !== 'approved')
+                            @if($showPriceInput)
                                 @php $hargaDusInput = $item->price_per_base > 0 && $ctrPack && $packBase
                                     ? round($item->price_per_base * $ctrPack * $packBase)
                                     : ($hargaDus > 0 ? round($hargaDus) : ''); @endphp
