@@ -683,25 +683,13 @@ class OpnameController extends Controller
         return back()->with('success', 'Variance berhasil dihitung ulang.');
     }
 
-    public function destroy(Opname $opname)
+    /**
+     * Alasan (string) bila ada mutasi/pencatatan harian terkonfirmasi SETELAH tanggal
+     * opname — transaksi tsb bergantung pada stok opname ini, jadi opname tidak boleh
+     * dihapus/dibatalkan. NULL bila aman.
+     */
+    private function transactionsAfterReason(Opname $opname): ?string
     {
-        // Approved hanya boleh dihapus oleh Super Admin
-        if ($opname->status === 'approved' && !auth()->user()->isSuperAdmin()) {
-            abort(403, 'Opname yang sudah disetujui hanya dapat dihapus oleh Super Admin.');
-        }
-
-        // Terkunci oleh snapshot HPP? Tidak boleh dihapus (snapshot bergantung padanya).
-        if ($m = $this->hppLockMsg($opname)) {
-            return redirect()->route('opname.opnames.show', $opname)->with('error', $m);
-        }
-
-        if (MonthLockService::isLocked('opname', $opname->id, $opname->period_month, $opname->period_year)) {
-            return redirect()->route('opname.opnames.show', $opname)
-                ->with('error', MonthLockService::lockMessage($opname->period_month, $opname->period_year));
-        }
-
-        // Tidak bisa hapus jika sudah ada mutasi atau pencatatan harian SETELAH tanggal opname
-        // (transaksi setelahnya bergantung pada stok dari opname ini)
         $afterDate = \Carbon\Carbon::parse($opname->opname_date)->toDateString();
 
         $hasMutation = \App\Models\Mutation::where(function ($q) use ($opname) {
@@ -721,14 +709,81 @@ class OpnameController extends Controller
                 ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
             ->exists();
 
-        if ($hasMutation || $hasDaily) {
-            $reasons = array_filter([
-                $hasMutation ? 'sudah ada mutasi' : null,
-                $hasDaily    ? 'sudah ada pencatatan harian terkonfirmasi' : null,
-            ]);
+        if (!$hasMutation && !$hasDaily) return null;
+
+        $reasons = array_filter([
+            $hasMutation ? 'sudah ada mutasi' : null,
+            $hasDaily    ? 'sudah ada pencatatan harian terkonfirmasi' : null,
+        ]);
+        return implode(' dan ', $reasons)
+            . ' setelah tanggal ' . \Carbon\Carbon::parse($opname->opname_date)->isoFormat('D MMMM Y') . '.';
+    }
+
+    /**
+     * Batalkan approve: kembalikan opname ke draft & balikkan efek FIFO-nya,
+     * supaya bisa diedit lalu di-approve ulang. Hanya bila belum ada transaksi
+     * setelahnya (dijaga di pemanggil).
+     */
+    public function unapprove(Opname $opname)
+    {
+        abort_unless(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea(), 403);
+        abort_if($opname->status !== 'approved', 422, 'Hanya opname approved yang bisa dibatalkan.');
+
+        if ($m = $this->hppLockMsg($opname)) {
+            return redirect()->route('opname.opnames.show', $opname)->with('error', $m);
+        }
+        if (MonthLockService::isLocked('opname', $opname->id, $opname->period_month, $opname->period_year)) {
             return redirect()->route('opname.opnames.show', $opname)
-                ->with('error', 'Opname tidak dapat dihapus karena ' . implode(' dan ', $reasons)
-                    . ' setelah tanggal ' . \Carbon\Carbon::parse($opname->opname_date)->isoFormat('D MMMM Y') . '.');
+                ->with('error', MonthLockService::lockMessage($opname->period_month, $opname->period_year));
+        }
+        if ($reason = $this->transactionsAfterReason($opname)) {
+            return redirect()->route('opname.opnames.show', $opname)
+                ->with('error', 'Tidak dapat membatalkan approve karena ' . $reason);
+        }
+
+        DB::transaction(function () use ($opname) {
+            $affectedIngIds = $opname->items->pluck('ingredient_id')->unique()->all();
+            $storeId        = $opname->store_id;
+
+            // Draft dulu supaya variance-nya tidak lagi ikut dihitung saat recalculate.
+            $opname->update(['status' => 'draft']);
+
+            StockLedger::where('reference_type', 'Opname')->where('reference_id', $opname->id)->delete();
+            Mutation::where('type', 'opening_stock')
+                ->where('notes', 'Auto-generated dari Opname #' . $opname->id)
+                ->each(function ($m) { $m->items()->delete(); $m->delete(); });
+
+            foreach ($affectedIngIds as $ingId) {
+                FifoService::recalculate($storeId, $ingId);
+            }
+        });
+
+        return redirect()->route('opname.opnames.edit', $opname)
+            ->with('success', 'Approve dibatalkan. Opname kembali ke draft & bisa diedit — jangan lupa Approve lagi setelah selesai.');
+    }
+
+    public function destroy(Opname $opname)
+    {
+        // Approved boleh dihapus oleh Admin Area & Super Admin (viewer diblok middleware).
+        if ($opname->status === 'approved'
+            && !auth()->user()->isSuperAdmin() && !auth()->user()->isAdminArea()) {
+            abort(403, 'Opname yang sudah disetujui hanya dapat dihapus oleh Admin Area atau Super Admin.');
+        }
+
+        // Terkunci oleh snapshot HPP? Tidak boleh dihapus (snapshot bergantung padanya).
+        if ($m = $this->hppLockMsg($opname)) {
+            return redirect()->route('opname.opnames.show', $opname)->with('error', $m);
+        }
+
+        if (MonthLockService::isLocked('opname', $opname->id, $opname->period_month, $opname->period_year)) {
+            return redirect()->route('opname.opnames.show', $opname)
+                ->with('error', MonthLockService::lockMessage($opname->period_month, $opname->period_year));
+        }
+
+        // Tidak bisa hapus jika sudah ada mutasi/pencatatan harian SETELAH tanggal opname.
+        if ($reason = $this->transactionsAfterReason($opname)) {
+            return redirect()->route('opname.opnames.show', $opname)
+                ->with('error', 'Opname tidak dapat dihapus karena ' . $reason);
         }
 
         DB::transaction(function () use ($opname) {

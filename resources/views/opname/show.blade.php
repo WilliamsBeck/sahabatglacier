@@ -65,8 +65,15 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                     <button class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Approve</button>
                 </form>
             @else
-                {{-- Approved: hanya Super Admin yang bisa hapus, dengan modal konfirmasi --}}
-                @if(auth()->user()->isSuperAdmin())
+                {{-- Approved: Admin Area & Super Admin bisa Batalkan Approve (untuk edit) atau Hapus.
+                     Server menolak kalau sudah ada mutasi/pencatatan setelah tanggal opname. --}}
+                @if(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea())
+                <form method="POST" action="{{ route('opname.opnames.unapprove', $opname) }}" class="d-inline"
+                      data-confirm="Batalkan approve opname ini? Opname kembali ke draft & efek stoknya dibalikkan agar bisa diedit. Hanya bisa jika belum ada mutasi setelahnya. Jangan lupa Approve lagi setelah selesai."
+                      data-confirm-type="warning" data-confirm-ok="Ya, batalkan approve">
+                    @csrf
+                    <button class="btn btn-warning btn-sm"><i class="bi bi-pencil-square me-1"></i>Batalkan Approve (Edit)</button>
+                </form>
                 <button class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#modalHapusOpname">
                     <i class="bi bi-trash me-1"></i>Hapus
                 </button>
@@ -407,7 +414,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
 @endif
 
 {{-- Modal Hapus Opname (hanya untuk approved, Super Admin) --}}
-@if($opname->status === 'approved' && auth()->user()->isSuperAdmin())
+@if($opname->status === 'approved' && (auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea()))
 <div class="modal fade" id="modalHapusOpname" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content border-danger">

@@ -117,6 +117,7 @@ Route::middleware(['auth'])->group(function () {
         Route::post('opnames/import',           [OpnameController::class, 'import'])->name('opnames.import');
         Route::resource('opnames', OpnameController::class);
         Route::post('opnames/{opname}/approve', [OpnameController::class, 'approve'])->name('opnames.approve');
+        Route::post('opnames/{opname}/unapprove', [OpnameController::class, 'unapprove'])->name('opnames.unapprove');
         Route::post('opnames/{opname}/recalculate', [OpnameController::class, 'recalculate'])->name('opnames.recalculate');
         Route::get('opnames/{opname}/export', [OpnameController::class, 'export'])->name('opnames.export');
         Route::post('opnames/{opname}/add-batch', [OpnameController::class, 'addBatch'])->name('opnames.add-batch');
