@@ -15,6 +15,7 @@ class MutationController extends Controller
         $storeIds = auth()->user()->accessibleStoreIds();
         $query = Mutation::with(['destinationStore','sourceStore','supplier'])
             ->withCount('items')
+            ->where('type', '!=', 'opening_stock')   // stok awal (opname) tidak ditampilkan di daftar mutasi
             ->where(function($q) use ($storeIds) {
                 $q->whereIn('destination_store_id',$storeIds)->orWhereIn('source_store_id',$storeIds);
             });
