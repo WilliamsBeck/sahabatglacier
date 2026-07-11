@@ -315,9 +315,11 @@ function handleTypeChange() {
         labelDest.textContent   = 'Toko Penerima';
     }
 
-    // Label tanggal pengiriman: stok awal → "Tanggal Stok"
+    // Label tanggal kirim: stok awal → "Tanggal Stok"; pembelian pusat → "Tanggal Pemesanan"
     if (labelTxDate) {
-        labelTxDate.innerHTML = (isOpening ? 'Tanggal Stok' : 'Tanggal Pengiriman') + ' <span class="text-danger">*</span>';
+        var txLabel = isOpening ? 'Tanggal Stok'
+                    : (type === 'purchase_zhisheng' ? 'Tanggal Pemesanan' : 'Tanggal Pengiriman');
+        labelTxDate.innerHTML = txLabel + ' <span class="text-danger">*</span>';
     }
 
     // Tanggal Penerimaan: tidak pernah wajib saat create (barang bisa masih di perjalanan)
