@@ -26,6 +26,15 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
 @endphp
 
 @section('content')
+<style>
+    /* Hilangkan panah spinner di semua input angka opname */
+    .opname-input::-webkit-outer-spin-button,
+    .opname-input::-webkit-inner-spin-button,
+    .price-input::-webkit-outer-spin-button,
+    .price-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .opname-input[type=number] { -moz-appearance: textfield; }
+    .price-input { text-align: right; }
+</style>
 <div class="page-header d-flex justify-content-between align-items-start">
     <div>
         <h4 class="page-title">Stok Opname — {{ $opname->store->name }}</h4>
@@ -322,12 +331,12 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                                 @php $hargaDusInput = $item->price_per_base !== null && $ctrPack && $packBase
                                     ? round($item->price_per_base * $ctrPack * $packBase)
                                     : ($hargaDus > 0 ? round($hargaDus) : ''); @endphp
-                                <input type="number"
+                                <input type="text" inputmode="numeric"
                                        name="items[{{ $item->id }}][price_per_dus]"
                                        class="form-control form-control-sm text-end price-input"
-                                       value="{{ $hargaDusInput }}"
-                                       min="0" step="1" placeholder="—"
-                                       style="width:90px;margin-left:auto"
+                                       value="{{ $hargaDusInput !== '' ? number_format($hargaDusInput, 0, ',', '.') : '' }}"
+                                       placeholder="—"
+                                       style="width:140px;margin-left:auto"
                                        data-crate="{{ $ctrPack ?? 0 }}"
                                        data-pack="{{ $packBase ?? 1 }}"
                                        data-item="{{ $item->id }}">
@@ -564,7 +573,7 @@ function priceInputHandler() {
     var id       = row.dataset.id;
     var crate    = parseFloat(row.dataset.crate) || 0;
     var pack     = parseFloat(row.dataset.pack)  || 1;
-    var priceDus = parseFloat(this.value) || 0;
+    var priceDus = parseFloat(String(this.value).replace(/[^\d]/g, '')) || 0;
     var priceBase = (crate > 0 && pack > 0) ? priceDus / (crate * pack) : priceDus;
 
     var nilaiCell = document.getElementById('nilai-' + id);
@@ -627,6 +636,19 @@ if (opnameTbody) {
         if (e.target.classList.contains('price-input')) priceInputHandler.call(e.target);
         else if (e.target.classList.contains('opname-input')) opnameInputHandler.call(e.target);
     });
+    // Format ribuan (titik) saat selesai mengetik harga — tidak saat mengetik biar kursor stabil.
+    opnameTbody.addEventListener('blur', function(e) {
+        if (!e.target.classList.contains('price-input')) return;
+        var raw = parseFloat(String(e.target.value).replace(/[^\d]/g, '')) || 0;
+        e.target.value = raw ? raw.toLocaleString('id-ID') : '';
+    }, true);
+    // Sebelum submit: buang titik ribuan agar backend terima angka mentah (680000).
+    var opnameForm = opnameTbody.closest('form');
+    if (opnameForm) opnameForm.addEventListener('submit', function() {
+        opnameForm.querySelectorAll('.price-input').forEach(function(el) {
+            el.value = String(el.value).replace(/[^\d]/g, '');
+        });
+    });
     opnameTbody.addEventListener('click', function(e) {
         var add = e.target.closest('.js-add-batch');
         if (add) { addBatchAjax(add); return; }
@@ -666,7 +688,7 @@ function buildBatchRow(d) {
         + '<td class="text-center border-start"><span class="text-muted opacity-50 small">-</span></td>'
         + '<td class="text-center"><span class="text-muted opacity-50 small">-</span></td>'
         + '<td class="text-end border-start fw-bold text-muted" id="var-' + d.id + '"><span class="text-muted opacity-50 small">-</span></td>'
-        + '<td class="text-end border-start small text-muted"><input type="number" name="' + n + '[price_per_dus]" class="form-control form-control-sm text-end price-input" min="0" step="1" placeholder="—" style="width:90px;margin-left:auto" data-crate="' + (d.crate_to_pack || 0) + '" data-pack="' + (d.pack_to_base || 1) + '" data-item="' + d.id + '"></td>'
+        + '<td class="text-end border-start small text-muted"><input type="text" inputmode="numeric" name="' + n + '[price_per_dus]" class="form-control form-control-sm text-end price-input" placeholder="—" style="width:140px;margin-left:auto" data-crate="' + (d.crate_to_pack || 0) + '" data-pack="' + (d.pack_to_base || 1) + '" data-item="' + d.id + '"></td>'
         + '<td class="text-end border-start fw-semibold" id="nilai-' + d.id + '" data-price="0"><span class="text-muted opacity-50 small">-</span></td>'
         + '<td class="border-start text-center" style="width:36px;padding:2px 4px"><button type="button" class="btn btn-outline-danger btn-sm px-1 py-0 js-del-batch" data-id="' + d.id + '" title="Hapus batch ini" style="font-size:.75rem;line-height:1.4">×</button></td>';
     return tr;
