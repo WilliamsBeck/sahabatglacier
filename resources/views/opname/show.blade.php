@@ -217,7 +217,9 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         // Harga: stok_awal → price_per_base per item (batch individual)
                         //        bulanan   → harga efektif FIFO BERLAPIS (akurat) per item,
                         //                    fallback weighted bila tak ada batch.
-                        $harga = ($opname->opname_mode === 'stok_awal' && $item->price_per_base > 0)
+                        // stok_awal: harga sudah diisi user (termasuk 0) → pakai apa adanya.
+                        // NULL (belum diisi) → saran dari FIFO/harga terakhir.
+                        $harga = ($opname->opname_mode === 'stok_awal' && $item->price_per_base !== null)
                             ? (float) $item->price_per_base
                             : (($fifoPrice[$item->id] ?? null) ?: ($priceMap[$item->ingredient_id] ?? 0));
                         $hargaDus   = ($ctrPack && $packBase) ? $harga * $ctrPack * $packBase : $harga;
@@ -317,7 +319,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         @endphp
                         <td class="text-end border-start small text-muted">
                             @if($showPriceInput)
-                                @php $hargaDusInput = $item->price_per_base > 0 && $ctrPack && $packBase
+                                @php $hargaDusInput = $item->price_per_base !== null && $ctrPack && $packBase
                                     ? round($item->price_per_base * $ctrPack * $packBase)
                                     : ($hargaDus > 0 ? round($hargaDus) : ''); @endphp
                                 <input type="number"

@@ -541,8 +541,9 @@ class OpnameController extends Controller
                     'variance'       => $variance,
                 ];
 
-                // Simpan harga/dus → price_per_base (berlaku untuk semua mode jika diisi)
-                if (isset($data['price_per_dus']) && (float)$data['price_per_dus'] > 0) {
+                // Simpan harga/dus → price_per_base. Angka apa pun DIISI (termasuk 0 = gratis
+                // yang disengaja). Field DIKOSONGKAN → biarkan NULL (nanti pakai saran harga).
+                if (isset($data['price_per_dus']) && $data['price_per_dus'] !== '' && is_numeric($data['price_per_dus'])) {
                     $pkg         = $item->packaging;
                     $crateToBase = $pkg ? (float)$pkg->crate_to_pack * (float)$pkg->pack_to_base : 0;
                     $updateData['price_per_base'] = $crateToBase > 0
@@ -922,15 +923,18 @@ class OpnameController extends Controller
                 foreach ($opname->items as $item) {
                     if ($item->physical_qty <= 0) continue;
 
-                    $lastPrice = \App\Models\MutationItem::whereHas('mutation', fn($q) =>
-                            $q->where('destination_store_id', $opname->store_id)->where('status', 'confirmed')
-                              ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal']))
-                        ->where('ingredient_id', $item->ingredient_id)
-                        ->where('packaging_id', $item->packaging_id)
-                        ->where('price_per_base', '>', 0)
-                        ->latest('id')->value('price_per_base') ?? 0;
-                    if ((float) $item->price_per_base > 0) {
+                    // Harga sudah diisi user (termasuk 0 = gratis) → pakai apa adanya.
+                    // Hanya kalau BELUM diisi (NULL) → ambil saran harga pembelian terakhir.
+                    if ($item->price_per_base !== null) {
                         $lastPrice = (float) $item->price_per_base;
+                    } else {
+                        $lastPrice = \App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                                $q->where('destination_store_id', $opname->store_id)->where('status', 'confirmed')
+                                  ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal']))
+                            ->where('ingredient_id', $item->ingredient_id)
+                            ->where('packaging_id', $item->packaging_id)
+                            ->where('price_per_base', '>', 0)
+                            ->latest('id')->value('price_per_base') ?? 0;
                     }
 
                     $opening = $opening ?: \App\Models\Mutation::create([
@@ -1000,15 +1004,18 @@ class OpnameController extends Controller
                     $delta = round($packedQty - $curr, 4);
                     if ($delta <= 0) continue;
 
-                    $lastPrice = \App\Models\MutationItem::whereHas('mutation', fn($q) =>
-                            $q->where('destination_store_id', $opname->store_id)->where('status', 'confirmed')
-                              ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal']))
-                        ->where('ingredient_id', $item->ingredient_id)
-                        ->where('packaging_id', $item->packaging_id)
-                        ->where('price_per_base', '>', 0)
-                        ->latest('id')->value('price_per_base') ?? 0;
-                    if ((float) $item->price_per_base > 0) {
+                    // Harga sudah diisi user (termasuk 0 = gratis) → pakai apa adanya.
+                    // Hanya kalau BELUM diisi (NULL) → ambil saran harga pembelian terakhir.
+                    if ($item->price_per_base !== null) {
                         $lastPrice = (float) $item->price_per_base;
+                    } else {
+                        $lastPrice = \App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                                $q->where('destination_store_id', $opname->store_id)->where('status', 'confirmed')
+                                  ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal']))
+                            ->where('ingredient_id', $item->ingredient_id)
+                            ->where('packaging_id', $item->packaging_id)
+                            ->where('price_per_base', '>', 0)
+                            ->latest('id')->value('price_per_base') ?? 0;
                     }
 
                     $opening = $opening ?: \App\Models\Mutation::create([
