@@ -58,9 +58,10 @@
 
                 <div class="col-md-3 d-none" id="wrapSource">
                     <label class="form-label fw-semibold" id="labelSource">Toko Pengirim</label>
+                    {{-- Pengirim = HANYA toko yang dipegang akun (barang keluar dari toko sendiri) --}}
                     <select name="source_store_id" id="sourceStoreSelect" class="form-select" onchange="onSourceStoreChange()">
                         <option value="">— Pilih Toko —</option>
-                        @foreach($sourceStores as $store)
+                        @foreach($stores as $store)
                             <option value="{{ $store->id }}" {{ old('source_store_id') == $store->id ? 'selected' : '' }}>
                                 {{ $store->name }}
                             </option>
@@ -231,6 +232,25 @@ function buildIngOptgroups(filtered) {
 
 var zhishengSupplierId = {{ $zhishengId ?? 'null' }};
 var suppliersData   = @json($suppliersJs);  // [{id, name, type}]
+var STORES_MINE     = @json($storesMineJs);  // toko yg dipegang akun (pengirim)
+var STORES_ALL      = @json($storesAllJs);   // semua toko (penerima transfer internal)
+
+// Isi ulang dropdown Toko Penerima sesuai tipe:
+// - Penjualan Internal → SEMUA toko (kirim ke toko mana pun)
+// - Pembelian/eksternal masuk → hanya toko akun (barang masuk ke toko sendiri)
+function updateDestStoreOptions() {
+    var sel = document.getElementById('destStoreSelect');
+    if (!sel) return;
+    var type = document.getElementById('typeSelect').value;
+    var list = (type === 'sale_internal') ? STORES_ALL : STORES_MINE;
+    var prev = sel.value;
+    var html = '<option value="">— Pilih Toko —</option>';
+    list.forEach(function (s) { html += '<option value="' + s.id + '">' + s.name + '</option>'; });
+    sel.innerHTML = html;
+    // pertahankan pilihan sebelumnya bila masih ada; kalau hanya 1 toko, auto-pilih
+    if (prev && list.some(function (s) { return String(s.id) === String(prev); })) sel.value = prev;
+    else if (list.length === 1) sel.value = list[0].id;
+}
 var packagingCache  = {};
 var stockPriceCache = {};
 var storeStockCache = {};
@@ -340,6 +360,7 @@ function handleTypeChange() {
     // Kunci/buka dropdown bahan: tak bisa pilih bahan sebelum tipe dipilih
     toggleIngredientLock();
     toggleZhishengButton();
+    updateDestStoreOptions();
 
     // Tombol selalu sama — semua langsung confirmed
 }

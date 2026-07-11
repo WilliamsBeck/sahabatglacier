@@ -37,10 +37,14 @@ class MutationController extends Controller
     {
         $stores        = auth()->user()->accessibleStores();
         $myStoreIds    = $stores->pluck('id')->all();
-        // Source store: semua toko aktif, toko sendiri di atas
         $allStores     = Store::where('is_active', true)->orderBy('name')->get();
+        // Toko lain di atas untuk daftar "semua toko" (dipakai sbg penerima transfer internal).
         $sourceStores  = $allStores->sortBy(fn($s) => in_array($s->id, $myStoreIds) ? 0 : 1)->values();
         $suppliers = Supplier::where('is_active',true)->orderBy('name')->get();
+
+        // Untuk JS: daftar toko sendiri (pengirim) & semua toko (penerima transfer internal).
+        $storesMineJs = $stores->map(fn($s) => ['id' => $s->id, 'name' => $s->name])->values()->all();
+        $storesAllJs  = $sourceStores->map(fn($s) => ['id' => $s->id, 'name' => $s->name])->values()->all();
 
         // Data supplier untuk JS filtering (pusat vs lokal)
         $suppliersJs = $suppliers->map(fn($s) => [
@@ -95,7 +99,7 @@ class MutationController extends Controller
             ];
         })->values()->all();
 
-        return view('inventory.mutations.create', compact('stores','sourceStores','myStoreIds','suppliers','ingredients','zhishengId','ingredientJs','suppliersJs'));
+        return view('inventory.mutations.create', compact('stores','sourceStores','myStoreIds','suppliers','ingredients','zhishengId','ingredientJs','suppliersJs','storesMineJs','storesAllJs'));
     }
 
     public function store(Request $request)
