@@ -134,9 +134,9 @@ class FifoService
     }
 
     /**
-     * Stok TERSEDIA untuk barang keluar = PACK SEGEL = FIFO − eceran opname terakhir,
-     * lalu dibulatkan ke pack utuh. Pack terbuka (eceran) tidak bisa ditransfer/dijual.
-     * Dipakai untuk validasi & tampilan transfer/penjualan eksternal. (Konsisten Saldo Stok.)
+     * Stok TERSEDIA untuk barang keluar = PACK UTUH dari FIFO, dibulatkan ke bawah.
+     * Eceran (pcs/gr) tidak masuk FIFO, jadi sisa pecahan pack otomatis terbuang oleh
+     * floor — konsisten dengan tampilan Saldo Stok. Dipakai untuk validasi transfer/jual.
      */
     public static function availableWholePacksBase(int $storeId, int $ingredientId, ?int $packagingId = null): float
     {
@@ -145,8 +145,7 @@ class FifoService
         $ptb   = self::packToBaseFor($packagingId);
         if ($ptb <= 0) return $total;
 
-        $sealed = max(0.0, $total - self::opnameLoose($storeId, $ingredientId, $packagingId));
-        return floor($sealed / $ptb) * $ptb;
+        return floor($total / $ptb) * $ptb;
     }
 
     /**
