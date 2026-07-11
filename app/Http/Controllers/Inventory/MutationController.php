@@ -100,6 +100,16 @@ class MutationController extends Controller
 
     public function store(Request $request)
     {
+        // Abaikan baris yang qty-nya kosong/0 (mis. dari "Muat Semua Bahan Zhisheng" —
+        // user hanya mengisi qty bahan yang benar-benar dibeli).
+        $request->merge([
+            'items' => collect($request->input('items', []))->filter(function ($it) {
+                return ((float) ($it['qty_crate'] ?? 0)
+                      + (float) ($it['qty_pack'] ?? 0)
+                      + (float) ($it['qty_base'] ?? 0)) > 0;
+            })->values()->all(),
+        ]);
+
         $needsDest   = in_array($request->type, ['purchase_zhisheng','purchase_supplier','sale_internal','sale_external']);
         $needsSource = in_array($request->type, ['sale_internal','sale_external_out']);
 

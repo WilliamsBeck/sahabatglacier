@@ -163,9 +163,12 @@
                 </table>
             </div>
         </div>
-        <div class="card-footer border-top-0 pt-0 pb-3 px-3">
+        <div class="card-footer border-top-0 pt-0 pb-3 px-3 d-flex gap-2 flex-wrap">
             <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow()">
                 <i class="bi bi-plus-circle me-1"></i> Tambah Bahan
+            </button>
+            <button type="button" id="btnLoadZhisheng" class="btn btn-sm btn-outline-primary d-none" onclick="loadZhishengItems()">
+                <i class="bi bi-lightning-charge me-1"></i> Muat Semua Bahan Zhisheng
             </button>
         </div>
     </div>
@@ -336,6 +339,7 @@ function handleTypeChange() {
 
     // Kunci/buka dropdown bahan: tak bisa pilih bahan sebelum tipe dipilih
     toggleIngredientLock();
+    toggleZhishengButton();
 
     // Tombol selalu sama — semua langsung confirmed
 }
@@ -356,6 +360,7 @@ function onSupplierChange() {
     if (type === 'purchase_supplier' || type === 'purchase_zhisheng') {
         rebuildAllIngredientSelects();
     }
+    toggleZhishengButton();
 }
 
 // Sinkronisasi: disable opsi yang sama di dropdown lain
@@ -1052,6 +1057,54 @@ function addRow() {
 
     updateRemoveButtons();
     toggleIngredientLock();
+}
+
+// Tampilkan tombol "Muat Semua Bahan Zhisheng" hanya untuk Pembelian Pusat + supplier terpilih.
+function toggleZhishengButton() {
+    var btn = document.getElementById('btnLoadZhisheng');
+    if (!btn) return;
+    var type   = document.getElementById('typeSelect').value;
+    var suppId = document.getElementById('supplierSelect') ? document.getElementById('supplierSelect').value : '';
+    btn.classList.toggle('d-none', !(type === 'purchase_zhisheng' && suppId));
+}
+
+// Muat semua bahan baku Zhisheng jadi baris (bahan+kemasan terisi, harga auto dari
+// pembelian terakhir & bisa diedit). Qty dikosongkan — user isi yang dibeli saja.
+function loadZhishengItems() {
+    var type   = document.getElementById('typeSelect').value;
+    var suppId = document.getElementById('supplierSelect') ? document.getElementById('supplierSelect').value : '';
+    if (type !== 'purchase_zhisheng' || !suppId) return;
+
+    // Kumpulkan pasangan (bahan baku × kemasan Zhisheng)
+    var pairs = [];
+    ingredientData.forEach(function (i) {
+        if (i.type === 'semi_finished') return;   // hanya bahan baku
+        i.packagings.forEach(function (p) {
+            if (String(p.supplier_id) === String(suppId)) pairs.push({ ing: i.id, pkg: p.id });
+        });
+    });
+    if (!pairs.length) { alert('Tidak ada bahan baku dengan kemasan dari supplier Pusat ini.'); return; }
+
+    if (document.querySelectorAll('.item-row').length > 0 &&
+        !confirm('Muat ' + pairs.length + ' bahan Zhisheng? Semua baris yang ada sekarang akan diganti.')) return;
+
+    document.querySelectorAll('.item-row').forEach(function (r) { r.remove(); });
+
+    pairs.forEach(function (pair) {
+        addRow();
+        var idx = rowCount - 1;
+        var sel = document.querySelector('#row-' + idx + ' select[name$="[ingredient_id]"]');
+        if (!sel) return;
+        sel.value = pair.ing;
+        onIngredientChange(pair.ing, idx);   // load kemasan (sinkron utk data client-side)
+
+        var pkgSel = document.querySelector('#row-' + idx + ' .packaging-select');
+        if (pkgSel && String(pkgSel.value) !== String(pair.pkg)) {
+            pkgSel.value = pair.pkg;
+            if (String(pkgSel.value) === String(pair.pkg)) onPackagingChange(idx);  // auto-isi harga
+        }
+    });
+    updateRemoveButtons();
 }
 
 function buildRowHTML(idx, ingOptions) {
