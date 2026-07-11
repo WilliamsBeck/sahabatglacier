@@ -835,7 +835,7 @@ function fillPackagings(select, wrapper, packagings, idx, ingId) {
         var perBase = ctp * ptb;
         var opt = document.createElement('option');
         opt.value = p.id;
-        opt.textContent = p.packaging_name + ' (' + ctp + ' pack x ' + ptb + ' ' + unit + ')';
+        opt.textContent = '@' + ctp + ' pack';
         opt.dataset.crateToBase = perBase;
         opt.dataset.packToBase  = ptb;
         select.appendChild(opt);
