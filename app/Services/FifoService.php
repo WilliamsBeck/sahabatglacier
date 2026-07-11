@@ -134,6 +134,33 @@ class FifoService
     }
 
     /**
+     * Rincian LAPISAN FIFO (pack utuh) yang akan terpakai untuk qty tertentu — urut FIFO
+     * (terlama dulu), sejajar dengan deductWholePacks. Tiap lapisan: ['base', 'price_per_base'].
+     * Dipakai untuk mempertahankan harga per-batch saat transfer antar toko.
+     */
+    public static function getWholePackLayers(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): array
+    {
+        $ptb = self::packToBaseFor($packagingId);
+        if ($ptb <= 0) {
+            // Tanpa kemasan: 1 lapisan dengan harga rata-rata FIFO.
+            $cost = self::getCost($storeId, $ingredientId, $qty, $packagingId);
+            return [['base' => $qty, 'price_per_base' => $qty > 0 ? $cost / $qty : 0.0]];
+        }
+
+        $packsNeeded = (int) round($qty / $ptb);
+        $layers = [];
+        foreach (self::getFifoItems($storeId, $ingredientId, $packagingId) as $item) {
+            if ($packsNeeded <= 0) break;
+            $wholePacks = (int) floor((float) $item->remaining_qty / $ptb);
+            if ($wholePacks <= 0) continue;
+            $take = min($wholePacks, $packsNeeded);
+            $layers[] = ['base' => $take * $ptb, 'price_per_base' => (float) $item->price_per_base];
+            $packsNeeded -= $take;
+        }
+        return $layers;
+    }
+
+    /**
      * Stok TERSEDIA untuk barang keluar = PACK UTUH dari FIFO, dibulatkan ke bawah.
      * Eceran (pcs/gr) tidak masuk FIFO, jadi sisa pecahan pack otomatis terbuang oleh
      * floor — konsisten dengan tampilan Saldo Stok. Dipakai untuk validasi transfer/jual.

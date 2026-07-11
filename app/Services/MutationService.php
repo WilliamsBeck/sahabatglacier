@@ -18,6 +18,10 @@ class MutationService
                 'confirmed_by' => auth()->id(),
             ]);
 
+            // Transfer internal: pecah tiap baris menjadi beberapa baris sesuai LAPISAN
+            // harga FIFO sumber, supaya toko tujuan menerima batch per-harga (bukan rata-rata).
+            self::splitSaleItemsByFifoLayers($mutation);
+
             foreach ($mutation->items as $item) {
                 // Stok bergerak per tgl terima (delivery_date); fallback ke tgl kirim jika belum diisi
                 $date         = ($mutation->delivery_date ?? $mutation->transaction_date)->format('Y-m-d');
@@ -66,6 +70,58 @@ class MutationService
                 }
             }
         });
+    }
+
+    /**
+     * Pecah baris transfer internal menjadi beberapa baris per LAPISAN harga FIFO sumber.
+     * Baris @247rb + @310rb tidak digabung rata-rata, tapi jadi 2 batch terpisah di tujuan —
+     * supaya transfer/pemakaian berikutnya mengambil harga FIFO yang benar. Hanya dipecah
+     * bila sumber punya >1 harga untuk qty yang dikirim.
+     */
+    private static function splitSaleItemsByFifoLayers(Mutation $mutation): void
+    {
+        if (!$mutation->isSale() || !$mutation->destination_store_id
+            || !$mutation->source_store_id || !$mutation->deductsFromSource()) {
+            return;
+        }
+
+        $changed = false;
+        foreach ($mutation->items()->get() as $item) {
+            $pkgId  = $item->packaging_id ?: null;
+            $layers = FifoService::getWholePackLayers(
+                (int) $mutation->source_store_id, (int) $item->ingredient_id,
+                (float) $item->total_in_base, $pkgId
+            );
+            if (count($layers) <= 1) continue;   // 1 harga → tidak perlu dipecah
+
+            $pkg = $pkgId ? \App\Models\IngredientPackaging::find($pkgId) : null;
+            $ptb = $pkg ? (float) $pkg->pack_to_base : 0;
+            $ctb = $pkg ? (float) $pkg->crate_to_pack * $ptb : 0;
+
+            foreach ($layers as $L) {
+                $base  = (float) $L['base'];
+                $price = (float) $L['price_per_base'];
+                $dus   = $ctb > 0 ? (int) floor($base / $ctb) : 0;
+                $pack  = $ptb > 0 ? (int) floor(($base - $dus * $ctb) / $ptb) : 0;
+
+                $mutation->items()->create([
+                    'ingredient_id'          => $item->ingredient_id,
+                    'packaging_id'           => $pkgId,
+                    'qty_crate'              => $dus,
+                    'qty_pack'               => $pack,
+                    'qty_base'               => 0,
+                    'total_in_base'          => $base,
+                    'price_per_base'         => $price,
+                    'selling_price_per_base' => $item->selling_price_per_base,
+                    'cost_subtotal'          => $base * $price,
+                    'remaining_qty'          => $base,
+                ]);
+            }
+            $item->delete();
+            $changed = true;
+        }
+
+        if ($changed) $mutation->load('items');
     }
 
     /**
