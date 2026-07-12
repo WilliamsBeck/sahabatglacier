@@ -178,7 +178,7 @@
                                 $dosText  = $isCrit ? 'text-white' : 'text-dark';
 
                                 // Pecah saldo ke Dus / Pack / unit dasar — konsisten dgn Saldo Stok
-                                $pkg  = $stock->ingredient->packagings->first();
+                                $pkg  = $stock->packaging ?? $stock->ingredient->packagings->first();
                                 $unit = $stock->ingredient->unit_base;
                                 $bal  = (float) ($stock->sealed_balance ?? $stock->stock_balance);
                                 $ptb  = $pkg && $pkg->pack_to_base  > 0 ? (float) $pkg->pack_to_base : 0;
