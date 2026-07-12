@@ -140,6 +140,17 @@ class DashboardController extends Controller
                 $demandMap[$k] = ($demandMap[$k] ?? 0) + $base;
             }
 
+            // On-order (dalam perjalanan) = mutasi masuk berstatus draft. Dipakai untuk
+            // Inventory Position supaya item yang barangnya sudah di jalan tidak dialarmkan.
+            $onOrderMap = [];
+            foreach (\App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                        $q->where('destination_store_id', $sid)->where('status', 'draft')
+                          ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external']))
+                    ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) as t')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $onOrderMap[$kkey($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
+            }
+
             // Bangun baris low-stock per (bahan × kemasan) untuk bahan yang ada pemakaian
             foreach ($usageByIng as $ingId => $u) {
                 $ing = $ingMap[$ingId] ?? null;
@@ -156,8 +167,10 @@ class DashboardController extends Controller
                     $avgDailyBase = ((float) $u->total_pack / $dosWindowDays) * $ptb;
                     if ($avgDailyBase < 0.001) continue;
 
-                    $dos    = $pkgBalance / $avgDailyBase;
-                    $status = (new StoreStock())->dosStatus($dos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
+                    $dos     = $pkgBalance / $avgDailyBase;              // DOS stok fisik (untuk tampilan)
+                    $onOrder = $onOrderMap[$k] ?? 0;
+                    $posDos  = ($pkgBalance + $onOrder) / $avgDailyBase; // Inventory Position (untuk status)
+                    $status  = (new StoreStock())->dosStatus($posDos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
                     if (!in_array($status, ['critical', 'warning'])) continue;
 
                     $lowStocks->push((object) [

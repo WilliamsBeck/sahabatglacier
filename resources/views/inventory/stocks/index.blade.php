@@ -197,6 +197,15 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         $totalSubtotal = $ingRows->sum('subtotal');
                         $totalBalance  = $ingRows->sum('balance');
 
+                        // Stok dalam perjalanan (on-order) — untuk badge 🚚
+                        $totalInTransit = $ingRows->sum('inTransitBase');
+                        $itDus  = $ingRows->sum('inTransitDus');
+                        $itPack = $ingRows->sum('inTransitPack');
+                        $itParts = [];
+                        if ($itDus)  $itParts[] = $itDus.' Dus';
+                        if ($itPack) $itParts[] = $itPack.' Pack';
+                        $itLabel = $itParts ? implode(' ', $itParts) : 'ada';
+
                         // Harga rata-rata (weighted by balance)
                         $avgPriceBase = $totalBalance > 0
                             ? $ingRows->sum(fn($r) => $r->balance * $r->avgPrice) / $totalBalance
@@ -282,6 +291,10 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                             @endif
                             @if($primaryRow->avgDailyPack !== null)
                                 <div class="text-muted" style="font-size:.6rem">{{ number_format($primaryRow->avgDailyPack, 1, ',', '.') }} Pack/hari</div>
+                            @endif
+                            @if($totalInTransit > 0)
+                                <div class="mt-1"><span class="badge bg-info text-dark" style="font-size:.56rem"
+                                    title="Stok dalam perjalanan (mutasi masuk belum dikonfirmasi). Status reorder sudah memperhitungkan ini.">🚚 {{ $itLabel }} di jalan</span></div>
                             @endif
                         </td>
 

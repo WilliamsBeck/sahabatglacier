@@ -168,9 +168,21 @@ class StockController extends Controller
             $demandMap[$k] = ($demandMap[$k] ?? 0) + $base;
         }
 
+        // On-order (stok DALAM PERJALANAN): mutasi masuk berstatus draft (belum dikonfirmasi,
+        // jadi belum menambah FIFO). Dipakai untuk Inventory Position = stok ada + on-order,
+        // supaya status reorder tidak alarm bila barang sudah dipesan/di jalan.
+        $onOrderMap = [];
+        foreach (MutationItem::whereHas('mutation', fn($q) =>
+                    $q->where('destination_store_id', $selectedId)->where('status', 'draft')
+                      ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external']))
+                ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) as t')
+                ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+            $onOrderMap[$kkey($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
+        }
+
         $rows = collect();
 
-        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays) use ($receivedMap, $demandMap, $looseMap) {
+        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays) use ($receivedMap, $demandMap, $looseMap, $onOrderMap) {
             $ptb         = $pkg && $pkg->pack_to_base > 0 ? (float)$pkg->pack_to_base : 0;
             $crateToBase = $pkg ? $pkg->crate_to_pack * $ptb : 0;
 
@@ -269,7 +281,15 @@ class StockController extends Controller
             // Min Stok = reorder point = pemakaian harian × (lead time + safety stock)
             $ropDays      = ($leadTimeDays ?? 0) + max(0, (int) $safetyStockDays);
             $parLevelPack = ($avgDailyPack !== null && $ropDays > 0) ? $avgDailyPack * $ropDays : null;
-            $dosStatus    = (new StoreStock())->dosStatus($dosValue, $leadTimeDays, $safetyStockDays, $orderCycleDays);
+            // Status pakai Inventory Position = stok ada + on-order (dalam perjalanan),
+            // tapi angka DOS yang ditampilkan tetap berbasis stok fisik di rak.
+            $onOrder      = $onOrderMap[$k] ?? 0;
+            $posDos       = ($avgDailyBase && $avgDailyBase > 0.001) ? ($pkgBalance + $onOrder) / $avgDailyBase : null;
+            $dosStatus    = (new StoreStock())->dosStatus($posDos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
+            // Pecah on-order ke Dus/Pack untuk badge "dalam perjalanan"
+            $itDus = $itPack = 0; $itRem = $onOrder;
+            if ($crateToBase > 0) { $itDus = (int) floor($itRem / $crateToBase); $itRem -= $itDus * $crateToBase; }
+            if ($ptb > 0)         { $itPack = (int) floor($itRem / $ptb); }
 
             return (object) [
                 'ingredient'      => $ing,
@@ -296,6 +316,9 @@ class StockController extends Controller
                 'dosValue'        => $dosValue !== null ? round($dosValue, 1) : null,
                 'parLevelPack'    => $parLevelPack,
                 'dosStatus'       => $dosStatus,
+                'inTransitBase'   => $onOrder,
+                'inTransitDus'    => $itDus,
+                'inTransitPack'   => $itPack,
             ];
         };
 
