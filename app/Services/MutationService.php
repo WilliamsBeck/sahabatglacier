@@ -92,7 +92,21 @@ class MutationService
                 (int) $mutation->source_store_id, (int) $item->ingredient_id,
                 (float) $item->total_in_base, $pkgId
             );
-            if (count($layers) <= 1) continue;   // 1 harga → tidak perlu dipecah
+            if (empty($layers)) continue;
+
+            // 1 lapisan: tidak perlu dipecah, tapi PASTIKAN harga = harga FIFO sumber
+            // (harga input transfer internal bisa meleset/stale — sumber yang otoritatif).
+            if (count($layers) === 1) {
+                $price = (float) $layers[0]['price_per_base'];
+                if (abs($price - (float) $item->price_per_base) > 0.0001) {
+                    $item->update([
+                        'price_per_base' => $price,
+                        'cost_subtotal'  => (float) $item->total_in_base * $price,
+                    ]);
+                    $item->refresh();
+                }
+                continue;
+            }
 
             $pkg = $pkgId ? \App\Models\IngredientPackaging::find($pkgId) : null;
             $ptb = $pkg ? (float) $pkg->pack_to_base : 0;
