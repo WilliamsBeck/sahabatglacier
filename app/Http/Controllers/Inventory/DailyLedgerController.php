@@ -500,16 +500,33 @@ class DailyLedgerController extends Controller
                 $k = $K($r->ing, $r->pkg); $dem[$k] = ($dem[$k] ?? 0) + abs((float) $r->v);
             }
 
+            // Pemakaian harian DRAFT (belum dikonfirmasi): TIDAK memotong FIFO/Saldo Stok,
+            // tapi ikut mengurangi "stok akhir" yang tampil di halaman pencatatan harian —
+            // supaya angka import/ketik langsung terlihat memotong tanpa nunggu konfirmasi.
+            $draftDem = [];
+            foreach (DailyUsage::where('store_id', $storeId)->where('qty_pack', '>', 0)
+                    ->whereIn('ingredient_id', $ingIds)
+                    ->whereNotExists(fn($q) => $q->from('daily_confirmations')
+                        ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                        ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+                    ->selectRaw('ingredient_id, packaging_id, SUM(qty_pack) p')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $ptbU = ($r->packaging_id && isset($conv[$r->packaging_id])) ? $conv[$r->packaging_id]['ptb'] : 1;
+                $draftDem[$K($r->ingredient_id, $r->packaging_id)] = (float) $r->p * $ptbU;
+            }
+
             foreach ($ingIds as $iid) {
                 $ing = $ingredients[$iid] ?? null;
                 if (!$ing) continue;
                 $defaultPkgId = $ing->packagings->first()?->id;
                 $byPkg = ($batchesGrouped[$iid] ?? collect())->groupBy(fn($b) => $b->packaging_id ?: $defaultPkgId);
                 foreach ($ing->packagings as $pkg) {
-                    $fifo   = ($byPkg[$pkg->id] ?? collect())->sum('remaining_qty');
-                    $signed = ($recv[$K($iid, $pkg->id)] ?? 0) - ($dem[$K($iid, $pkg->id)] ?? 0);
-                    // base bertanda: minus hanya bila over; selain itu FIFO remaining (= Saldo Stok)
-                    $closingBreakdown[$iid][$pkg->id] = ($signed < -0.001) ? $signed : (float) $fifo;
+                    $fifo    = ($byPkg[$pkg->id] ?? collect())->sum('remaining_qty');
+                    $draftB  = $draftDem[$K($iid, $pkg->id)] ?? 0;
+                    // demand termasuk pemakaian draft supaya over-usage tampil minus di ledger
+                    $signed  = ($recv[$K($iid, $pkg->id)] ?? 0) - ($dem[$K($iid, $pkg->id)] ?? 0) - $draftB;
+                    // base bertanda: minus hanya bila over; selain itu FIFO remaining dikurangi pemakaian draft
+                    $closingBreakdown[$iid][$pkg->id] = ($signed < -0.001) ? $signed : ((float) $fifo - $draftB);
                 }
             }
         }
