@@ -13,7 +13,7 @@
 
 {{-- Konfigurasi order banner (compact) --}}
 @php
-$warnAt = $leadTimeDays ? ($leadTimeDays + ($orderCycleDays ? (int)ceil($orderCycleDays/3) : 3)) : null;
+$warnAt = $leadTimeDays ? ($leadTimeDays + ($orderCycleDays ? (int)ceil($orderCycleDays*0.15) : 3)) : null;
 @endphp
 @if($leadTimeDays)
 <div class="alert alert-info d-flex align-items-center gap-2 py-1 px-3 mb-2 small">
@@ -419,7 +419,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function calcWarn() {
         const lead  = parseInt(form.querySelector('[name=lead_time_days]').value) || 0;
         const cycle = parseInt(form.querySelector('[name=order_cycle_days]').value) || 0;
-        const warn  = lead + Math.ceil(cycle / 3);
+        const warn  = lead + (cycle ? Math.ceil(cycle * 0.15) : 3);
         const cEl = document.getElementById('prevCrit');
         const wEl = document.getElementById('prevWarn');
         if (cEl) cEl.textContent = lead;

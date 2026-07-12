@@ -23,8 +23,8 @@ class StoreStock extends Model
      *
      * Logic:
      *   - critical : DOS < lead_time                   → harus order SEKARANG
-     *   - warning  : DOS < lead_time + order_cycle/3   → segera order dalam waktu dekat
-     *   - ok       : DOS >= lead_time + order_cycle/3  → aman
+     *   - warning  : DOS < lead_time + 15% order_cycle → segera order dalam waktu dekat
+     *   - ok       : DOS >= lead_time + 15% order_cycle → aman
      *   - no_par   : lead_time belum diset
      *   - no_data  : DOS tidak bisa dihitung (tidak ada data pemakaian)
      *
@@ -38,8 +38,8 @@ class StoreStock extends Model
         if ($dos === null)           return 'no_data';
         if ($leadTimeDays === null)  return 'no_par';
 
-        // Warning buffer: 1/3 siklus order (atau 3 hari jika siklus belum diset)
-        $buffer  = $orderCycleDays ? (int)ceil($orderCycleDays / 3) : 3;
+        // Warning buffer: 15% siklus order (atau 3 hari jika siklus belum diset)
+        $buffer  = $orderCycleDays ? (int)ceil($orderCycleDays * 0.15) : 3;
         $warnAt  = $leadTimeDays + $buffer;
 
         if ($dos < $leadTimeDays)  return 'critical';
