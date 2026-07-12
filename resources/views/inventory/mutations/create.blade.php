@@ -1010,12 +1010,12 @@ function recalcTotals() {
         var qtyStr = qtyParts.join(' + ');
 
         lines.push(
-            '<div class="d-flex justify-content-between border-bottom py-1 small">'
-            + '<div><strong>' + ingName + '</strong>'
-            + (pkgLabel ? ' <span class="text-muted">· ' + pkgLabel + '</span>' : '')
-            + ' <span class="text-muted ms-1">(' + qtyStr + ')</span></div>'
-            + '<div class="fw-semibold">Rp ' + fmt(subtotal) + '</div>'
-            + '</div>'
+            '<tr>'
+            + '<td class="fw-semibold">' + ingName + '</td>'
+            + '<td class="text-muted small">' + (pkgLabel || '—') + '</td>'
+            + '<td class="text-end text-muted small text-nowrap">' + (qtyStr || '—') + '</td>'
+            + '<td class="text-end fw-semibold text-nowrap">Rp ' + fmt(subtotal) + '</td>'
+            + '</tr>'
         );
     });
 
@@ -1026,11 +1026,18 @@ function recalcTotals() {
 
     container.innerHTML =
         '<div class="fw-semibold mb-2"><i class="bi bi-receipt me-1"></i>Ringkasan Total</div>'
-        + lines.join('')
-        + '<div class="d-flex justify-content-between mt-2 pt-2 border-top">'
-        + '<div class="fw-bold fs-6">GRAND TOTAL</div>'
-        + '<div class="fw-bold fs-5 text-success">Rp ' + fmt(grand) + '</div>'
-        + '</div>';
+        + '<div class="table-responsive">'
+        + '<table class="table table-sm align-middle mb-0">'
+        + '<thead><tr class="text-muted small">'
+        +   '<th>Bahan</th><th>Kemasan</th>'
+        +   '<th class="text-end">Qty</th><th class="text-end">Subtotal</th>'
+        + '</tr></thead>'
+        + '<tbody>' + lines.join('') + '</tbody>'
+        + '<tfoot><tr class="border-top">'
+        +   '<td colspan="3" class="fw-bold fs-6">GRAND TOTAL</td>'
+        +   '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(grand) + '</td>'
+        + '</tr></tfoot>'
+        + '</table></div>';
 }
 
 // Auto-recalc setiap kali qty input berubah (delegasi event)
