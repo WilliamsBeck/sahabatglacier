@@ -1062,6 +1062,12 @@ function resetPriceRow(idx) {
     var info = document.querySelector('#row-' + idx + ' .price-info');
     if (info) info.classList.add('d-none');
     document.querySelector('#row-' + idx + ' .price-per-base-hidden').value = '';
+    // Kosongkan juga kotak harga yang TERLIHAT, supaya saat ganti bahan harga bahan
+    // baru bisa auto-terisi (kalau tidak, harga lama menghalangi karena "isi bila kosong").
+    var priceCrate = document.querySelector('#row-' + idx + ' .price-crate-input');
+    if (priceCrate) priceCrate.value = '';
+    var priceDirect = document.querySelector('#row-' + idx + ' .wrap-price-direct input');
+    if (priceDirect) priceDirect.value = '';
 }
 
 function addRow() {
