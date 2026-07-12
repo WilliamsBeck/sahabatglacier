@@ -13,16 +13,19 @@
 
 {{-- Konfigurasi order banner (compact) --}}
 @php
-$warnAt = $leadTimeDays ? ($leadTimeDays + ($orderCycleDays ? (int)ceil($orderCycleDays*0.15) : 3)) : null;
+// Model standar: reorder point = lead time + safety stock; zona kuning +1 siklus order
+$critAt = $leadTimeDays ? ($leadTimeDays + (int)($safetyStockDays ?? 0)) : null;
+$warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
 @endphp
 @if($leadTimeDays)
 <div class="alert alert-info d-flex align-items-center gap-2 py-1 px-3 mb-2 small">
     <i class="bi bi-bullseye"></i>
     <span>
-        <strong>Order:</strong> <span id="cfgOrderCycle">{{ $orderCycleDays ?? '?' }}</span> hr ·
         <strong>Lead:</strong> <span id="cfgLeadTime">{{ $leadTimeDays }}</span> hr ·
+        <strong>Safety:</strong> <span id="cfgSafety">{{ $safetyStockDays ?? 0 }}</span> hr ·
+        <strong>Order:</strong> <span id="cfgOrderCycle">{{ $orderCycleDays ?? '?' }}</span> hr ·
         <strong>Window:</strong> <span id="cfgDosWindow">{{ $dosWindowDays }}</span> hr
-        <span class="text-muted ms-2">🔴 &lt;<span id="cfgCrit">{{ $leadTimeDays }}</span>hr kritis · 🟡 &lt;<span id="cfgWarn">{{ $warnAt }}</span>hr segera</span>
+        <span class="text-muted ms-2">🔴 &lt;<span id="cfgCrit">{{ $critAt }}</span>hr pesan · 🟡 &lt;<span id="cfgWarn">{{ $warnAt }}</span>hr ancang²</span>
     </span>
     <button type="button" class="btn btn-sm btn-outline-primary ms-auto py-0" data-bs-toggle="modal" data-bs-target="#modalStoreConfig">
         <i class="bi bi-pencil-square"></i> Ubah
@@ -62,10 +65,17 @@ $warnAt = $leadTimeDays ? ($leadTimeDays + ($orderCycleDays ? (int)ceil($orderCy
                     </div>
 
                     <div class="mb-3">
+                        <label class="form-label fw-semibold">Safety Stock (hari) <span class="text-danger">*</span></label>
+                        <input type="number" name="safety_stock_days" class="form-control" min="0" max="60" required
+                               value="{{ $safetyStockDays ?? 0 }}">
+                        <div class="form-text">Cadangan di atas lead time (jaga-jaga pemakaian naik / kiriman telat). Titik pesan = Lead Time + Safety. Patokan umum: 30–50% lead time.</div>
+                    </div>
+
+                    <div class="mb-3">
                         <label class="form-label fw-semibold">Siklus Order (hari) <span class="text-danger">*</span></label>
                         <input type="number" name="order_cycle_days" class="form-control" min="1" max="90" required
                                value="{{ $orderCycleDays ?? 14 }}">
-                        <div class="form-text">Jarak antar order (misal: 30 = order tiap sebulan sekali).</div>
+                        <div class="form-text">Jarak antar order (misal: 30 = order tiap sebulan sekali). Juga jadi zona kuning "ancang-ancang".</div>
                     </div>
 
                     <div class="mb-3">
@@ -86,8 +96,8 @@ $warnAt = $leadTimeDays ? ($leadTimeDays + ($orderCycleDays ? (int)ceil($orderCy
                         <i class="bi bi-info-circle me-1"></i>
                         <strong>Threshold DOS yang akan berlaku:</strong>
                         <div class="mt-1">
-                            🔴 Kritis: DOS &lt; <span id="prevCrit">{{ $leadTimeDays ?? 7 }}</span> hari ·
-                            🟡 Segera: DOS &lt; <span id="prevWarn">{{ $warnAt ?? 10 }}</span> hari
+                            🔴 Pesan sekarang: DOS &lt; <span id="prevCrit">{{ $critAt ?? 7 }}</span> hari (Lead+Safety) ·
+                            🟡 Ancang-ancang: DOS &lt; <span id="prevWarn">{{ $warnAt ?? 10 }}</span> hari (+Siklus)
                         </div>
                     </div>
                 </div>
@@ -415,18 +425,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('formStoreConfig');
     if (!form) return;
 
-    // Live preview threshold
+    // Live preview threshold — model standar: crit = lead+safety, warn = crit+siklus
     function calcWarn() {
-        const lead  = parseInt(form.querySelector('[name=lead_time_days]').value) || 0;
-        const cycle = parseInt(form.querySelector('[name=order_cycle_days]').value) || 0;
-        const warn  = lead + (cycle ? Math.ceil(cycle * 0.15) : 3);
+        const lead   = parseInt(form.querySelector('[name=lead_time_days]').value) || 0;
+        const safety = parseInt(form.querySelector('[name=safety_stock_days]').value) || 0;
+        const cycle  = parseInt(form.querySelector('[name=order_cycle_days]').value) || 0;
+        const crit = lead + safety;
+        const warn = crit + cycle;
         const cEl = document.getElementById('prevCrit');
         const wEl = document.getElementById('prevWarn');
-        if (cEl) cEl.textContent = lead;
+        if (cEl) cEl.textContent = crit;
         if (wEl) wEl.textContent = warn;
     }
-    form.querySelector('[name=lead_time_days]').addEventListener('input', calcWarn);
-    form.querySelector('[name=order_cycle_days]').addEventListener('input', calcWarn);
+    ['lead_time_days','safety_stock_days','order_cycle_days'].forEach(n =>
+        form.querySelector('[name='+n+']')?.addEventListener('input', calcWarn));
 
     // Submit via AJAX
     form.addEventListener('submit', function(e) {

@@ -31,8 +31,9 @@ class StockController extends Controller
 
         // ── Konfigurasi order toko ────────────────────────────────────────────
         $selectedStore  = Store::find($selectedId);
-        $leadTimeDays   = $selectedStore?->leadTimeDays();   // reorder point
-        $orderCycleDays = $selectedStore?->orderCycleDays(); // siklus order
+        $leadTimeDays   = $selectedStore?->leadTimeDays();       // waktu tunggu kiriman
+        $orderCycleDays = $selectedStore?->orderCycleDays();     // siklus order (zona warning)
+        $safetyStockDays= $selectedStore?->safetyStockDays() ?? 0; // cadangan (hari)
         $dosWindowDays  = $selectedStore?->dosWindowDays() ?? 30; // window hitung rata-rata
         $parLevelDays   = $leadTimeDays; // backward compat alias
 
@@ -169,7 +170,7 @@ class StockController extends Controller
 
         $rows = collect();
 
-        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays) use ($receivedMap, $demandMap, $looseMap) {
+        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays) use ($receivedMap, $demandMap, $looseMap) {
             $ptb         = $pkg && $pkg->pack_to_base > 0 ? (float)$pkg->pack_to_base : 0;
             $crateToBase = $pkg ? $pkg->crate_to_pack * $ptb : 0;
 
@@ -265,8 +266,10 @@ class StockController extends Controller
                 : null;
             $avgDailyBase = ($avgDailyPack !== null && $ptb > 0) ? $avgDailyPack * $ptb : null;
             $dosValue     = ($avgDailyBase && $avgDailyBase > 0.001) ? $pkgBalance / $avgDailyBase : null;
-            $parLevelPack = ($avgDailyPack !== null && $parLevelDays) ? $avgDailyPack * $parLevelDays : null;
-            $dosStatus    = (new StoreStock())->dosStatus($dosValue, $leadTimeDays, $orderCycleDays);
+            // Min Stok = reorder point = pemakaian harian × (lead time + safety stock)
+            $ropDays      = ($leadTimeDays ?? 0) + max(0, (int) $safetyStockDays);
+            $parLevelPack = ($avgDailyPack !== null && $ropDays > 0) ? $avgDailyPack * $ropDays : null;
+            $dosStatus    = (new StoreStock())->dosStatus($dosValue, $leadTimeDays, $safetyStockDays, $orderCycleDays);
 
             return (object) [
                 'ingredient'      => $ing,
@@ -303,7 +306,7 @@ class StockController extends Controller
 
             if ($packagings->isEmpty()) {
                 // Bahan tanpa kemasan master aktif → 1 row dengan packaging null
-                $rows->push($buildRow($ing, null, $batches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays));
+                $rows->push($buildRow($ing, null, $batches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays));
                 continue;
             }
 
@@ -317,7 +320,7 @@ class StockController extends Controller
                     return $pkg->id == $defaultPkgId; // NULL fallback ke default
                 });
 
-                $rows->push($buildRow($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays));
+                $rows->push($buildRow($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays));
             }
         }
 
@@ -332,7 +335,7 @@ class StockController extends Controller
 
         return view('inventory.stocks.index', compact(
             'grouped', 'categoryLabels', 'stores', 'selectedId',
-            'selectedStore', 'parLevelDays', 'leadTimeDays', 'orderCycleDays', 'dosWindowDays'
+            'selectedStore', 'parLevelDays', 'leadTimeDays', 'orderCycleDays', 'dosWindowDays', 'safetyStockDays'
         ));
     }
 
@@ -340,25 +343,28 @@ class StockController extends Controller
     public function setStorePar(Request $request)
     {
         $request->validate([
-            'store_id'        => 'required|exists:stores,id',
-            'lead_time_days'  => 'required|integer|min:1|max:30',
-            'order_cycle_days'=> 'required|integer|min:1|max:90',
-            'dos_window_days' => 'required|integer|in:7,14,30',
+            'store_id'         => 'required|exists:stores,id',
+            'lead_time_days'   => 'required|integer|min:1|max:30',
+            'order_cycle_days' => 'required|integer|min:1|max:90',
+            'safety_stock_days'=> 'required|integer|min:0|max:60',
+            'dos_window_days'  => 'required|integer|in:7,14,30',
         ]);
 
         abort_unless(in_array($request->store_id, auth()->user()->accessibleStoreIds()), 403);
 
         Store::where('id', $request->store_id)->update([
-            'lead_time_days'   => $request->lead_time_days,
-            'order_cycle_days' => $request->order_cycle_days,
-            'dos_window_days'  => $request->dos_window_days,
+            'lead_time_days'    => $request->lead_time_days,
+            'order_cycle_days'  => $request->order_cycle_days,
+            'safety_stock_days' => $request->safety_stock_days,
+            'dos_window_days'   => $request->dos_window_days,
         ]);
 
         return response()->json([
-            'ok'               => true,
-            'lead_time_days'   => $request->lead_time_days,
-            'order_cycle_days' => $request->order_cycle_days,
-            'dos_window_days'  => $request->dos_window_days,
+            'ok'                => true,
+            'lead_time_days'    => $request->lead_time_days,
+            'order_cycle_days'  => $request->order_cycle_days,
+            'safety_stock_days' => $request->safety_stock_days,
+            'dos_window_days'   => $request->dos_window_days,
         ]);
     }
 

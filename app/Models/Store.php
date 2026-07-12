@@ -7,7 +7,7 @@ class Store extends Model
 {
     protected $fillable = [
         'store_code', 'name', 'area', 'is_active',
-        'lead_time_days', 'order_cycle_days', 'par_days', 'dos_window_days',
+        'lead_time_days', 'order_cycle_days', 'safety_stock_days', 'par_days', 'dos_window_days',
     ];
 
     protected $casts = ['is_active' => 'boolean'];
@@ -27,6 +27,15 @@ class Store extends Model
     public function orderCycleDays(): ?int
     {
         return $this->order_cycle_days ? (int)$this->order_cycle_days : null;
+    }
+
+    /**
+     * Safety stock dalam hari (cadangan di atas lead time).
+     * Reorder point = lead_time + safety_stock. NULL bila belum diset.
+     */
+    public function safetyStockDays(): ?int
+    {
+        return $this->safety_stock_days !== null ? (int)$this->safety_stock_days : null;
     }
 
     /**

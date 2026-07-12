@@ -32,7 +32,7 @@ class DashboardController extends Controller
 
         // ── 2. Low stock (DOS < lead_time) ───────────────────────────────────
         $storeConfigs = Store::whereIn('id', $storeIds)
-            ->get(['id', 'lead_time_days', 'order_cycle_days', 'dos_window_days'])
+            ->get(['id', 'lead_time_days', 'order_cycle_days', 'safety_stock_days', 'dos_window_days'])
             ->keyBy('id');
 
         // Rumus DOS DISAMAKAN dengan halaman Saldo Stok (StockController):
@@ -57,10 +57,11 @@ class DashboardController extends Controller
 
         $lowStocks = collect();
         foreach ($storeIds as $sid) {
-            $cfg            = $storeConfigs[$sid] ?? null;
-            $leadTimeDays   = $cfg?->leadTimeDays();
-            $orderCycleDays = $cfg?->orderCycleDays();
-            $dosWindowDays  = $cfg?->dosWindowDays() ?? self::DOS_WINDOW;
+            $cfg             = $storeConfigs[$sid] ?? null;
+            $leadTimeDays    = $cfg?->leadTimeDays();
+            $orderCycleDays  = $cfg?->orderCycleDays();
+            $safetyStockDays = $cfg?->safetyStockDays() ?? 0;
+            $dosWindowDays   = $cfg?->dosWindowDays() ?? self::DOS_WINDOW;
 
             // Window DOS mundur dari tanggal terakhir dikonfirmasi (sama dgn Saldo Stok)
             $lastConfirmed = \App\Models\DailyConfirmation::where('store_id', $sid)
@@ -156,7 +157,7 @@ class DashboardController extends Controller
                     if ($avgDailyBase < 0.001) continue;
 
                     $dos    = $pkgBalance / $avgDailyBase;
-                    $status = (new StoreStock())->dosStatus($dos, $leadTimeDays, $orderCycleDays);
+                    $status = (new StoreStock())->dosStatus($dos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
                     if (!in_array($status, ['critical', 'warning'])) continue;
 
                     $lowStocks->push((object) [
