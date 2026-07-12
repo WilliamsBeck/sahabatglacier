@@ -35,77 +35,146 @@ class DashboardController extends Controller
             ->get(['id', 'lead_time_days', 'order_cycle_days', 'dos_window_days'])
             ->keyBy('id');
 
-        $parStocks = StoreStock::with(['store', 'ingredient.packagings'])
-            ->whereIn('store_id', $storeIds)
-            ->where('stock_balance', '>=', 0)
-            ->get();
+        // Rumus DOS DISAMAKAN dengan halaman Saldo Stok (StockController):
+        //  - pembagi rata-rata = WINDOW PENUH (bukan hari aktif)
+        //  - basis stok        = FIFO pack UTUH per kemasan (bukan stock_balance ledger)
+        //  - acuan window       = mundur dari TANGGAL TERAKHIR DIKONFIRMASI (bukan hari ini)
+        //  - granularitas       = per (bahan × kemasan)
+        // Dihitung per toko lalu digabung, supaya daftar "Stok Menipis" konsisten dgn Saldo Stok.
+        $ingMap   = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
+            ->where('is_active', true)->get()->keyBy('id');
+        $storeMap = $stores->keyBy('id');
+        $kkey     = fn($i, $p) => $i . '-' . ($p ?: 0);
 
-        // Pakai window terkecil dari semua toko sebagai batas query, filter per baris di PHP
-        $minWindow = $storeConfigs->min(fn($s) => $s->dosWindowDays()) ?? self::DOS_WINDOW;
-        $dosFrom   = now()->subDays($minWindow - 1)->toDateString();
-        $usageSums = DailyUsage::whereIn('store_id', $storeIds)
-            ->where('usage_date', '>=', $dosFrom)
-            ->where('qty_pack', '>', 0)
-            ->whereExists(fn($q) => $q
-                ->from('daily_confirmations')
-                ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
-                ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date')
-            )
-            ->groupBy(['store_id', 'ingredient_id'])
-            ->selectRaw('store_id, ingredient_id, SUM(qty_pack) as total_pack, COUNT(DISTINCT usage_date) as active_days, MIN(usage_date) as min_date')
-            ->get()
-            ->keyBy(fn($r) => $r->store_id . '-' . $r->ingredient_id);
-
-        // Eceran (pcs/gr) dari opname approved TERAKHIR per toko — untuk DIABAIKAN di tampilan
-        // (konsisten dgn halaman Saldo Stok). DISPLAY-ONLY: stock_balance/DOS tidak diubah.
-        // key = "store-ingredient-packaging".
-        $lastOps = Opname::whereIn('store_id', $storeIds)->where('status', 'approved')
-            ->orderByDesc('opname_date')->orderByDesc('id')->get(['id', 'store_id'])
-            ->groupBy('store_id')->map(fn($g) => $g->first()->id);
-        $opIdToStore = $lastOps->flip(); // opname_id => store_id
-        $looseMap = [];
-        if ($lastOps->isNotEmpty()) {
-            foreach (OpnameItem::whereIn('opname_id', $lastOps->values())
-                    ->whereNotNull('packaging_id')->where('physical_base', '>', 0)
-                    ->get(['opname_id', 'ingredient_id', 'packaging_id', 'physical_base']) as $oi) {
-                $sid = $opIdToStore[$oi->opname_id] ?? null;
-                if ($sid) $looseMap[$sid . '-' . $oi->ingredient_id . '-' . $oi->packaging_id] = (float) $oi->physical_base;
+        // pkgConv untuk konversi base (ptb/ctb) — sama untuk semua toko
+        $pkgConv = [];
+        foreach ($ingMap as $ingX) {
+            foreach ($ingX->packagings as $p) {
+                $pkgConv[$p->id] = ['ptb' => (float) $p->pack_to_base,
+                                    'ctb' => (float) $p->crate_to_pack * (float) $p->pack_to_base];
             }
         }
 
-        $lowStocks = $parStocks
-            ->map(function ($ss) use ($usageSums, $storeConfigs, $looseMap) {
-                $key   = $ss->store_id . '-' . $ss->ingredient_id;
-                $usage = $usageSums[$key] ?? null;
-                if (!$usage) return null;
+        $lowStocks = collect();
+        foreach ($storeIds as $sid) {
+            $cfg            = $storeConfigs[$sid] ?? null;
+            $leadTimeDays   = $cfg?->leadTimeDays();
+            $orderCycleDays = $cfg?->orderCycleDays();
+            $dosWindowDays  = $cfg?->dosWindowDays() ?? self::DOS_WINDOW;
 
-                $pkg            = $ss->ingredient->packagings->first();
-                $ptb            = $pkg ? (float) $pkg->pack_to_base : 1;
-                $store          = $storeConfigs[$ss->store_id] ?? null;
-                $leadTimeDays   = $store?->leadTimeDays();
-                $orderCycleDays = $store?->orderCycleDays();
-                $windowDays     = $store?->dosWindowDays() ?? 30;
-                $windowFrom     = now()->subDays($windowDays - 1)->toDateString();
+            // Window DOS mundur dari tanggal terakhir dikonfirmasi (sama dgn Saldo Stok)
+            $lastConfirmed = \App\Models\DailyConfirmation::where('store_id', $sid)
+                ->orderByDesc('confirmation_date')->first()?->confirmation_date;
+            if (!$lastConfirmed) continue;
 
-                // Hitung ulang active_days & total_pack dalam window toko ini
-                // (data sudah di-fetch dari window terkecil, filter lagi jika perlu)
-                $activeDays   = $usage->active_days > 0 ? $usage->active_days : 1;
-                $avgDailyBase = ($usage->total_pack * $ptb) / $activeDays;
-                if ($avgDailyBase < 0.001) return null;
+            $dosTo   = $lastConfirmed->toDateString();
+            $dosFrom = $lastConfirmed->copy()->subDays($dosWindowDays - 1)->toDateString();
+            $usageByIng = DailyUsage::where('store_id', $sid)
+                ->whereBetween('usage_date', [$dosFrom, $dosTo])
+                ->where('qty_pack', '>', 0)
+                ->whereExists(fn($q) => $q->from('daily_confirmations')
+                    ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                    ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+                ->groupBy('ingredient_id')
+                ->selectRaw('ingredient_id, SUM(qty_pack) as total_pack')
+                ->get()->keyBy('ingredient_id');
+            if ($usageByIng->isEmpty()) continue;
 
-                $dos = $ss->stock_balance / $avgDailyBase;
-                $ss->dos_value        = round($dos, 1);
-                $ss->lead_time_days   = $leadTimeDays;
-                $ss->order_cycle_days = $orderCycleDays;
-                $ss->dos_status       = $ss->dosStatus($dos, $leadTimeDays, $orderCycleDays);
-                // FIFO hanya berisi pack utuh; eceran tidak masuk stok. Sisa stok tampil =
-                // stock_balance apa adanya (pecahan pack difloor saat ditampilkan per Dus/Pack).
-                $ss->sealed_balance = max(0, (float) $ss->stock_balance);
-                return $ss;
-            })
-            ->filter(fn($ss) => $ss && in_array($ss->dos_status, ['critical', 'warning']))
-            ->sortBy('dos_value')
-            ->values();
+            // FIFO pack utuh per (ing,pkg)
+            $fifoByKey = [];
+            foreach (\App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                        $q->where('destination_store_id', $sid)->where('status', 'confirmed')
+                          ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal', 'sale_external']))
+                    ->where('remaining_qty', '>', 0)
+                    ->selectRaw('ingredient_id, packaging_id, SUM(remaining_qty) as t')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $fifoByKey[$kkey($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
+            }
+
+            // received & demand per (ing,pkg) — untuk deteksi saldo MINUS (over-usage), sama dgn Saldo Stok
+            $receivedMap = [];
+            foreach (\App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                        $q->where('destination_store_id', $sid)->where('status', 'confirmed'))
+                    ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) as t')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $receivedMap[$kkey($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
+            }
+            $demandMap = [];
+            foreach (\App\Models\MutationItem::whereHas('mutation', fn($q) =>
+                        $q->where('source_store_id', $sid)->where('status', 'confirmed')
+                          ->whereIn('type', ['sale_internal', 'sale_external_out']))
+                    ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) as t')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $k = $kkey($r->ingredient_id, $r->packaging_id);
+                $demandMap[$k] = ($demandMap[$k] ?? 0) + (float) $r->t;
+            }
+            foreach (DailyUsage::where('store_id', $sid)->where('qty_pack', '>', 0)
+                    ->whereExists(fn($q) => $q->from('daily_confirmations')
+                        ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                        ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+                    ->selectRaw('ingredient_id, packaging_id, SUM(qty_pack) as p')
+                    ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
+                $ptbU = ($r->packaging_id && isset($pkgConv[$r->packaging_id])) ? $pkgConv[$r->packaging_id]['ptb'] : 1;
+                $k = $kkey($r->ingredient_id, $r->packaging_id);
+                $demandMap[$k] = ($demandMap[$k] ?? 0) + (float) $r->p * $ptbU;
+            }
+            foreach (OpnameItem::query()
+                    ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
+                    ->where('opnames.store_id', $sid)->where('opnames.status', 'approved')
+                    ->where('opname_items.variance', '<', 0)
+                    ->selectRaw('opname_items.ingredient_id as ing, opname_items.packaging_id as pkg, SUM(opname_items.variance) as v')
+                    ->groupBy('opname_items.ingredient_id', 'opname_items.packaging_id')->get() as $r) {
+                $k = $kkey($r->ing, $r->pkg);
+                $demandMap[$k] = ($demandMap[$k] ?? 0) + abs((float) $r->v);
+            }
+            foreach (WasteLogItem::query()
+                    ->join('waste_logs', 'waste_logs.id', '=', 'waste_log_items.waste_log_id')
+                    ->where('waste_logs.store_id', $sid)->where('waste_log_items.source_type', 'raw')
+                    ->selectRaw('waste_log_items.ingredient_id as ing, waste_log_items.packaging_id as pkg, SUM(waste_log_items.qty_crate) as c, SUM(waste_log_items.qty_pack) as p, SUM(waste_log_items.qty_base) as b')
+                    ->groupBy('waste_log_items.ingredient_id', 'waste_log_items.packaging_id')->get() as $r) {
+                $base = ($r->pkg && isset($pkgConv[$r->pkg]))
+                    ? ((float) $r->c * $pkgConv[$r->pkg]['ctb'] + (float) $r->p * $pkgConv[$r->pkg]['ptb'])
+                    : (float) $r->b;
+                $k = $kkey($r->ing, $r->pkg);
+                $demandMap[$k] = ($demandMap[$k] ?? 0) + $base;
+            }
+
+            // Bangun baris low-stock per (bahan × kemasan) untuk bahan yang ada pemakaian
+            foreach ($usageByIng as $ingId => $u) {
+                $ing = $ingMap[$ingId] ?? null;
+                if (!$ing) continue;
+                foreach ($ing->packagings as $pkg) {
+                    $ptb = (float) $pkg->pack_to_base;
+                    if ($ptb <= 0) continue;
+                    $k          = $kkey($ingId, $pkg->id);
+                    $wholeBase  = $fifoByKey[$k] ?? 0;
+                    $signed     = ($receivedMap[$k] ?? 0) - ($demandMap[$k] ?? 0);
+                    $pkgBalance = $signed < -0.001 ? $signed : $wholeBase;
+
+                    // pembagi = WINDOW PENUH (bukan hari aktif)
+                    $avgDailyBase = ((float) $u->total_pack / $dosWindowDays) * $ptb;
+                    if ($avgDailyBase < 0.001) continue;
+
+                    $dos    = $pkgBalance / $avgDailyBase;
+                    $status = (new StoreStock())->dosStatus($dos, $leadTimeDays, $orderCycleDays);
+                    if (!in_array($status, ['critical', 'warning'])) continue;
+
+                    $lowStocks->push((object) [
+                        'ingredient'      => $ing,
+                        'packaging'       => $pkg,
+                        'store'           => $storeMap[$sid] ?? null,
+                        'store_id'        => $sid,
+                        'ingredient_id'   => $ingId,
+                        'sealed_balance'  => $pkgBalance,
+                        'dos_value'       => round($dos, 1),
+                        'dos_status'      => $status,
+                        'lead_time_days'  => $leadTimeDays,
+                        'order_cycle_days'=> $orderCycleDays,
+                    ]);
+                }
+            }
+        }
+        $lowStocks = $lowStocks->sortBy('dos_value')->values();
 
         // ── 3. Total waste bulan ini ───────────────────────────────────────────
         $totalWaste = WasteLog::whereIn('store_id', $storeIds)
@@ -169,8 +238,8 @@ class DashboardController extends Controller
                 ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date')
             )
             ->distinct()->pluck('ingredient_id');
-        $chartIngredients = Ingredient::whereIn('id', $usedIngredientIds)
-            ->orderBy('name')->get(['id', 'name', 'unit_base']);
+        $chartIngredients = Ingredient::whereIn('ingredients.id', $usedIngredientIds)
+            ->orderedByCategory()->get(['ingredients.id', 'ingredients.name', 'ingredients.unit_base']);
 
         $chartSelectedId = request('chart_ingredient');
         if ($chartSelectedId && !$usedIngredientIds->contains((int) $chartSelectedId)) {
