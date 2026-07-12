@@ -158,9 +158,9 @@
                         <thead class="table-dark">
                             <tr>
                                 <th>Bahan</th>
-                                <th class="text-center">Dus</th>
-                                <th class="text-center">Pack</th>
-                                <th class="text-center">Pcs/Gr</th>
+                                <th class="text-center" style="width:80px">Dus</th>
+                                <th class="text-center" style="width:80px">Pack</th>
+                                <th class="text-center" style="width:80px">Pcs/Gr</th>
                                 <th class="text-end">Harga/Dus</th>
                                 @if($mutation->type === 'sale_external_out')
                                 <th class="text-end">Harga Jual/Base</th>
