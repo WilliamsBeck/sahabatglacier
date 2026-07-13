@@ -436,6 +436,16 @@
         };
         var fmt = function (v) { return mode === 'value' ? rupiah(v) : numFmt(v) + ' ' + unit; };
 
+        // Mode per-bahan pakai satuan pack (bilangan bulat) → paksa tick sumbu-Y integer,
+        // jangan tampilkan gridline desimal (0,2 / 0,4 dst). Step disesuaikan max ≤ ~6 tick.
+        var dataArr = @json($chartData);
+        var maxVal  = dataArr.length ? Math.max.apply(null, dataArr) : 0;
+        var yTickOpts = { font: { size: 10 }, color: '#475569', callback: function (v) { return fmt(v); } };
+        if (mode !== 'value') {
+            yTickOpts.stepSize  = Math.max(1, Math.ceil(maxVal / 6));
+            yTickOpts.precision = 0;
+        }
+
         new Chart(el, {
             type: 'line',
             data: {
@@ -467,7 +477,7 @@
                     y: {
                         beginAtZero: true,
                         grid: { color: '#E2E8F0' },
-                        ticks: { font: { size: 10 }, color: '#475569', callback: function (v) { return fmt(v); } }
+                        ticks: yTickOpts
                     }
                 }
             }
