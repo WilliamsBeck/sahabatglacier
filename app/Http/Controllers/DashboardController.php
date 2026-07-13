@@ -70,16 +70,22 @@ class DashboardController extends Controller
 
             $dosTo   = $lastConfirmed->toDateString();
             $dosFrom = $lastConfirmed->copy()->subDays($dosWindowDays - 1)->toDateString();
-            $usageByIng = DailyUsage::where('store_id', $sid)
-                ->whereBetween('usage_date', [$dosFrom, $dosTo])
-                ->where('qty_pack', '>', 0)
-                ->whereExists(fn($q) => $q->from('daily_confirmations')
-                    ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
-                    ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
-                ->groupBy('ingredient_id')
-                ->selectRaw('ingredient_id, SUM(qty_pack) as total_pack')
-                ->get()->keyBy('ingredient_id');
-            if ($usageByIng->isEmpty()) continue;
+            // Pemakaian dalam BASE per bahan (konversi qty_pack × ptb per kemasan lalu jumlah).
+            // Dipakai untuk DOS tingkat bahan (gabungan semua kemasan).
+            $usageBaseByIng = [];
+            foreach (DailyUsage::where('store_id', $sid)
+                    ->whereBetween('usage_date', [$dosFrom, $dosTo])
+                    ->where('qty_pack', '>', 0)
+                    ->whereExists(fn($q) => $q->from('daily_confirmations')
+                        ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                        ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+                    ->groupBy('ingredient_id', 'packaging_id')
+                    ->selectRaw('ingredient_id, packaging_id, SUM(qty_pack) as p')
+                    ->get() as $r) {
+                $ptbU = ($r->packaging_id && isset($pkgConv[$r->packaging_id])) ? $pkgConv[$r->packaging_id]['ptb'] : 1;
+                $usageBaseByIng[$r->ingredient_id] = ($usageBaseByIng[$r->ingredient_id] ?? 0) + (float) $r->p * $ptbU;
+            }
+            if (empty($usageBaseByIng)) continue;
 
             // FIFO pack utuh per (ing,pkg)
             $fifoByKey = [];
@@ -151,41 +157,43 @@ class DashboardController extends Controller
                 $onOrderMap[$kkey($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
             }
 
-            // Bangun baris low-stock per (bahan × kemasan) untuk bahan yang ada pemakaian
-            foreach ($usageByIng as $ingId => $u) {
+            // Bangun baris low-stock per BAHAN (gabungan semua kemasan).
+            // Stok & on-order dijumlah lintas kemasan → bahan tak tampil 0 palsu hanya
+            // karena satu kemasan kosong sementara kemasan lain masih berstok.
+            foreach ($usageBaseByIng as $ingId => $usageBase) {
                 $ing = $ingMap[$ingId] ?? null;
                 if (!$ing) continue;
+
+                $totalStock = 0.0; $totalOnOrder = 0.0;
                 foreach ($ing->packagings as $pkg) {
-                    $ptb = (float) $pkg->pack_to_base;
-                    if ($ptb <= 0) continue;
                     $k          = $kkey($ingId, $pkg->id);
                     $wholeBase  = $fifoByKey[$k] ?? 0;
                     $signed     = ($receivedMap[$k] ?? 0) - ($demandMap[$k] ?? 0);
-                    $pkgBalance = $signed < -0.001 ? $signed : $wholeBase;
-
-                    // pembagi = WINDOW PENUH (bukan hari aktif)
-                    $avgDailyBase = ((float) $u->total_pack / $dosWindowDays) * $ptb;
-                    if ($avgDailyBase < 0.001) continue;
-
-                    $dos     = $pkgBalance / $avgDailyBase;              // DOS stok fisik (untuk tampilan)
-                    $onOrder = $onOrderMap[$k] ?? 0;
-                    $posDos  = ($pkgBalance + $onOrder) / $avgDailyBase; // Inventory Position (untuk status)
-                    $status  = (new StoreStock())->dosStatus($posDos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
-                    if (!in_array($status, ['critical', 'warning'])) continue;
-
-                    $lowStocks->push((object) [
-                        'ingredient'      => $ing,
-                        'packaging'       => $pkg,
-                        'store'           => $storeMap[$sid] ?? null,
-                        'store_id'        => $sid,
-                        'ingredient_id'   => $ingId,
-                        'sealed_balance'  => $pkgBalance,
-                        'dos_value'       => round($dos, 1),
-                        'dos_status'      => $status,
-                        'lead_time_days'  => $leadTimeDays,
-                        'order_cycle_days'=> $orderCycleDays,
-                    ]);
+                    $totalStock   += ($signed < -0.001 ? $signed : $wholeBase);
+                    $totalOnOrder += ($onOrderMap[$k] ?? 0);
                 }
+
+                // pembagi = WINDOW PENUH (bukan hari aktif)
+                $avgDailyBase = (float) $usageBase / $dosWindowDays;
+                if ($avgDailyBase < 0.001) continue;
+
+                $dos    = $totalStock / $avgDailyBase;                    // DOS stok fisik (tampilan)
+                $posDos = ($totalStock + $totalOnOrder) / $avgDailyBase;  // Inventory Position (status)
+                $status = (new StoreStock())->dosStatus($posDos, $leadTimeDays, $safetyStockDays, $orderCycleDays);
+                if (!in_array($status, ['critical', 'warning'])) continue;
+
+                $lowStocks->push((object) [
+                    'ingredient'      => $ing,
+                    'packaging'       => $ing->packagings->first(),
+                    'store'           => $storeMap[$sid] ?? null,
+                    'store_id'        => $sid,
+                    'ingredient_id'   => $ingId,
+                    'sealed_balance'  => $totalStock,
+                    'dos_value'       => round($dos, 1),
+                    'dos_status'      => $status,
+                    'lead_time_days'  => $leadTimeDays,
+                    'order_cycle_days'=> $orderCycleDays,
+                ]);
             }
         }
         $lowStocks = $lowStocks->sortBy('dos_value')->values();
