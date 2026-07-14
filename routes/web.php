@@ -88,6 +88,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('ledger-export', [StockLedgerController::class, 'export'])->name('ledger.export');
         Route::get('daily-ledger', [DailyLedgerController::class, 'index'])->name('daily-ledger.index');
         Route::post('daily-ledger/save-usage', [DailyLedgerController::class, 'saveUsage'])->name('daily-ledger.save-usage');
+        Route::post('daily-ledger/bulk-delete-usage', [DailyLedgerController::class, 'bulkDeleteUsage'])->name('daily-ledger.bulk-delete-usage');
         Route::post('daily-ledger/confirm-date', [DailyLedgerController::class, 'confirmDate'])->name('daily-ledger.confirm-date');
         Route::get('daily-ledger/export-template', [DailyLedgerController::class, 'exportTemplate'])->name('daily-ledger.export-template');
         Route::post('daily-ledger/import-usage', [DailyLedgerController::class, 'importUsage'])->name('daily-ledger.import-usage');

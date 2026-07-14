@@ -595,6 +595,51 @@ class DailyLedgerController extends Controller
         ]);
     }
 
+    // ── AJAX: hapus pemakaian BANYAK sel sekaligus (blok ala Excel) ─────────────
+    // Satu request + satu transaksi + recalculate FIFO SEKALI per bahan. Ini mencegah
+    // race condition yang terjadi bila tiap sel dikirim terpisah (recalc bahan yang
+    // sama berjalan paralel → saldo stok jadi kacau).
+    public function bulkDeleteUsage(Request $request)
+    {
+        $data = $request->validate([
+            'store_id'              => 'required|exists:stores,id',
+            'cells'                 => 'required|array|min:1',
+            'cells.*.ingredient_id' => 'required|integer',
+            'cells.*.packaging_id'  => 'nullable|integer',
+            'cells.*.date'          => 'required|date',
+        ]);
+
+        $storeId = (int) $data['store_id'];
+        abort_unless(in_array($storeId, auth()->user()->accessibleStoreIds()), 403);
+
+        $affectedIngs = [];
+        $errors       = [];
+        $cleared      = 0;
+
+        \DB::transaction(function () use ($data, $storeId, &$affectedIngs, &$errors, &$cleared) {
+            foreach ($data['cells'] as $c) {
+                if ($err = $this->lockError($storeId, $c['date'])) { $errors[$err] = true; continue; }
+                $q = DailyUsage::where('store_id', $storeId)
+                    ->where('ingredient_id', (int) $c['ingredient_id'])
+                    ->where('usage_date', $c['date']);
+                empty($c['packaging_id']) ? $q->whereNull('packaging_id') : $q->where('packaging_id', (int) $c['packaging_id']);
+                $cleared += $q->delete();
+                $affectedIngs[(int) $c['ingredient_id']] = true;
+            }
+        });
+
+        // Recalculate FIFO sekali per bahan (sekuensial, tidak paralel) — aman dari race.
+        foreach (array_keys($affectedIngs) as $ingId) {
+            FifoService::recalculate($storeId, (int) $ingId);
+        }
+
+        return response()->json([
+            'ok'      => true,
+            'cleared' => $cleared,
+            'errors'  => array_keys($errors),
+        ]);
+    }
+
     // ── AJAX: toggle konfirmasi per tanggal ────────────────────────────────────
     // Aturan urutan:
     //   - Konfirmasi tgl D  → semua tgl 1..D-1 dalam bulan yang sama harus sudah dikonfirmasi.

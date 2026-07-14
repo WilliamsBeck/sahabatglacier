@@ -561,8 +561,9 @@ body.dl-noselect, body.dl-noselect * { -webkit-user-select: none !important; use
 
 @push('scripts')
 <script>
-var saveUrl    = '{{ route("inventory.daily-ledger.save-usage") }}';
-var confirmUrl = '{{ route("inventory.daily-ledger.confirm-date") }}';
+var saveUrl       = '{{ route("inventory.daily-ledger.save-usage") }}';
+var bulkDeleteUrl = '{{ route("inventory.daily-ledger.bulk-delete-usage") }}';
+var confirmUrl    = '{{ route("inventory.daily-ledger.confirm-date") }}';
 var csrfToken  = '{{ csrf_token() }}';
 var saveTimers = {};
 
@@ -766,15 +767,37 @@ if (ledgerTable) {
         var ae = document.activeElement;
         if (ae && ae.classList && ae.classList.contains('usage-input')) return; // biarkan edit sel tunggal
         e.preventDefault();
+
+        // Kosongkan tampilan segera (optimistis) + kumpulkan sel berisi yang perlu dihapus di server
+        var payload = [], affectedRows = new Set();
         Array.from(selCells).forEach(function(td) {
-            td.textContent = '';
-            if ((parseFloat(td.dataset.val) || 0) > 0) {
-                postUsage(td, 0);                                 // hapus di server
-            } else {
-                td.dataset.val = ''; td.classList.remove('has-val');
-            }
-            updateRowSummary(td.closest('tr'));
+            var tr  = td.closest('tr');
+            var had = (parseFloat(td.dataset.val) || 0) > 0;
+            td.textContent = ''; td.dataset.val = ''; td.classList.remove('has-val');
+            affectedRows.add(tr);
+            if (had) payload.push({ ingredient_id: tr.dataset.ing, packaging_id: tr.dataset.pkg || null, date: td.dataset.date });
         });
+        affectedRows.forEach(function(tr){ updateRowSummary(tr); });
+        if (payload.length === 0) return;
+
+        // SATU request hapus-massal → 1 transaksi + recalc FIFO sekali per bahan (anti race)
+        var status = document.getElementById('saveStatus');
+        status.textContent = 'Menghapus...';
+        fetch(bulkDeleteUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
+            body: JSON.stringify({ store_id: ledgerStore, cells: payload })
+        })
+        .then(function(r) { return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
+        .then(function(res) {
+            if (!res.ok) { status.textContent = '⚠ Gagal hapus'; window.location.reload(); return; }
+            if (res.data && res.data.errors && res.data.errors.length) {
+                status.textContent = '⚠ Sebagian terkunci'; window.location.reload(); return; // resync
+            }
+            status.textContent = 'Terhapus ✓';
+            setTimeout(function() { status.textContent = ''; }, 1500);
+        })
+        .catch(function() { status.textContent = '⚠ Gagal hapus'; window.location.reload(); });
     });
 }
 
