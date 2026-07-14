@@ -201,6 +201,9 @@
         @endif
     </div>
     <div class="d-flex gap-2 align-items-center">
+        <span class="text-muted small d-none d-md-inline" title="Klik-tahan lalu seret untuk memilih banyak sel, tekan Delete untuk mengosongkan. Esc untuk batal.">
+            <i class="bi bi-grid-3x3-gap me-1"></i>Seret pilih blok · Delete = hapus
+        </span>
         <span id="saveStatus" class="text-muted small"></span>
         <button id="btnToggleReorder" type="button" class="btn btn-outline-primary btn-sm">
             <i class="bi bi-arrows-move me-1"></i> Atur Urutan
@@ -519,6 +522,9 @@
 }
 .daily-ledger-table .td-usage-cell.has-val { background: #fdecea; }
 .daily-ledger-table .td-usage-cell:focus { outline: 2px solid #3498db; background: #ebf5fb; }
+/* Seleksi blok ala Excel */
+.daily-ledger-table .td-usage-cell.dl-selected { background: #cfe8ff !important; box-shadow: inset 0 0 0 1px #2980b9; }
+body.dl-noselect, body.dl-noselect * { -webkit-user-select: none !important; user-select: none !important; }
 .usage-input {
     width: 100%;
     border: none;
@@ -636,13 +642,12 @@ if (ledgerTable) {
         }
     });
 
-    function saveUsage(input) {
-        var td      = input.closest('.td-usage-cell');
+    // Simpan satu sel ke server. Dipakai edit tunggal (via saveUsage) & hapus massal.
+    function postUsage(td, qtyPack) {
         var tr      = td.closest('tr');
         var date    = td.dataset.date;
         var ingId   = tr.dataset.ing;
         var pkg     = tr.dataset.pkg || null;
-        var qtyPack = parseFloat(input.value) || 0;
         var newVal  = qtyPack > 0 ? String(qtyPack) : '';
         var prevVal = td.dataset.val;
         var key     = ingId + date;
@@ -687,6 +692,90 @@ if (ledgerTable) {
             .catch(function() { status.textContent = '⚠ Gagal simpan'; });
         }, 500);
     }
+
+    function saveUsage(input) {
+        postUsage(input.closest('.td-usage-cell'), parseFloat(input.value) || 0);
+    }
+
+    // ── Seleksi blok ala Excel + hapus massal ─────────────────────────────
+    // Seret (klik-tahan) untuk memilih blok sel, tekan Delete/Backspace untuk
+    // mengosongkan semuanya sekaligus. Esc untuk batal seleksi.
+    var selCells = new Set();
+    var selAnchor = null, mouseDownCell = null, isDragging = false, rowCache = null;
+
+    function usageRows() {
+        if (!rowCache) rowCache = Array.from(ledgerTable.querySelectorAll('tr'))
+            .filter(function(tr){ return tr.querySelector('.td-usage-cell'); });
+        return rowCache;
+    }
+    function cellPos(td) {
+        var tr = td.closest('tr');
+        return { r: usageRows().indexOf(tr),
+                 c: Array.from(tr.querySelectorAll('.td-usage-cell')).indexOf(td) };
+    }
+    function clearSelection() {
+        selCells.forEach(function(td){ td.classList.remove('dl-selected'); });
+        selCells.clear();
+    }
+    function selectRange(anchor, target) {
+        clearSelection();
+        var a = cellPos(anchor), b = cellPos(target);
+        var r1 = Math.min(a.r, b.r), r2 = Math.max(a.r, b.r);
+        var c1 = Math.min(a.c, b.c), c2 = Math.max(a.c, b.c);
+        var rws = usageRows();
+        for (var r = r1; r <= r2; r++) {
+            var cells = Array.from(rws[r].querySelectorAll('.td-usage-cell'));
+            for (var c = c1; c <= c2; c++) {
+                var td = cells[c];
+                if (td && td.getAttribute('tabindex') !== '-1') { td.classList.add('dl-selected'); selCells.add(td); }
+            }
+        }
+    }
+
+    ledgerTable.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        var td = e.target.closest('.td-usage-cell');
+        if (!td || td.getAttribute('tabindex') === '-1') return;
+        mouseDownCell = td;
+        isDragging = false;
+    });
+    ledgerTable.addEventListener('mouseover', function(e) {
+        if (!mouseDownCell) return;
+        var td = e.target.closest('.td-usage-cell');
+        if (!td || (!isDragging && td === mouseDownCell)) return;
+        if (!isDragging) {
+            isDragging = true;
+            selAnchor  = mouseDownCell;
+            document.body.classList.add('dl-noselect');
+            var inp = mouseDownCell.querySelector('input');
+            if (inp) inp.blur();                                  // batalkan mode edit sel awal
+            var s = window.getSelection && window.getSelection(); if (s) s.removeAllRanges();
+        }
+        selectRange(selAnchor, td);
+    });
+    document.addEventListener('mouseup', function() {
+        if (mouseDownCell && !isDragging) clearSelection();       // klik tunggal → edit biasa
+        mouseDownCell = null; isDragging = false;
+        document.body.classList.remove('dl-noselect');
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (selCells.size === 0) return;
+        if (e.key === 'Escape') { clearSelection(); return; }
+        if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+        var ae = document.activeElement;
+        if (ae && ae.classList && ae.classList.contains('usage-input')) return; // biarkan edit sel tunggal
+        e.preventDefault();
+        Array.from(selCells).forEach(function(td) {
+            td.textContent = '';
+            if ((parseFloat(td.dataset.val) || 0) > 0) {
+                postUsage(td, 0);                                 // hapus di server
+            } else {
+                td.dataset.val = ''; td.classList.remove('has-val');
+            }
+            updateRowSummary(td.closest('tr'));
+        });
+    });
 }
 
 // ── Update TOT + Stok Akhir ──────────────────────
