@@ -522,7 +522,8 @@ class MutationController extends Controller
         }
 
         MutationService::confirm($mutation);
-        return back()->with('success', 'Mutasi berhasil dikonfirmasi. Stok telah diupdate.');
+        return redirect()->route('inventory.mutations.index')
+            ->with('success', 'Mutasi berhasil dikonfirmasi. Stok telah diupdate.');
     }
 
     public function cancel(Mutation $mutation)
