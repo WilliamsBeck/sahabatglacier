@@ -628,19 +628,43 @@ if (ledgerTable) {
         updateRowSummary(tr); // pastikan TOT & stok akhir selalu sinkron saat keluar sel
     });
 
-    // ENTER: pindah ke sel di baris bawah kolom yang sama
+    // NAVIGASI ala Excel: Enter/panah pindah sel (bukan mengubah angka).
+    //   ↑/↓ & Enter → baris atas/bawah pada kolom tanggal yang sama
+    //   ←/→        → tanggal sebelum/berikutnya pada baris yang sama
+    //                (hanya pindah bila kursor sudah di ujung teks, biar tetap bisa edit)
     ledgerTable.addEventListener('keydown', function(e) {
-        if (e.key !== 'Enter') return;
         var el = e.target;
         if (!el.classList.contains('usage-input')) return;
-        e.preventDefault();
-        var td    = el.closest('.td-usage-cell');
-        var date  = td.dataset.date;
-        var cells = Array.from(ledgerTable.querySelectorAll('.td-usage-cell[data-date="' + date + '"]'));
-        var idx   = cells.indexOf(td);
-        if (idx >= 0 && idx < cells.length - 1) {
-            cells[idx + 1].focus(); // blur sel kini → focusin sel berikut → jadi input
+        var key = e.key;
+        if (key !== 'Enter' && key !== 'ArrowUp' && key !== 'ArrowDown'
+            && key !== 'ArrowLeft' && key !== 'ArrowRight') return;
+
+        var td = el.closest('.td-usage-cell');
+        if (!td) return;
+
+        // Kiri/kanan: biarkan kursor bergerak dulu selama belum di ujung teks
+        var caret = (typeof el.selectionStart === 'number') ? el.selectionStart : 0;
+        if (key === 'ArrowLeft'  && caret > 0) return;
+        if (key === 'ArrowRight' && caret < (el.value || '').length) return;
+
+        var list, idx, step;
+        if (key === 'Enter' || key === 'ArrowDown' || key === 'ArrowUp') {
+            list = Array.from(ledgerTable.querySelectorAll('.td-usage-cell[data-date="' + td.dataset.date + '"]'));
+            step = (key === 'ArrowUp') ? -1 : 1;
+        } else {
+            list = Array.from(td.closest('tr').querySelectorAll('.td-usage-cell'));
+            step = (key === 'ArrowLeft') ? -1 : 1;
         }
+        idx = list.indexOf(td);
+
+        // Cari sel berikutnya yang bisa diedit (lewati yang terkunci)
+        var target = null;
+        for (var i = idx + step; i >= 0 && i < list.length; i += step) {
+            if (list[i].getAttribute('tabindex') !== '-1') { target = list[i]; break; }
+        }
+
+        e.preventDefault();                 // cegah scroll & perubahan nilai bawaan
+        if (target) target.focus();         // blur sel kini → focusin sel tujuan → jadi input
     });
 
     // Simpan satu sel ke server. Dipakai edit tunggal (via saveUsage) & hapus massal.
