@@ -181,7 +181,7 @@
                                 <td class="fw-semibold">{{ $item->ingredient->name }}</td>
                                 <td class="text-center">{{ $item->qty_crate ?: '-' }}</td>
                                 <td class="text-center">{{ $item->qty_pack ?: '-' }}</td>
-                                <td class="text-center">{{ $item->qty_base ? number_format($item->qty_base, 0, ',', '.') : '-' }}</td>
+                                <td class="text-center">{{ (float) $item->qty_base ? number_format($item->qty_base, 0, ',', '.') : '-' }}</td>
                                 <td class="text-end">{{ $hargaDus ? 'Rp '.number_format($hargaDus, 0, ',', '.') : '-' }}</td>
                                 @if($mutation->type === 'sale_external_out')
                                 <td class="text-end">{{ ($item->selling_price_per_base ?? 0) > 0 ? 'Rp '.number_format($item->selling_price_per_base, 0, ',', '.') : '-' }}</td>
