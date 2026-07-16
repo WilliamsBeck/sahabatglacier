@@ -244,7 +244,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         {{-- Total Dus --}}
                         <td class="text-end">
                             @if($totalDus > 0)
-                                <span class="fw-semibold" style="font-size:.92rem">{{ $totalDus }}</span>
+                                <span class="fw-semibold">{{ $totalDus }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
@@ -253,7 +253,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         {{-- Total Pack --}}
                         <td class="text-end">
                             @if($totalPack > 0)
-                                <span class="fw-semibold" style="font-size:.92rem">{{ $totalPack }}</span>
+                                <span class="fw-semibold">{{ $totalPack }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
