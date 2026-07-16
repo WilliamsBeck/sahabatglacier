@@ -763,9 +763,28 @@ code, .font-monospace { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospa
    RESPONSIVE
    =================================================================== */
 @media (max-width: 768px) {
-    .sidebar { width: var(--sidebar-collapsed); }
-    .sidebar .brand-text, .sidebar .sidebar-link span, .sidebar .sidebar-section { display: none; }
-    .main-content { margin-left: var(--sidebar-collapsed); }
+    /* Sidebar jadi DRAWER: tersembunyi di luar layar, digeser masuk lewat tombol ☰.
+       Sebelumnya sidebar menyusut jadi ikon tapi tetap memakan ~68px permanen —
+       di layar 375px itu bikin konten sempit & tabel kepotong. */
+    .sidebar {
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        z-index: 1050;
+        box-shadow: 4px 0 24px rgba(15, 23, 42, .18);
+    }
+    .sidebar.mobile-open { transform: translateX(0); }
+
+    /* Konten pakai LEBAR PENUH (tidak lagi didorong sidebar) */
+    .main-content,
+    .main-content.expanded { margin-left: 0; }
+
+    .sidebar-backdrop {
+        position: fixed; inset: 0;
+        background: rgba(15, 23, 42, .5);
+        z-index: 1040;
+    }
+
+    .topbar { padding-left: .75rem !important; padding-right: .75rem !important; }
     .card-body, .card-header { padding: 12px; }
     .page-title { font-size: var(--fs-xl); }
 }

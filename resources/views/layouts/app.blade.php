@@ -230,10 +230,49 @@
     @include('layouts.partials.ui-dialog')
     <script>
         // Toggle sidebar
-        $('#sidebarToggle').on('click', function () {
-            $('#sidebar').toggleClass('collapsed');
-            $('#mainContent').toggleClass('expanded');
-        });
+        // Sidebar — desktop: collapse jadi ikon. Mobile (≤768px): drawer geser + backdrop.
+        (function () {
+            var mq = window.matchMedia('(max-width: 768px)');
+            var isMobile = function () { return mq.matches; };
+
+            function closeDrawer() {
+                $('#sidebar').removeClass('mobile-open');
+                $('.sidebar-backdrop').remove();
+            }
+            function openDrawer() {
+                $('#sidebar').removeClass('collapsed').addClass('mobile-open');
+                if (!$('.sidebar-backdrop').length) {
+                    $('<div class="sidebar-backdrop"></div>').appendTo('body').on('click', closeDrawer);
+                }
+            }
+            // Pastikan mode sesuai lebar layar (mis. saat rotate / resize)
+            function syncMode() {
+                if (isMobile()) {
+                    $('#sidebar').removeClass('collapsed');   // di drawer, menu tampil penuh
+                    $('#mainContent').removeClass('expanded'); // konten selalu lebar penuh
+                } else {
+                    closeDrawer();
+                }
+            }
+
+            $('#sidebarToggle').on('click', function () {
+                if (isMobile()) {
+                    $('#sidebar').hasClass('mobile-open') ? closeDrawer() : openDrawer();
+                } else {
+                    $('#sidebar').toggleClass('collapsed');
+                    $('#mainContent').toggleClass('expanded');
+                }
+            });
+
+            // Tutup drawer setelah memilih menu (bukan tombol grup dropdown)
+            $(document).on('click', '#sidebar a.sidebar-link', function () {
+                var href = $(this).attr('href');
+                if (isMobile() && href && href !== '#' && !$(this).attr('data-bs-toggle')) closeDrawer();
+            });
+
+            mq.addEventListener ? mq.addEventListener('change', syncMode) : mq.addListener(syncMode);
+            syncMode();
+        })();
 
         // Active menu highlight + biarkan grup dropdown yang aktif tetap terbuka
         $(document).ready(function () {
