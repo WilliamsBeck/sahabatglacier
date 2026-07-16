@@ -67,12 +67,23 @@
                                                                     style="background-color: #dcfce7; color: #166534; font-size: 0.75rem; padding: 4px 8px;">Default
                                                                     (Semua Toko)</span>
                                                             @else
-                                                                @foreach($vStoreNames as $sn)
-                                                                    <span class="badge"
-                                                                        style="background-color: #e0f2fe; color: #0284c7; font-size: 0.75rem; padding: 4px 8px;">
-                                                                        <i class="bi bi-shop me-1"></i> {{ $sn }}
-                                                                    </span>
-                                                                @endforeach
+                                                                {{-- Ringkas: chip jumlah toko, klik untuk buka daftar lengkap --}}
+                                                                @php $vsId = 'ver-stores-'.$loop->index; @endphp
+                                                                <button type="button" class="badge border-0 btn-toggle-stores"
+                                                                    data-target="{{ $vsId }}"
+                                                                    title="{{ $vStoreNames->implode(', ') }}"
+                                                                    style="background-color: #e0f2fe; color: #0284c7; font-size: 0.75rem; padding: 4px 8px; cursor: pointer;">
+                                                                    <i class="bi bi-shop me-1"></i>{{ $vStoreNames->count() }} toko
+                                                                    <i class="bi bi-chevron-down ms-1" style="font-size: 0.65rem;"></i>
+                                                                </button>
+                                                                <div id="{{ $vsId }}" class="d-none flex-wrap gap-1 mt-1 w-100">
+                                                                    @foreach($vStoreNames as $sn)
+                                                                        <span class="badge"
+                                                                            style="background-color: #e0f2fe; color: #0284c7; font-size: 0.72rem; padding: 3px 7px;">
+                                                                            <i class="bi bi-shop me-1"></i> {{ $sn }}
+                                                                        </span>
+                                                                    @endforeach
+                                                                </div>
                                                             @endif
                                                         </div>
                                                     </div>
@@ -308,6 +319,19 @@
     </div>
 
     <script>
+        // ── Chip "N toko" pada kartu versi: klik untuk buka/tutup daftar toko ──
+        document.addEventListener('click', function (e) {
+            const btn = e.target.closest('.btn-toggle-stores');
+            if (!btn) return;
+            const box = document.getElementById(btn.dataset.target);
+            if (!box) return;
+            const isOpen = !box.classList.contains('d-none');
+            box.classList.toggle('d-none', isOpen);
+            box.classList.toggle('d-flex', !isOpen);
+            const chev = btn.querySelector('.bi-chevron-down, .bi-chevron-up');
+            if (chev) chev.className = 'bi ms-1 ' + (isOpen ? 'bi-chevron-down' : 'bi-chevron-up');
+        });
+
         // ── Dropdown checklist toko (skalabel utk banyak toko) ──────────────
         (function () {
             const wrap = document.getElementById('storeDropdownWrap');
