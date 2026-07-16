@@ -94,7 +94,27 @@ class MutationService
             );
             if (empty($layers)) continue;
 
-            // 1 lapisan: tidak perlu dipecah, tapi PASTIKAN harga = harga FIFO sumber
+            $pkg = $pkgId ? \App\Models\IngredientPackaging::find($pkgId) : null;
+            $ptb = $pkg ? (float) $pkg->pack_to_base : 0;
+            $ctb = $pkg ? (float) $pkg->crate_to_pack * $ptb : 0;
+
+            // Gabungkan lapisan FIFO yang HARGANYA SAMA (dibulatkan per dus/pack) supaya
+            // batch berbeda tapi harga identik tidak terpecah jadi banyak baris sia-sia.
+            $groups = [];
+            foreach ($layers as $L) {
+                $pb  = (float) $L['price_per_base'];
+                $key = $ctb > 0 ? (string) round($pb * $ctb)
+                     : ($ptb > 0 ? (string) round($pb * $ptb) : number_format($pb, 6, '.', ''));
+                if (!isset($groups[$key])) $groups[$key] = ['base' => 0.0, 'wsum' => 0.0];
+                $groups[$key]['base'] += (float) $L['base'];
+                $groups[$key]['wsum'] += (float) $L['base'] * $pb;
+            }
+            $layers = array_values(array_map(fn($g) => [
+                'base'           => $g['base'],
+                'price_per_base' => $g['base'] > 0 ? $g['wsum'] / $g['base'] : 0.0,
+            ], $groups));
+
+            // 1 harga: tidak perlu dipecah, tapi PASTIKAN harga = harga FIFO sumber
             // (harga input transfer internal bisa meleset/stale — sumber yang otoritatif).
             if (count($layers) === 1) {
                 $price = (float) $layers[0]['price_per_base'];
@@ -107,10 +127,6 @@ class MutationService
                 }
                 continue;
             }
-
-            $pkg = $pkgId ? \App\Models\IngredientPackaging::find($pkgId) : null;
-            $ptb = $pkg ? (float) $pkg->pack_to_base : 0;
-            $ctb = $pkg ? (float) $pkg->crate_to_pack * $ptb : 0;
 
             foreach ($layers as $L) {
                 $base  = (float) $L['base'];
