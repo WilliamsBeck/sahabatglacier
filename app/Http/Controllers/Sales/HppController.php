@@ -117,16 +117,29 @@ class HppController extends Controller
         if ($sales->isEmpty() && $omset <= 0 && !$soAkhir) return null;
 
         $menuIds    = $sales->pluck('menu_id')->unique()->all();
-        // Resep PER TOKO: prioritas resep khusus toko ini; kalau tidak ada → resep default (store_id NULL)
+        // Resep PER TOKO — resolusi per VERSI, bukan per bahan:
+        //   - Kalau toko ini punya versi resep sendiri → versi itu dipakai SEPENUHNYA
+        //     dan resep default DIABAIKAN TOTAL (tidak dicampur per-bahan).
+        //   - Kalau tidak ada versi khusus toko → pakai versi default (store_id NULL).
+        //   - Di dalam pool terpilih, ambil versi dgn effective_from TERBARU (<= dateEnd).
+        //     (Satu versi = satu kombinasi tanggal berlaku + toko.)
         $allRecipes = Recipe::with('ingredient')
             ->whereIn('menu_id', $menuIds)
             ->where(fn($q) => $q->where('store_id', $storeId)->orWhereNull('store_id'))
             ->where('effective_from', '<=', $dateEnd)
-            ->orderByRaw('store_id IS NULL ASC') // store-specific (NOT NULL) menang
-            ->orderByDesc('effective_from')
             ->get()
             ->groupBy('menu_id')
-            ->map(fn($g) => $g->groupBy('ingredient_id')->map(fn($r) => $r->first()));
+            ->map(function ($rows) {
+                $pool = $rows->whereNotNull('store_id');          // versi khusus toko menang
+                if ($pool->isEmpty()) $pool = $rows->whereNull('store_id');
+                if ($pool->isEmpty()) return collect();
+
+                $latest = $pool->map(fn($r) => $r->effective_from->format('Y-m-d'))->max();
+                return $pool
+                    ->filter(fn($r) => $r->effective_from->format('Y-m-d') === $latest)
+                    ->groupBy('ingredient_id')
+                    ->map(fn($g) => $g->first());
+            });
 
         $compositionMap = $this->loadCompositionMap();
 
