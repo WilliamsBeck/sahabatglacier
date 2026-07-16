@@ -483,9 +483,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 @push('styles')
 <style>
-.stock-table { font-size: .88rem; table-layout: fixed; }
+.stock-table { font-size: .82rem; table-layout: fixed; }
 .stock-table th { white-space: nowrap; font-size: .72rem; padding: .4rem .5rem; }
 .stock-table td { padding: .35rem .5rem; overflow: hidden; text-overflow: ellipsis; }
+/* app.css punya `.table-sm tbody td { font-size: var(--fs-sm) }` yang menyetel ukuran
+   LANGSUNG di td, jadi mengalahkan pewarisan dari .stock-table. Selector ini dibuat
+   lebih spesifik supaya menang — naik 1 tingkat skala: --fs-sm (12px) → --fs-base (13px).
+   Nama bahan & angka Dus/Pack sama-sama ikut aturan ini, jadi ukurannya tetap seragam. */
+.stock-table.table-sm tbody td { font-size: var(--fs-base); }
 .stock-table .category-header td {
     background: #f3f4f6; padding: .25rem .6rem;
     border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;
