@@ -493,7 +493,7 @@ document.addEventListener('DOMContentLoaded', function() {
 .stock-table.table-sm tbody td { font-size: var(--fs-base); }
 /* Angka Dus/Pack = data utama → dibuat lebih menonjol dari teks sel lain.
    Ukuran dipasang di span-nya sendiri, jadi menang atas warisan dari td. */
-.stock-table .stock-qty { font-size: var(--fs-lg); line-height: 1.2; }
+.stock-table .stock-qty { font-size: var(--fs-md); line-height: 1.2; }
 .stock-table .category-header td {
     background: #f3f4f6; padding: .25rem .6rem;
     border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;
