@@ -494,6 +494,22 @@ document.addEventListener('DOMContentLoaded', function() {
 /* Angka Dus/Pack = data utama → dibuat lebih menonjol dari teks sel lain.
    Ukuran dipasang di span-nya sendiri, jadi menang atas warisan dari td. */
 .stock-table .stock-qty { font-size: var(--fs-md); line-height: 1.2; }
+
+/* ── MOBILE ───────────────────────────────────────────────────────────────
+   Masalah: .stock-table pakai table-layout:fixed + lebar kolom PERSEN, jadi
+   tabel MENGKERUT mengikuti layar dan tidak pernah meluber → .table-responsive
+   tak pernah scroll. Di layar 375px kolom Bahan cuma ~82px (nama terlipat) dan
+   kolom DOS ~52px padahal padding-left-nya 92px (isi terdorong keluar/terpotong).
+   Solusi: beri min-width supaya tabel benar-benar bisa di-scroll horizontal
+   dengan proporsi kolom yang wajar, dan netralkan padding DOS khusus di HP.
+   Semua kolom tetap utuh → baris kategori & subtotal (pakai colspan) aman. */
+@media (max-width: 768px) {
+    .stock-table { min-width: 760px; }
+    .stock-table thead th:nth-child(6),
+    .stock-table td:nth-child(6) { padding-left: .5rem !important; }
+    /* beri isyarat bahwa tabel bisa digeser */
+    .table-responsive { -webkit-overflow-scrolling: touch; }
+}
 .stock-table .category-header td {
     background: #f3f4f6; padding: .25rem .6rem;
     border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;
