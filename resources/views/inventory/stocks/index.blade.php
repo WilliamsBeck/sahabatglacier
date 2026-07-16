@@ -483,7 +483,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 @push('styles')
 <style>
-.stock-table { font-size: .82rem; table-layout: fixed; }
+.stock-table { font-size: .88rem; table-layout: fixed; }
 .stock-table th { white-space: nowrap; font-size: .72rem; padding: .4rem .5rem; }
 .stock-table td { padding: .35rem .5rem; overflow: hidden; text-overflow: ellipsis; }
 .stock-table .category-header td {
