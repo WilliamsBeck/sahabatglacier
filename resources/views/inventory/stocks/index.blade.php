@@ -244,7 +244,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         {{-- Total Dus --}}
                         <td class="text-end">
                             @if($totalDus > 0)
-                                <span class="fw-semibold">{{ $totalDus }}</span>
+                                <span class="fw-semibold stock-qty">{{ $totalDus }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
@@ -253,7 +253,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         {{-- Total Pack --}}
                         <td class="text-end">
                             @if($totalPack > 0)
-                                <span class="fw-semibold">{{ $totalPack }}</span>
+                                <span class="fw-semibold stock-qty">{{ $totalPack }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
@@ -491,6 +491,9 @@ document.addEventListener('DOMContentLoaded', function() {
    lebih spesifik supaya menang — naik 1 tingkat skala: --fs-sm (12px) → --fs-base (13px).
    Nama bahan & angka Dus/Pack sama-sama ikut aturan ini, jadi ukurannya tetap seragam. */
 .stock-table.table-sm tbody td { font-size: var(--fs-base); }
+/* Angka Dus/Pack = data utama → dibuat lebih menonjol dari teks sel lain.
+   Ukuran dipasang di span-nya sendiri, jadi menang atas warisan dari td. */
+.stock-table .stock-qty { font-size: var(--fs-lg); line-height: 1.2; }
 .stock-table .category-header td {
     background: #f3f4f6; padding: .25rem .6rem;
     border-top: 1px solid #dee2e6; border-bottom: 1px solid #dee2e6;
