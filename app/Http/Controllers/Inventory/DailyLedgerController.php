@@ -201,23 +201,16 @@ class DailyLedgerController extends Controller
 
         // ── Load ingredients: urut kategori → urutan input (id) ────
         $catSort     = IngredientCategory::pluck('sort_order', 'name')->toArray();
-        $userOrder   = DB::table('user_ingredient_orders')
-            ->where('user_id', auth()->id())
-            ->pluck('sort_order', 'ingredient_id')
-            ->toArray();
+        // Urutan custom melekat ke TOKO (bukan user) & per (bahan × kemasan).
+        $storeOrder  = $this->storeRowOrder($storeId);
 
         $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
             ->whereIn('id', $ingIds)
             ->where('type', '!=', 'semi_finished')
             ->get()
-            ->sort(function ($a, $b) use ($catSort, $userOrder) {
-                // Prioritas 1: urutan custom user (kalau ada)
-                $ua = $userOrder[$a->id] ?? null;
-                $ub = $userOrder[$b->id] ?? null;
-                if ($ua !== null && $ub !== null) return $ua <=> $ub;
-                if ($ua !== null) return -1;
-                if ($ub !== null) return 1;
-                // Prioritas 2 (default): kategori (sort_order) → urutan input (id)
+            ->sort(function ($a, $b) use ($catSort) {
+                // Default: kategori (sort_order) → urutan input (id).
+                // Urutan custom diterapkan nanti di level BARIS (tableRows), bukan di sini.
                 $ai = $catSort[$a->category] ?? 9999;
                 $bi = $catSort[$b->category] ?? 9999;
                 return $ai !== $bi ? $ai <=> $bi : $a->id <=> $b->id;
@@ -310,6 +303,28 @@ class DailyLedgerController extends Controller
                     ];
                 }
             }
+        }
+
+        // Terapkan urutan custom TOKO di level BARIS (bahan × kemasan). Baris yang
+        // sudah diatur muncul lebih dulu sesuai urutannya; sisanya menyusul memakai
+        // urutan default (kategori → id bahan → id kemasan) dari perulangan di atas.
+        if ($storeOrder) {
+            $seq = 0;
+            $tableRows = collect($tableRows)
+                ->map(function ($r) use ($storeOrder, &$seq) {
+                    $r['_key'] = $storeOrder[$r['ing_id'] . '-' . ($r['pkg_id'] ?: 0)] ?? null;
+                    $r['_seq'] = $seq++;   // penjaga urutan default (sort stabil)
+                    return $r;
+                })
+                ->sort(function ($a, $b) {
+                    if ($a['_key'] !== null && $b['_key'] !== null) return $a['_key'] <=> $b['_key'];
+                    if ($a['_key'] !== null) return -1;
+                    if ($b['_key'] !== null) return 1;
+                    return $a['_seq'] <=> $b['_seq'];
+                })
+                ->values()
+                ->map(function ($r) { unset($r['_key'], $r['_seq']); return $r; })
+                ->all();
         }
 
         // ── Isi stok awal ──────────────────────────────────────────
@@ -812,10 +827,15 @@ class DailyLedgerController extends Controller
 
         // Ambil semua bahan baku aktif — urutan sama dengan tampilan web: kategori → id input
         $catSort = IngredientCategory::pluck('sort_order', 'name')->toArray();
-        $userOrder = DB::table('user_ingredient_orders')
-            ->where('user_id', auth()->id())
-            ->pluck('sort_order', 'ingredient_id')
-            ->toArray();
+        // Ikuti urutan custom TOKO (sama dgn layar). Karena template disusun per bahan
+        // lalu per kemasan, posisi bahan diambil dari sort_order TERKECIL di antara
+        // baris kemasannya — sedekat mungkin dengan tampilan.
+        $storeOrder = $this->storeRowOrder($storeId);
+        $userOrder  = [];
+        foreach ($storeOrder as $k => $v) {
+            $ingId = (int) explode('-', $k)[0];
+            $userOrder[$ingId] = isset($userOrder[$ingId]) ? min($userOrder[$ingId], $v) : $v;
+        }
 
         $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
             ->where('ingredients.is_active', true)
@@ -1335,37 +1355,59 @@ class DailyLedgerController extends Controller
         return $letter;
     }
 
-    /** Simpan urutan bahan custom per user (drag-drop dari halaman pencatatan harian). */
+    /**
+     * Urutan baris custom milik TOKO → ["ingId-pkgId" => sort_order].
+     * pkgId 0 = bahan tanpa kemasan.
+     */
+    private function storeRowOrder(int $storeId): array
+    {
+        return DB::table('store_ingredient_orders')
+            ->where('store_id', $storeId)
+            ->get(['ingredient_id', 'packaging_id', 'sort_order'])
+            ->mapWithKeys(fn($r) => [$r->ingredient_id . '-' . $r->packaging_id => (int) $r->sort_order])
+            ->all();
+    }
+
+    /**
+     * Simpan urutan baris (bahan × kemasan) milik TOKO — drag-drop dari pencatatan harian.
+     * Urutan berlaku untuk semua user yang membuka toko tsb.
+     */
     public function saveOrder(Request $request)
     {
-        $request->validate([
-            'ingredient_ids'   => 'required|array',
-            'ingredient_ids.*' => 'integer|exists:ingredients,id',
+        $data = $request->validate([
+            'store_id'            => 'required|exists:stores,id',
+            'rows'                => 'required|array',
+            'rows.*.ingredient_id' => 'required|integer|exists:ingredients,id',
+            'rows.*.packaging_id'  => 'nullable|integer',
         ]);
 
-        $userId = auth()->id();
-        $ids    = $request->input('ingredient_ids');
+        $storeId = (int) $data['store_id'];
+        abort_unless(in_array($storeId, auth()->user()->accessibleStoreIds()), 403);
 
-        DB::transaction(function () use ($userId, $ids) {
-            DB::table('user_ingredient_orders')->where('user_id', $userId)->delete();
+        DB::transaction(function () use ($storeId, $data) {
+            DB::table('store_ingredient_orders')->where('store_id', $storeId)->delete();
             $rows = [];
-            foreach ($ids as $i => $ingId) {
+            foreach ($data['rows'] as $i => $r) {
                 $rows[] = [
-                    'user_id'       => $userId,
-                    'ingredient_id' => (int) $ingId,
+                    'store_id'      => $storeId,
+                    'ingredient_id' => (int) $r['ingredient_id'],
+                    'packaging_id'  => (int) ($r['packaging_id'] ?? 0),
                     'sort_order'    => $i + 1,
                 ];
             }
-            if ($rows) DB::table('user_ingredient_orders')->insert($rows);
+            if ($rows) DB::table('store_ingredient_orders')->insert($rows);
         });
 
-        return response()->json(['ok' => true]);
+        return response()->json(['ok' => true, 'saved' => count($data['rows'])]);
     }
 
-    /** Reset urutan ke default (kategori → nama). */
-    public function resetOrder()
+    /** Reset urutan toko ke default (kategori → bahan → kemasan). */
+    public function resetOrder(Request $request)
     {
-        DB::table('user_ingredient_orders')->where('user_id', auth()->id())->delete();
+        $storeId = (int) $request->input('store_id');
+        abort_unless(in_array($storeId, auth()->user()->accessibleStoreIds()), 403);
+
+        DB::table('store_ingredient_orders')->where('store_id', $storeId)->delete();
         return response()->json(['ok' => true]);
     }
 }

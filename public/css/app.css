@@ -787,4 +787,23 @@ code, .font-monospace { font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospa
     .topbar { padding-left: .75rem !important; padding-right: .75rem !important; }
     .card-body, .card-header { padding: 12px; }
     .page-title { font-size: var(--fs-xl); }
+
+    /* Filter grafik dashboard: 3 select ber-min-width (110+80+160 + jarak ≈ 366px)
+       tidak muat di layar 375px → halaman jadi melebar. Biarkan membungkus dan
+       select bahan turun ke barisnya sendiri. */
+    #chartIngredientForm { flex-wrap: wrap; }
+    #chartIngredientForm .form-select { min-width: 0 !important; }
+    #chartIngredientForm select[name="chart_ingredient"] { flex: 1 0 100%; }
+
+    /* Baris filter yang dipaksa satu baris (flex-nowrap) mendorong halaman melebar
+       di HP — mis. filter Mutasi (7 kolom = 678px). Di layar kecil biarkan membungkus. */
+    .row.flex-nowrap { flex-wrap: wrap !important; }
+    .row > .col { min-width: 0; }
+
+    /* Header halaman: judul + grup tombol pakai justify-content-between dan tidak
+       membungkus, sehingga tombolnya terdorong keluar layar (Master Toko, Opname
+       input, Produksi, dll). Biarkan turun ke baris berikutnya di HP. */
+    .page-header { flex-wrap: wrap; gap: .5rem; }
+    .page-header .d-flex,
+    .page-header .btn-group { flex-wrap: wrap; }
 }

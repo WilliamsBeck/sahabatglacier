@@ -365,13 +365,10 @@
                         @endforeach
                     </tr>
                 </thead>
-                @php
-                    // Kelompokkan tableRows per ingredient (1 tbody per bahan → bisa di-drag-drop)
-                    $rowsByIng = collect($tableRows)->groupBy('ing_id');
-                @endphp
-                @foreach($rowsByIng as $groupIngId => $groupRows)
-                <tbody class="ing-group" data-ing-id="{{ $groupIngId }}" style="font-size:0.7rem">
-                    @foreach($groupRows as $trow)
+                {{-- Satu tbody berisi semua baris: tiap baris (bahan × kemasan) bisa
+                     diatur urutannya sendiri, tidak lagi terikat per-bahan. --}}
+                <tbody class="dl-body" style="font-size:0.7rem">
+                    @foreach($tableRows as $trow)
                         @php
                             $ingId   = $trow['ing_id'];
                             $pkgId   = $trow['pkg_id'];
@@ -480,7 +477,6 @@
                         </tr>
                     @endforeach
                 </tbody>
-                @endforeach
             </table>
         </div>
     </div>
@@ -488,10 +484,8 @@
 
 {{-- Border separator antar ingredient group --}}
 <style>
-    .daily-ledger-table tbody.ing-group { border-top: 2px solid #ddd; }
-    .daily-ledger-table tbody.ing-group:first-of-type { border-top: 0; }
-    .daily-ledger-table.reorder-mode tbody.ing-group { cursor: grab; }
-    .daily-ledger-table.reorder-mode tbody.ing-group:hover { background: #fff8e1; }
+    .daily-ledger-table.reorder-mode tbody.dl-body > tr { cursor: grab; }
+    .daily-ledger-table.reorder-mode tbody.dl-body > tr:hover { background: #fff8e1; }
     .daily-ledger-table.reorder-mode .drag-handle { display: inline-block !important; }
     .sortable-ghost { opacity: 0.4; }
 </style>
@@ -954,8 +948,8 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
                 btnToggle.classList.remove('btn-outline-primary');
                 btnToggle.classList.add('btn-primary');
                 btnToggle.innerHTML = '<i class="bi bi-check-lg me-1"></i> Selesai';
-                sortable = Sortable.create(table, {
-                    draggable: 'tbody.ing-group',
+                sortable = Sortable.create(table.querySelector('tbody.dl-body'), {
+                    draggable: 'tr',
                     handle: '.drag-handle',
                     animation: 150,
                     ghostClass: 'sortable-ghost',
@@ -972,13 +966,17 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
     });
 
     function saveOrder() {
-        const ids = Array.from(table.querySelectorAll('tbody.ing-group'))
-                         .map(tb => tb.dataset.ingId);
+        // Urutan disimpan per BARIS (bahan × kemasan) dan melekat ke TOKO
+        const rows = Array.from(table.querySelectorAll('tbody.dl-body > tr'))
+                          .map(tr => ({
+                              ingredient_id: parseInt(tr.dataset.ing, 10),
+                              packaging_id:  parseInt(tr.dataset.pkg, 10) || 0,
+                          }));
         status.textContent = 'Menyimpan urutan…';
         fetch(saveUrl, {
             method: 'POST',
             headers: {'Content-Type':'application/json','X-CSRF-TOKEN':csrf,'Accept':'application/json'},
-            body: JSON.stringify({ ingredient_ids: ids }),
+            body: JSON.stringify({ store_id: table.dataset.store, rows: rows }),
         })
         .then(r => r.json())
         .then(() => { status.textContent = '✓ Urutan tersimpan'; setTimeout(() => status.textContent = '', 1500); })
@@ -989,7 +987,8 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
         if (!(await uiConfirm('Reset urutan ke default (kategori → nama)?', { type: 'warning', confirmText: 'Ya, reset' }))) return;
         fetch(resetUrl, {
             method: 'POST',
-            headers: {'X-CSRF-TOKEN':csrf,'Accept':'application/json'},
+            headers: {'Content-Type':'application/json','X-CSRF-TOKEN':csrf,'Accept':'application/json'},
+            body: JSON.stringify({ store_id: table.dataset.store }),
         })
         .then(r => r.json())
         .then(() => { location.reload(); })
