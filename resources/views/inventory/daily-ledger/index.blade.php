@@ -428,11 +428,10 @@
 
                             {{-- Nama Bahan / Kemasan --}}
                             <td class="sticky-col" style="background:#fff;font-size:0.7rem">
-                                @if($isFirst)
-                                    <span class="drag-handle d-none me-1" style="cursor:grab;color:#999" title="Geser untuk atur urutan">
-                                        <i class="bi bi-grip-vertical"></i>
-                                    </span>
-                                @endif
+                                {{-- Gagang drag di SETIAP baris: tiap kemasan bisa diatur sendiri --}}
+                                <span class="drag-handle d-none me-1" style="cursor:grab;color:#999" title="Geser untuk atur urutan">
+                                    <i class="bi bi-grip-vertical"></i>
+                                </span>
                                 <span class="fw-semibold">{{ $ing->name }}</span>
                                 @if($pkg && $multiPkg && $pkg->crate_to_pack)
                                     <span class="text-muted" style="font-size:0.62rem">{{ '@'.$pkg->crate_to_pack }} pack</span>
