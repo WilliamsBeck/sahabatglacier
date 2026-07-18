@@ -369,8 +369,11 @@
             background: linear-gradient(135deg, #006275 0%, #0e7490 55%, #14b8a6 100%);
             color: #fff; padding: 20px 22px 16px;
         }
-        #welcomePopup .wp-head h5 { margin: 0; font-weight: 700; font-size: 1.05rem; }
-        #welcomePopup .wp-head small { opacity: .85; }
+        #welcomePopup .wp-head h5 { margin: 0 0 3px; font-weight: 700; font-size: 1.05rem; }
+        #welcomePopup .wp-head small {
+            color: #ecfeff; font-size: .78rem; font-weight: 500;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+        }
         #welcomePopup .wp-body { padding: 18px 22px 6px; font-size: .86rem; color: #334155; }
         #welcomePopup .wp-step { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-start; }
         #welcomePopup .wp-num {
