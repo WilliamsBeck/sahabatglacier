@@ -392,7 +392,7 @@
         #welcomePopup .wp-bar > div {
             height: 100%; width: 100%;
             background: linear-gradient(90deg, #006275, #14b8a6);
-            animation: wpCountdown 8s linear forwards;
+            animation: wpCountdown 15s linear forwards;
         }
         @keyframes wpFadeIn { from { opacity: 0; } }
         @keyframes wpPopIn { from { opacity: 0; transform: translateY(24px) scale(.96); } }
@@ -406,12 +406,12 @@
                 <small>Halo, {{ auth()->user()->name }} — semangat bekerja hari ini</small>
             </div>
             <div class="wp-body">
-                <div class="mb-2 fw-semibold" style="color:#0f172a">Supaya data stok &amp; HPP akurat, mohon input secara <span style="color:#006275">urut dan disiplin</span>:</div>
-                <div class="wp-step"><span class="wp-num">1</span><div><strong>Pencatatan Harian</strong> diisi setiap hari, lalu <strong>konfirmasi tanggal</strong> — stok baru terpotong setelah dikonfirmasi.</div></div>
-                <div class="wp-step"><span class="wp-num">2</span><div><strong>Mutasi stok</strong> diinput saat barang dikirim, <strong>dikonfirmasi saat barang tiba</strong>.</div></div>
-                <div class="wp-step"><span class="wp-num">3</span><div><strong>Stok opname</strong> dilakukan rutin tiap <strong>akhir bulan</strong>.</div></div>
-                <div class="wp-warn">⚠️ Jangan menunda input — data yang telat bikin saldo stok &amp; laporan meleset.</div>
-                <div class="wp-contact">💬 Ada kendala atau bingung? <strong>Langsung hubungi Williams</strong> ya, jangan sungkan. 🙂</div>
+                <div class="mb-2 fw-semibold" style="color:#0f172a">Input harus <span style="color:#006275">urut &amp; disiplin</span>:</div>
+                <div class="wp-step"><span class="wp-num">1</span><div><strong>Pencatatan Harian</strong> tiap hari → <strong>konfirmasi tanggal</strong>.</div></div>
+                <div class="wp-step"><span class="wp-num">2</span><div><strong>Mutasi stok</strong> dikonfirmasi saat barang tiba.</div></div>
+                <div class="wp-step"><span class="wp-num">3</span><div><strong>Opname</strong> rutin tiap <strong>akhir bulan</strong>.</div></div>
+                <div class="wp-warn">⚠️ Input telat = stok &amp; laporan meleset.</div>
+                <div class="wp-contact">💬 Ada kendala? <strong>Hubungi Williams</strong>, jangan sungkan. 🙂</div>
             </div>
             <div class="wp-foot">
                 <div class="wp-bar"><div></div></div>
@@ -427,7 +427,7 @@
             el.style.opacity = '0';
             setTimeout(function () { el.remove(); }, 300);
         }
-        setTimeout(closeWelcomePopup, 8000); // auto-hilang setelah 8 detik
+        setTimeout(closeWelcomePopup, 15000); // auto-hilang setelah 15 detik
         document.getElementById('welcomePopupOverlay').addEventListener('click', function (e) {
             if (e.target === this) closeWelcomePopup(); // klik area gelap = tutup
         });
