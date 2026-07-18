@@ -369,7 +369,7 @@
             background: linear-gradient(135deg, #006275 0%, #0e7490 55%, #14b8a6 100%);
             color: #fff; padding: 20px 22px 16px;
         }
-        #welcomePopup .wp-head h5 { margin: 0 0 3px; font-weight: 700; font-size: 1.05rem; }
+        #welcomePopup .wp-head h5 { margin: 0 0 3px; font-weight: 700; font-size: 1.05rem; color: #ffffff !important; }
         #welcomePopup .wp-head small {
             color: #ffffff !important; font-size: .78rem; font-weight: 500;
             text-shadow: 0 1px 2px rgba(0, 0, 0, .25);
@@ -409,10 +409,7 @@
                 <small>Halo, {{ auth()->user()->name }} — semangat bekerja hari ini</small>
             </div>
             <div class="wp-body">
-                <div class="mb-2 fw-semibold" style="color:#0f172a">Input harus <span style="color:#006275">urut &amp; disiplin</span>:</div>
-                <div class="wp-step"><span class="wp-num">1</span><div><strong>Pencatatan Harian</strong> tiap hari → <strong>konfirmasi tanggal</strong>.</div></div>
-                <div class="wp-step"><span class="wp-num">2</span><div><strong>Mutasi stok</strong> dikonfirmasi saat barang tiba.</div></div>
-                <div class="wp-step"><span class="wp-num">3</span><div><strong>Opname</strong> rutin tiap <strong>akhir bulan</strong>.</div></div>
+                <div class="mb-2" style="color:#0f172a">Ingat input <strong>pencatatan harian</strong> dan <strong>mutasi stok</strong> dengan <span style="color:#006275;font-weight:600">tepat dan disiplin</span> ya..</div>
                 <div class="wp-warn">⚠️ Input telat = stok &amp; laporan meleset.</div>
                 <div class="wp-contact">💬 Ada kendala? <strong>Hubungi Williams</strong>, jangan sungkan. 🙂</div>
             </div>
