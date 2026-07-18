@@ -371,7 +371,7 @@
         }
         #welcomePopup .wp-head h5 { margin: 0 0 3px; font-weight: 700; font-size: 1.05rem; }
         #welcomePopup .wp-head small {
-            color: #ecfeff; font-size: .78rem; font-weight: 500;
+            color: #ffffff !important; font-size: .78rem; font-weight: 500;
             text-shadow: 0 1px 2px rgba(0, 0, 0, .25);
         }
         #welcomePopup .wp-body { padding: 18px 22px 6px; font-size: .86rem; color: #334155; }
@@ -395,7 +395,7 @@
         #welcomePopup .wp-bar > div {
             height: 100%; width: 100%;
             background: linear-gradient(90deg, #006275, #14b8a6);
-            animation: wpCountdown 15s linear forwards;
+            animation: wpCountdown 20s linear forwards;
         }
         @keyframes wpFadeIn { from { opacity: 0; } }
         @keyframes wpPopIn { from { opacity: 0; transform: translateY(24px) scale(.96); } }
@@ -430,7 +430,7 @@
             el.style.opacity = '0';
             setTimeout(function () { el.remove(); }, 300);
         }
-        setTimeout(closeWelcomePopup, 15000); // auto-hilang setelah 15 detik
+        setTimeout(closeWelcomePopup, 20000); // auto-hilang setelah 20 detik
         document.getElementById('welcomePopupOverlay').addEventListener('click', function (e) {
             if (e.target === this) closeWelcomePopup(); // klik area gelap = tutup
         });
