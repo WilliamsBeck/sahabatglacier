@@ -24,6 +24,8 @@ class LoginController extends Controller
 
         if (Auth::attempt(['username' => $request->username, 'password' => $request->password], $remember)) {
             $request->session()->regenerate();
+            // Penanda sekali-pakai untuk popup sambutan setelah login
+            $request->session()->flash('just_logged_in', true);
             return redirect()->route('dashboard');
         }
 

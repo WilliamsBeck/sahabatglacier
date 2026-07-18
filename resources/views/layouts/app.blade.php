@@ -349,6 +349,91 @@
             });
         })();
     </script>
+    {{-- ── Popup sambutan setelah login (auto-hilang 8 detik) ─────────────────── --}}
+    @if(session('just_logged_in'))
+    <style>
+        #welcomePopupOverlay {
+            position: fixed; inset: 0; z-index: 2000;
+            background: rgba(15, 23, 42, .45);
+            display: flex; align-items: center; justify-content: center;
+            padding: 16px;
+            animation: wpFadeIn .25s ease;
+        }
+        #welcomePopup {
+            background: #fff; border-radius: 18px; max-width: 460px; width: 100%;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, .35);
+            overflow: hidden;
+            animation: wpPopIn .35s cubic-bezier(.34, 1.4, .64, 1);
+        }
+        #welcomePopup .wp-head {
+            background: linear-gradient(135deg, #006275 0%, #0e7490 55%, #14b8a6 100%);
+            color: #fff; padding: 20px 22px 16px;
+        }
+        #welcomePopup .wp-head h5 { margin: 0; font-weight: 700; font-size: 1.05rem; }
+        #welcomePopup .wp-head small { opacity: .85; }
+        #welcomePopup .wp-body { padding: 18px 22px 6px; font-size: .86rem; color: #334155; }
+        #welcomePopup .wp-step { display: flex; gap: 10px; margin-bottom: 10px; align-items: flex-start; }
+        #welcomePopup .wp-num {
+            flex: 0 0 22px; height: 22px; border-radius: 50%;
+            background: #e0f2fe; color: #0369a1; font-weight: 700; font-size: .72rem;
+            display: flex; align-items: center; justify-content: center; margin-top: 1px;
+        }
+        #welcomePopup .wp-warn {
+            background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412;
+            border-radius: 10px; padding: 8px 12px; font-size: .8rem; margin: 12px 0;
+        }
+        #welcomePopup .wp-contact {
+            background: #f0fdfa; border: 1px solid #99f6e4; color: #0f766e;
+            border-radius: 10px; padding: 8px 12px; font-size: .8rem; margin-bottom: 14px;
+        }
+        #welcomePopup .wp-foot { padding: 0 22px 16px; display: flex; align-items: center; gap: 12px; }
+        #welcomePopup .wp-foot .btn { border-radius: 10px; font-size: .8rem; }
+        #welcomePopup .wp-bar { flex: 1; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden; }
+        #welcomePopup .wp-bar > div {
+            height: 100%; width: 100%;
+            background: linear-gradient(90deg, #006275, #14b8a6);
+            animation: wpCountdown 8s linear forwards;
+        }
+        @keyframes wpFadeIn { from { opacity: 0; } }
+        @keyframes wpPopIn { from { opacity: 0; transform: translateY(24px) scale(.96); } }
+        @keyframes wpCountdown { from { width: 100%; } to { width: 0%; } }
+        @media (max-width: 480px) { #welcomePopup .wp-body { font-size: .82rem; } }
+    </style>
+    <div id="welcomePopupOverlay">
+        <div id="welcomePopup">
+            <div class="wp-head">
+                <h5>Selamat datang di Glacier! 👋</h5>
+                <small>Halo, {{ auth()->user()->name }} — semangat bekerja hari ini</small>
+            </div>
+            <div class="wp-body">
+                <div class="mb-2 fw-semibold" style="color:#0f172a">Supaya data stok &amp; HPP akurat, mohon input secara <span style="color:#006275">urut dan disiplin</span>:</div>
+                <div class="wp-step"><span class="wp-num">1</span><div><strong>Pencatatan Harian</strong> diisi setiap hari, lalu <strong>konfirmasi tanggal</strong> — stok baru terpotong setelah dikonfirmasi.</div></div>
+                <div class="wp-step"><span class="wp-num">2</span><div><strong>Mutasi stok</strong> diinput saat barang dikirim, <strong>dikonfirmasi saat barang tiba</strong>.</div></div>
+                <div class="wp-step"><span class="wp-num">3</span><div><strong>Stok opname</strong> dilakukan rutin tiap <strong>akhir bulan</strong>.</div></div>
+                <div class="wp-warn">⚠️ Jangan menunda input — data yang telat bikin saldo stok &amp; laporan meleset.</div>
+                <div class="wp-contact">💬 Ada kendala atau bingung? <strong>Langsung hubungi Williams</strong> ya, jangan sungkan. 🙂</div>
+            </div>
+            <div class="wp-foot">
+                <div class="wp-bar"><div></div></div>
+                <button type="button" class="btn btn-sm btn-primary px-3" onclick="closeWelcomePopup()">Mengerti</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        function closeWelcomePopup() {
+            var el = document.getElementById('welcomePopupOverlay');
+            if (!el) return;
+            el.style.transition = 'opacity .3s ease';
+            el.style.opacity = '0';
+            setTimeout(function () { el.remove(); }, 300);
+        }
+        setTimeout(closeWelcomePopup, 8000); // auto-hilang setelah 8 detik
+        document.getElementById('welcomePopupOverlay').addEventListener('click', function (e) {
+            if (e.target === this) closeWelcomePopup(); // klik area gelap = tutup
+        });
+    </script>
+    @endif
+
     @stack('scripts')
     <script>
         // ── Store Picker ─────────────────────────────────────────────────────────────
