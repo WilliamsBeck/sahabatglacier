@@ -81,8 +81,9 @@
                         <td>
                             <x-action-menu>
                                 <x-action-view :href="route('master.menus.show', $menu)" />
-                                @unless(auth()->user()->role === 'admin_area')
+                                {{-- Admin area boleh masuk form untuk kelola versi resep tokonya --}}
                                 <x-action-edit :href="route('master.menus.edit', $menu)" label="Edit & Resep" />
+                                @unless(auth()->user()->role === 'admin_area')
                                 <x-action-delete :action="route('master.menus.destroy', $menu)"
                                                  confirm="Hapus menu ini beserta semua resepnya?" />
                                 @endunless

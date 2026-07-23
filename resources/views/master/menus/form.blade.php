@@ -87,6 +87,14 @@
                                                             @endif
                                                         </div>
                                                     </div>
+                                                    @php
+                                                        // Admin area hanya boleh kelola versi milik toko yg dia pegang
+                                                        // (versi default / menyangkut toko lain = tampilan saja).
+                                                        $canManageVer = auth()->user()->isSuperAdmin()
+                                                            || (!$isDefault && $vStoreIds->filter()
+                                                                    ->diff(auth()->user()->accessibleStoreIds())->isEmpty());
+                                                    @endphp
+                                                    @if($canManageVer)
                                                     <div class="d-flex gap-1">
                                                         <button type="button" class="btn btn-sm btn-light border btn-edit-version"
                                                             style="border-radius: 8px; color: #475569;" data-date="{{ $date }}"
@@ -103,6 +111,7 @@
                                                             </button>
                                                         </form>
                                                     </div>
+                                                    @endif
                                                 </div>
 
                                                 <div class="mt-auto">
@@ -159,18 +168,28 @@
                                         <h4 class="fw-semibold mb-0">Info Menu Dasar</h4>
                                     </div>
 
+                                    @php $isAdminArea = !auth()->user()->isSuperAdmin(); @endphp
                                     <div class="card-body">
+                                        @if($isAdminArea)
+                                            <div class="alert alert-info py-2 small mb-4">
+                                                <i class="bi bi-info-circle me-1"></i>
+                                                Info menu hanya bisa diubah Super Admin. Anda bisa menambah/mengubah
+                                                <strong>versi resep untuk toko yang Anda pegang</strong> di panel kanan.
+                                            </div>
+                                        @endif
                                         <div class="mb-4">
                                             <label class="form-label">Nama Menu <span
                                                     class="text-danger">*</span></label>
                                             <input type="text" name="name" class="form-control"
                                                 value="{{ old('name', $menu->name ?? '') }}"
-                                                placeholder="Contoh: Brown Sugar Boba" required>
+                                                placeholder="Contoh: Brown Sugar Boba" required
+                                                @if($isAdminArea) readonly style="background:#f8fafc" @endif>
                                         </div>
 
                                         <div class="mb-4">
                                             <label class="form-label">Kategori</label>
-                                            <select name="category_id" class="form-select">
+                                            <select name="category_id" class="form-select"
+                                                @if($isAdminArea) style="pointer-events:none;background:#f8fafc" tabindex="-1" @endif>
                                                 <option value="">— Pilih Kategori —</option>
                                                 @foreach($menuCategories as $mc)
                                                     <option value="{{ $mc->id }}" {{ old('category_id', $menu->category_id ?? '') == $mc->id ? 'selected' : '' }}>
@@ -189,7 +208,8 @@
                                         <div class="mb-4 pt-4 border-top">
                                             <div class="form-check form-switch d-flex align-items-center gap-3 ps-0">
                                                 <input class="form-check-input m-0" type="checkbox" name="is_active"
-                                                    value="1" id="actMenu" {{ old('is_active', $menu->is_active ?? true) ? 'checked' : '' }}>
+                                                    value="1" id="actMenu" {{ old('is_active', $menu->is_active ?? true) ? 'checked' : '' }}
+                                                    @if($isAdminArea) style="pointer-events:none" tabindex="-1" @endif>
                                                 <label class="form-check-label form-label mb-0" for="actMenu"
                                                     style="cursor: pointer;">Set Menu Aktif</label>
                                             </div>
@@ -197,7 +217,7 @@
 
                                         <div class="mt-auto pt-2">
                                             <button type="submit" class="btn btn-primary w-100">
-                                                <i class="bi bi-check-lg me-1"></i>Simpan Data Menu
+                                                <i class="bi bi-check-lg me-1"></i>{{ $isAdminArea ? 'Simpan Versi Resep' : 'Simpan Data Menu' }}
                                             </button>
                                         </div>
                                     </div>
@@ -251,7 +271,12 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-text mt-2">
-                                                    Kosongkan jika berlaku untuk <strong>semua toko</strong> (default).
+                                                    @if($isAdminArea)
+                                                        <span class="text-danger fw-semibold">Wajib pilih minimal 1 toko</span> —
+                                                        resep default (semua toko) hanya bisa dibuat Super Admin.
+                                                    @else
+                                                        Kosongkan jika berlaku untuk <strong>semua toko</strong> (default).
+                                                    @endif
                                                 </div>
                                             </div>
                                         </div>

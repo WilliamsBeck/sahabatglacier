@@ -28,6 +28,7 @@ class MenuController extends Controller
 
     public function create()
     {
+        abort_unless(auth()->user()->isSuperAdmin(), 403, 'Hanya Super Admin yang bisa menambah menu.');
         $ingredients     = Ingredient::where('ingredients.is_active', true)->orderedByCategory()->get();
         $menuCategories  = MenuCategory::ordered()->get();
         $stores          = Store::where('is_active', true)->orderBy('name')->get();
@@ -36,6 +37,7 @@ class MenuController extends Controller
 
     public function store(Request $request)
     {
+        abort_unless(auth()->user()->isSuperAdmin(), 403, 'Hanya Super Admin yang bisa menambah menu.');
         $request->validate([
             'name'                      => 'required|string',
             'category'                  => 'nullable|string',
@@ -84,7 +86,10 @@ class MenuController extends Controller
             ->groupBy('recipe_group_id');
         $ingredients    = Ingredient::where('ingredients.is_active', true)->orderedByCategory()->get();
         $menuCategories = MenuCategory::ordered()->get();
-        $stores         = Store::where('is_active', true)->orderBy('name')->get();
+        // Admin area: hanya boleh membuat versi resep utk toko yang dia pegang
+        $stores         = auth()->user()->isSuperAdmin()
+            ? Store::where('is_active', true)->orderBy('name')->get()
+            : auth()->user()->accessibleStores()->where('is_active', true)->sortBy('name')->values();
         return view('master.menus.form', compact('menu', 'recipes', 'ingredients', 'menuCategories', 'stores'));
     }
 
@@ -97,13 +102,26 @@ class MenuController extends Controller
             'items.*.qty_usage'         => 'nullable|integer|min:1',
         ]);
 
-        DB::transaction(function () use ($request, $menu) {
-            $menu->update([
-                'name'        => $request->name,
-                'category'    => $request->category,
-                'category_id' => $request->category_id ?: null,
-                'is_active'   => $request->has('is_active'),
-            ]);
+        // Admin area: hanya boleh mengelola VERSI RESEP utk toko yang dia pegang.
+        // Info menu (nama/kategori/status) tidak diubah, dan versi default (semua
+        // toko) tidak boleh dibuat — wajib pilih toko miliknya.
+        $isAdminArea = !auth()->user()->isSuperAdmin();
+        if ($isAdminArea) {
+            $storeIds   = array_map('intval', $request->input('store_ids', []));
+            $accessible = auth()->user()->accessibleStoreIds();
+            abort_if(empty($storeIds), 403, 'Pilih toko dulu — admin area tidak bisa membuat resep default (semua toko).');
+            abort_if(count(array_diff($storeIds, $accessible)) > 0, 403, 'Anda hanya bisa membuat resep untuk toko yang Anda pegang.');
+        }
+
+        DB::transaction(function () use ($request, $menu, $isAdminArea) {
+            if (!$isAdminArea) {
+                $menu->update([
+                    'name'        => $request->name,
+                    'category'    => $request->category,
+                    'category_id' => $request->category_id ?: null,
+                    'is_active'   => $request->has('is_active'),
+                ]);
+            }
 
             // Simpan versi resep baru jika ada item yang diisi
             $hasItems = collect($request->input('items', []))
@@ -151,6 +169,7 @@ class MenuController extends Controller
 
     public function destroy(Menu $menu)
     {
+        abort_unless(auth()->user()->isSuperAdmin(), 403, 'Hanya Super Admin yang bisa menghapus menu.');
         $hasData = \App\Models\MonthlySale::where('menu_id', $menu->id)->exists();
 
         if ($hasData) {
@@ -170,6 +189,17 @@ class MenuController extends Controller
         $query = $group === 'kosong'
             ? $menu->recipes()->whereNull('recipe_group_id')
             : $menu->recipes()->where('recipe_group_id', $group);
+
+        // Admin area: hanya boleh hapus versi milik toko yang dia pegang.
+        // Versi default (store_id NULL) atau versi yang menyangkut toko lain = terlarang.
+        if (!auth()->user()->isSuperAdmin()) {
+            $verStoreIds = (clone $query)->pluck('store_id');
+            $accessible  = auth()->user()->accessibleStoreIds();
+            abort_if($verStoreIds->contains(null), 403, 'Versi default (semua toko) hanya bisa dihapus Super Admin.');
+            abort_if($verStoreIds->filter(fn($s) => !in_array((int)$s, $accessible))->isNotEmpty(),
+                403, 'Versi ini menyangkut toko di luar wewenang Anda.');
+        }
+
         $query->delete();
         return back()->with('success', 'Versi resep dihapus.');
     }
