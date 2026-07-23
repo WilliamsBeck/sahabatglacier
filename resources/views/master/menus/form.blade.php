@@ -66,8 +66,16 @@
                                                                 <span class="badge"
                                                                     style="background-color: #dcfce7; color: #166534; font-size: 0.75rem; padding: 4px 8px;">Default
                                                                     (Semua Toko)</span>
+                                                            @elseif($vStoreNames->count() <= 2)
+                                                                {{-- 1–2 toko: langsung tampilkan namanya, tanpa dropdown --}}
+                                                                @foreach($vStoreNames as $sn)
+                                                                    <span class="badge"
+                                                                        style="background-color: #e0f2fe; color: #0284c7; font-size: 0.75rem; padding: 4px 8px;">
+                                                                        <i class="bi bi-shop me-1"></i> {{ $sn }}
+                                                                    </span>
+                                                                @endforeach
                                                             @else
-                                                                {{-- Ringkas: chip jumlah toko, klik untuk buka daftar lengkap --}}
+                                                                {{-- 3+ toko: ringkas jadi chip jumlah, klik untuk buka daftar lengkap --}}
                                                                 @php $vsId = 'ver-stores-'.$loop->index; @endphp
                                                                 <button type="button" class="badge border-0 btn-toggle-stores"
                                                                     data-target="{{ $vsId }}"
@@ -114,7 +122,7 @@
                                                     @endif
                                                 </div>
 
-                                                <div class="mt-auto">
+                                                <div>
                                                     <table class="table table-sm mb-0 align-middle">
                                                         <thead style="background-color: #f8fafc;">
                                                             <tr>
