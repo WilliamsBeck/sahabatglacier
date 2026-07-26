@@ -36,6 +36,20 @@ class MergeDuplicatePackagings extends Command
             return self::SUCCESS;
         }
 
+        // ⚠ Supplier menempel pada kemasan & dipakai memfilter daftar bahan saat input
+        // pembelian. Menggabungkan kemasan lintas supplier membuat bahan tsb HILANG dari
+        // daftar supplier yang kemasannya dihapus. Karena itu perlu konfirmasi eksplisit.
+        if (!$dry) {
+            $this->warn('PERINGATAN: kemasan menyimpan supplier, dan supplier dipakai memfilter');
+            $this->warn('daftar bahan saat input pembelian. Setelah digabung, bahan ini TIDAK akan');
+            $this->warn('muncul lagi saat membeli dari supplier yang kemasannya dihapus.');
+            $this->warn('Pastikan sudah backup database sebelum lanjut.');
+            if (!$this->confirm('Lanjutkan penggabungan?', false)) {
+                $this->info('Dibatalkan. Tidak ada perubahan.');
+                return self::SUCCESS;
+            }
+        }
+
         $this->line('Ditemukan ' . $groups->count() . ' kelompok kemasan ganda:');
         $affected = [];   // [ "storeId-ingId" => true ] untuk recalculate FIFO
         $totalDel = 0;

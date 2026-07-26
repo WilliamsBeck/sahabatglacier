@@ -204,7 +204,7 @@ class DailyLedgerController extends Controller
         // Urutan custom melekat ke TOKO (bukan user) & per (bahan × kemasan).
         $storeOrder  = $this->storeRowOrder($storeId);
 
-        $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
+        $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')->with('supplier')])
             ->whereIn('id', $ingIds)
             ->where('type', '!=', 'semi_finished')
             ->get()

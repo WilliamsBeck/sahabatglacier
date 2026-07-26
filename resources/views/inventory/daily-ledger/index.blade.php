@@ -379,6 +379,10 @@
                             $ptb     = $pkg ? (float)$pkg->pack_to_base : 1;
                             $ctb     = $pkg ? (float)($pkg->crate_to_pack * $pkg->pack_to_base) : 0;
                             $multiPkg = $ing->packagings->count() > 1;
+                            // Bila ada >1 kemasan dgn isi/dus SAMA (beda supplier), label "@N pack"
+                            // jadi kembar & membingungkan → tampilkan nama supplier sbg pembeda.
+                            $ambiguousPkg = $pkg && $multiPkg
+                                && $ing->packagings->where('crate_to_pack', $pkg->crate_to_pack)->count() > 1;
 
                             // Total pemakaian baris ini (pack)
                             $totalPack = collect($trow['days'])->sum('pemakaian');
@@ -435,6 +439,14 @@
                                 <span class="fw-semibold">{{ $ing->name }}</span>
                                 @if($pkg && $multiPkg && $pkg->crate_to_pack)
                                     <span class="text-muted" style="font-size:0.62rem">{{ '@'.$pkg->crate_to_pack }} pack</span>
+                                @endif
+                                @if($ambiguousPkg)
+                                    <span class="badge align-middle ms-1"
+                                          style="background:#e0f2fe;color:#0369a1;font-size:0.58rem;padding:2px 5px;font-weight:600"
+                                          title="Kemasan dengan isi sama — dibedakan dari supplier">
+                                        <i class="bi bi-truck" style="font-size:0.55rem"></i>
+                                        {{ $pkg->supplier->name ?? 'Tanpa supplier' }}
+                                    </span>
                                 @endif
                             </td>
 
