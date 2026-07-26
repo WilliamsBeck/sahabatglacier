@@ -640,19 +640,24 @@ class MutationController extends Controller
         return back()->with('success','Mutasi dibatalkan.');
     }
 
-    // API: ambil harga terakhir bahan dari pembelian
-    // API: harga TERAKHIR pembelian utk bahan tertentu — GLOBAL (semua toko),
-    // PER kemasan (kalau packaging_id diberikan), dan bisa difilter tipe.
+    // API: harga TERAKHIR pembelian utk bahan tertentu — dibatasi PER TOKO
+    // (bila store_id diberikan), PER kemasan (bila packaging_id diberikan), dan
+    // bisa difilter tipe. Harga tiap toko bisa berbeda, jadi tidak boleh saling
+    // meminjam — kalau toko belum punya riwayat, harga dibiarkan KOSONG supaya
+    // user mengisi manual (lebih aman daripada terisi angka toko lain).
     public function lastPrice(Ingredient $ingredient, Request $request)
     {
         $packagingId = $request->packaging_id;
         $type        = $request->type; // mis. 'purchase_zhisheng'
+        $storeId     = $request->store_id;
 
         $base = fn() => MutationItem::query()
             ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
             ->where('mutations.status', 'confirmed')
             ->where('mutation_items.ingredient_id', $ingredient->id)
             ->where('mutation_items.price_per_base', '>', 0)
+            // Pembelian = barang MASUK, jadi tokonya = destination_store_id
+            ->when($storeId, fn($q) => $q->where('mutations.destination_store_id', $storeId))
             ->when($packagingId, fn($q) => $q->where('mutation_items.packaging_id', $packagingId))
             ->orderByRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) DESC')
             ->orderByDesc('mutation_items.id');

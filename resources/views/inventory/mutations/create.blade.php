@@ -425,6 +425,33 @@ function syncStoreDropdowns() {
     document.querySelectorAll('#destStoreSelect option').forEach(function(opt) {
         opt.disabled = (opt.value !== '' && opt.value === srcVal);
     });
+
+    refreshPricesForStore();
+}
+
+// Toko tujuan berubah → harga auto-fill lama (dari toko sebelumnya) harus dibuang
+// dan diambil ulang sesuai riwayat toko yang baru dipilih.
+var lastPriceStoreId = null;
+function refreshPricesForStore() {
+    var type = document.getElementById('typeSelect').value;
+    if (!['purchase_zhisheng', 'purchase_supplier'].includes(type)) return;
+
+    var dstVal = document.getElementById('destStoreSelect').value || '';
+    if (dstVal === lastPriceStoreId) return;      // toko tidak berubah → biarkan
+    var isFirstPick = (lastPriceStoreId === null);
+    lastPriceStoreId = dstVal;
+    if (isFirstPick) return;                       // pemilihan pertama: belum ada harga lama
+
+    document.querySelectorAll('[id^="row-"]').forEach(function(row) {
+        var idx    = row.id.replace('row-', '');
+        var priceI = row.querySelector('.price-crate-input');
+        var pkgSel = row.querySelector('.packaging-select');
+        if (!priceI) return;
+        priceI.value = '';                         // buang harga toko sebelumnya
+        onPriceCrateChange(idx);
+        if (pkgSel && pkgSel.value) onPackagingChange(idx);  // ambil harga toko baru
+    });
+    recalcTotals();
 }
 
 // Dipanggil saat toko pengirim berubah
@@ -963,8 +990,11 @@ function onPackagingChange(idx) {
     if (['purchase_zhisheng','purchase_supplier'].includes(type) && ingInput && ingInput.value) {
         var priceInput = document.querySelector('#row-' + idx + ' .price-crate-input');
         if (priceInput && (!priceInput.value || NumberFmt.parse(priceInput.value) === 0)) {
+            // Harga diambil dari riwayat TOKO TUJUAN saja — jangan pinjam harga toko lain
+            var destStore = (document.getElementById('destStoreSelect') || {}).value || '';
             fetch('{{ url("api-internal/ingredient") }}/' + ingInput.value
                 + '/last-price?type=' + encodeURIComponent(type)
+                + '&store_id=' + encodeURIComponent(destStore)
                 + '&packaging_id=' + encodeURIComponent(select.value))
                 .then(function(r){ return r.json(); })
                 .then(function(d){
