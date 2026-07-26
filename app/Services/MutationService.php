@@ -66,6 +66,12 @@ class MutationService
                             'Mutation', $mutation->id,
                             "Ref: {$mutation->reference_no}"
                         );
+                        // Re-sync FIFO toko PENERIMA — sama seperti pada pembelian.
+                        // Batch baru ini masuk dengan remaining_qty penuh, sementara toko
+                        // penerima mungkin sudah punya pemakaian/waste/opname yang perlu
+                        // diterapkan ulang. Tanpa ini, stok penerima bisa kelebihan
+                        // (mis. saat mutasi dikonfirmasi ulang setelah dibatalkan).
+                        FifoService::recalculate($mutation->destination_store_id, $ingredientId);
                     }
                 }
             }

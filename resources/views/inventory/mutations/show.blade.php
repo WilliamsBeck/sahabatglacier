@@ -173,6 +173,18 @@
                     </form>
                 @endif
 
+                {{-- Batalkan Konfirmasi: mutasi confirmed kembali jadi draft supaya bisa diperbaiki --}}
+                @if($mutation->status === 'confirmed' && $mutation->type !== 'opening_stock' && !$isLocked)
+                    <form method="POST" action="{{ route('inventory.mutations.unconfirm', $mutation) }}"
+                          data-confirm="Batalkan konfirmasi mutasi ini? Stok akan dikembalikan seperti sebelum dikonfirmasi, dan mutasi jadi draft agar bisa diedit."
+                          data-confirm-type="warning" data-confirm-ok="Ya, batalkan konfirmasi">
+                        @csrf
+                        <button class="btn btn-outline-warning btn-sm">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i> Batalkan Konfirmasi & Edit
+                        </button>
+                    </form>
+                @endif
+
                 {{-- Hapus: untuk confirmed/cancelled atau draft yang belum dikunci --}}
                 @if($isLocked)
                     <button class="btn btn-danger btn-sm" disabled title="Data terkunci">

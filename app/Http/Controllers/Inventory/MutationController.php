@@ -683,6 +683,92 @@ class MutationController extends Controller
             ->with('success', 'Mutasi berhasil dikonfirmasi. Stok telah diupdate.');
     }
 
+    /**
+     * Batalkan konfirmasi: mutasi kembali ke DRAFT supaya bisa diedit bila ada salah input.
+     * Efek stoknya dibalik memakai mekanisme yang sama dengan destroy() (hapus ledger +
+     * recalculate FIFO), bedanya record-nya dipertahankan — jadi nomor referensi & jejak
+     * audit tetap utuh, dan user tidak perlu mengetik ulang.
+     *
+     * Dijaga oleh kunci yang sama seperti destroy(): month lock, opname approved, snapshot HPP.
+     */
+    public function unconfirm(Mutation $mutation)
+    {
+        abort_if($mutation->status !== 'confirmed', 422, 'Hanya mutasi terkonfirmasi yang bisa dibatalkan konfirmasinya.');
+        abort_if($mutation->type === 'opening_stock', 403, 'Input stok awal tidak bisa dibatalkan konfirmasinya.');
+
+        // ── Kunci periode ────────────────────────────────────────────────────────
+        $txDate = $mutation->transaction_date;
+        if (MonthLockService::isLocked('mutation', $mutation->id, $txDate->month, $txDate->year)) {
+            return back()->with('error', MonthLockService::lockMessage($txDate->month, $txDate->year));
+        }
+        $lockDate = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+        $lc = \Carbon\Carbon::parse($lockDate);
+        foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
+            if (\App\Models\Opname::isDateLocked((int) $sid, $lockDate)) {
+                return back()->with('error', \App\Models\Opname::lockMessageFor((int) $sid));
+            }
+            if (\App\Models\HppSnapshot::isDateLocked((int) $sid, $lockDate)) {
+                return back()->with('error', \App\Models\HppSnapshot::lockMessageFor((int) $sid, $lc->month, $lc->year));
+            }
+        }
+
+        DB::transaction(function () use ($mutation) {
+            $mutation->loadMissing('items');
+
+            // Pasangan (toko × bahan) yang perlu dihitung ulang — dua arah, sama spt destroy()
+            $pairs = [];
+            foreach ($mutation->items as $item) {
+                if ($mutation->source_store_id && in_array($mutation->type, ['sale_internal', 'sale_external_out'])) {
+                    $pairs[$mutation->source_store_id . '-' . $item->ingredient_id] =
+                        ['store_id' => $mutation->source_store_id, 'ingredient_id' => $item->ingredient_id];
+                }
+                if ($mutation->destination_store_id) {
+                    $pairs[$mutation->destination_store_id . '-' . $item->ingredient_id] =
+                        ['store_id' => $mutation->destination_store_id, 'ingredient_id' => $item->ingredient_id];
+                }
+            }
+
+            // Hapus jejak ledger mutasi ini, lalu susun ulang balance_after-nya
+            $ledgerPairs = StockLedger::where('reference_type', 'Mutation')
+                ->where('reference_id', $mutation->id)
+                ->get(['store_id', 'ingredient_id'])
+                ->unique(fn($e) => $e->store_id . '-' . $e->ingredient_id)
+                ->values();
+
+            StockLedger::where('reference_type', 'Mutation')
+                ->where('reference_id', $mutation->id)
+                ->delete();
+
+            foreach ($ledgerPairs as $pair) {
+                $balance = 0;
+                foreach (StockLedger::where('store_id', $pair->store_id)
+                            ->where('ingredient_id', $pair->ingredient_id)
+                            ->orderBy('movement_date')->orderBy('id')->get() as $entry) {
+                    $balance += $entry->qty_change;
+                    $entry->update(['balance_after' => $balance]);
+                }
+                StoreStock::updateOrCreate(
+                    ['store_id' => $pair->store_id, 'ingredient_id' => $pair->ingredient_id],
+                    ['stock_balance' => $balance]
+                );
+            }
+
+            // Kembali ke draft. remaining_qty dikembalikan penuh supaya saat dikonfirmasi
+            // ulang batch-nya mulai bersih (tidak membawa sisa deduksi lama).
+            $mutation->items()->update(['remaining_qty' => DB::raw('total_in_base')]);
+            $mutation->update(['status' => 'draft', 'confirmed_by' => null]);
+
+            // Setelah status jadi draft, item mutasi ini tidak lagi dihitung sebagai batch
+            // maupun deduksi → recalculate merapikan sisa batch toko terdampak.
+            foreach ($pairs as $p) {
+                FifoService::recalculate($p['store_id'], $p['ingredient_id']);
+            }
+        });
+
+        return redirect()->route('inventory.mutations.edit', $mutation)
+            ->with('success', 'Konfirmasi dibatalkan — mutasi kembali jadi draft. Silakan perbaiki lalu konfirmasi ulang.');
+    }
+
     public function cancel(Mutation $mutation)
     {
         // ── Lock check ──────────────────────────────────────────────────────────
