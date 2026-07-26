@@ -12,6 +12,47 @@
     </a>
 </div>
 
+{{-- ── Peringatan urutan FIFO (lunak — boleh dilanjutkan) ──────────────────── --}}
+@if(session('fifo_warning'))
+    @php $fw = session('fifo_warning'); @endphp
+    <div class="alert alert-warning d-flex align-items-start gap-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill fs-5 mt-1"></i>
+        <div class="flex-fill">
+            <strong>Ada pencatatan harian yang belum dikonfirmasi</strong>
+            <div class="small mt-1">
+                <strong>{{ $fw['store'] }}</strong> punya pemakaian yang belum dikonfirmasi di tanggal:
+                <strong>{{ collect($fw['dates'])->map(fn($d) => \Carbon\Carbon::parse($d)->isoFormat('D MMM'))->implode(', ') }}</strong>
+                — semuanya sebelum/pada tanggal mutasi ini
+                ({{ \Carbon\Carbon::parse($fw['txDate'])->isoFormat('D MMM Y') }}).
+            </div>
+            <div class="small mt-2">
+                Kalau dilanjutkan, mutasi ini bisa mengambil batch yang keliru dan
+                <strong>harganya</strong> mungkin tidak sesuai FIFO. Kuantitas tetap terkoreksi
+                otomatis saat tanggal-tanggal itu dikonfirmasi, tapi harga tidak ikut dihitung ulang.
+            </div>
+            <div class="small mt-2 text-muted">
+                Disarankan: konfirmasi tanggal-tanggal itu dulu di Pencatatan Harian, baru konfirmasi mutasi ini.
+            </div>
+            <div class="d-flex gap-2 mt-3 flex-wrap">
+                <a href="{{ route('inventory.daily-ledger.index', [
+                        'store_id' => $mutation->source_store_id,
+                        'month'    => \Carbon\Carbon::parse($fw['txDate'])->month,
+                        'year'     => \Carbon\Carbon::parse($fw['txDate'])->year,
+                   ]) }}" class="btn btn-sm btn-primary">
+                    <i class="bi bi-calendar-check me-1"></i>Konfirmasi tanggalnya dulu
+                </a>
+                <form method="POST" action="{{ route('inventory.mutations.confirm', $mutation) }}"
+                      data-confirm="Lanjutkan konfirmasi meski ada pencatatan harian yang belum dikonfirmasi?"
+                      data-confirm-type="warning" data-confirm-ok="Ya, lanjutkan">
+                    @csrf
+                    <input type="hidden" name="force_fifo" value="1">
+                    <button class="btn btn-sm btn-outline-secondary">Lanjutkan saja</button>
+                </form>
+            </div>
+        </div>
+    </div>
+@endif
+
 {{-- ── Lock / Unlock Banner ─────────────────────────────────────────────── --}}
 @if($isPastLock)
     @if($isLocked)

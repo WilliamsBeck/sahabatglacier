@@ -180,7 +180,13 @@ class FifoService
      * Dipanggil setelah menghapus mutation yang sudah confirmed,
      * supaya remaining_qty tidak under-count akibat deduction yang sudah dihapus.
      */
-    public static function recalculate(int $storeId, int $ingredientId): void
+    /**
+     * @param callable|null $onTransfer Kait OPSIONAL untuk audit: dipanggil tepat sebelum tiap
+     *        transfer/penjualan dipotong, dengan ($item, $layers) — $layers = lapisan FIFO yang
+     *        AKAN dipakai. Dipakai command audit untuk membandingkan harga tercatat vs seharusnya
+     *        tanpa menduplikasi logika urutan potong. Default null = perilaku normal.
+     */
+    public static function recalculate(int $storeId, int $ingredientId, ?callable $onTransfer = null): void
     {
         // 1. Reset semua incoming batch ke remaining_qty = total_in_base
         MutationItem::whereHas('mutation', fn($q) =>
@@ -200,7 +206,7 @@ class FifoService
         )
         ->where('ingredient_id', $ingredientId)
         ->orderBy('id')
-        ->get(['total_in_base', 'packaging_id']);
+        ->get(['id', 'mutation_id', 'total_in_base', 'packaging_id', 'price_per_base']);
 
         // 3. Deduksi transfer/penjualan (PACK UTUH) DITERAPKAN PALING AKHIR (lihat step 7b).
         //    Alasannya: transfer mengambil pack utuh dari stok pasca-pemakaian-harian.
@@ -300,6 +306,12 @@ class FifoService
         //     (setelah semua konsumsi) supaya hasilnya sama dengan confirm real-time:
         //     transfer mengambil pack utuh dari stok yang tersisa pasca-pemakaian.
         foreach ($deductions as $ded) {
+            if ($onTransfer) {
+                // Lapisan yang AKAN dipakai — direkam sebelum dipotong (untuk audit)
+                $onTransfer($ded, self::getWholePackLayers(
+                    $storeId, $ingredientId, (float) $ded->total_in_base, $ded->packaging_id ?: null
+                ));
+            }
             self::deductWholePacks($storeId, $ingredientId, (float) $ded->total_in_base, $ded->packaging_id ?: null);
         }
 

@@ -450,6 +450,20 @@ class MutationController extends Controller
         // Jika user klik "Konfirmasi Sekarang"
         if ($request->action === 'confirm') {
             $mutation->load('items');
+
+            // Peringatan LUNAK yang sama seperti di confirm() — boleh dilanjutkan
+            if (!$request->boolean('force_fifo')) {
+                $pending = $this->pendingUsageDatesBefore($mutation);
+                if (!empty($pending)) {
+                    return redirect()->route('inventory.mutations.show', $mutation)
+                        ->with('fifo_warning', [
+                            'store'  => $mutation->sourceStore->name ?? 'Toko sumber',
+                            'dates'  => $pending,
+                            'txDate' => ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString(),
+                        ]);
+                }
+            }
+
             MutationService::confirm($mutation);
             return redirect()->route('inventory.mutations.show', $mutation)
                 ->with('success', 'Mutasi dikonfirmasi. Stok telah diupdate.');
@@ -599,9 +613,52 @@ class MutationController extends Controller
         ));
     }
 
-    public function confirm(Mutation $mutation)
+    /**
+     * Tanggal pemakaian harian yang BELUM dikonfirmasi di toko sumber, pada tanggal
+     * <= tanggal mutasi ini, untuk bahan-bahan yang ada di mutasi.
+     *
+     * Kenapa penting: FIFO memotong pemakaian harian (urut tanggal) LEBIH DULU, baru
+     * transfer. Kalau transfer dikonfirmasi sementara pemakaian sebelumnya masih draft,
+     * transfer bisa mengambil batch yang keliru — kuantitas nanti terkoreksi sendiri saat
+     * tanggalnya dikonfirmasi, tapi HARGA yang terlanjur terkunci di transfer tidak ikut
+     * dihitung ulang. Karena itu user diperingatkan (boleh tetap lanjut).
+     */
+    private function pendingUsageDatesBefore(Mutation $mutation): array
+    {
+        if (!$mutation->deductsFromSource() || !$mutation->source_store_id) return [];
+
+        $upTo   = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+        $ingIds = $mutation->items->pluck('ingredient_id')->unique()->all();
+        if (empty($ingIds)) return [];
+
+        return \App\Models\DailyUsage::where('store_id', $mutation->source_store_id)
+            ->whereIn('ingredient_id', $ingIds)
+            ->where('qty_pack', '>', 0)
+            ->where('usage_date', '<=', $upTo)
+            ->whereNotExists(fn($q) => $q->from('daily_confirmations')
+                ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+            ->distinct()->orderBy('usage_date')
+            ->pluck('usage_date')
+            ->map(fn($d) => $d instanceof \Carbon\Carbon ? $d->toDateString() : (string) $d)
+            ->all();
+    }
+
+    public function confirm(Mutation $mutation, Request $request)
     {
         abort_if($mutation->status !== 'draft', 422, 'Hanya mutasi draft yang bisa dikonfirmasi.');
+
+        // Peringatan LUNAK: boleh dilanjutkan dengan tombol "Lanjutkan saja" (force_fifo=1)
+        if (!$request->boolean('force_fifo')) {
+            $pending = $this->pendingUsageDatesBefore($mutation);
+            if (!empty($pending)) {
+                return back()->with('fifo_warning', [
+                    'store' => $mutation->sourceStore->name ?? 'Toko sumber',
+                    'dates' => $pending,
+                    'txDate' => ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString(),
+                ]);
+            }
+        }
 
         // Tanggal penerimaan wajib ada sebelum konfirmasi (kecuali opening_stock)
         if ($mutation->type !== 'opening_stock' && !$mutation->delivery_date) {

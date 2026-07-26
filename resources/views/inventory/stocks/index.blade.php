@@ -158,7 +158,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         <th class="text-end" style="width:10%">Pack</th>
                         <th class="text-end" style="width:15%">Harga/Dus</th>
                         <th class="text-end" style="width:15%">Subtotal</th>
-                        <th class="text-center" style="width:14%;padding-left:calc(4.5rem + 20px)">DOS</th>
+                        <th class="text-center" style="width:14%">DOS</th>
                         <th class="text-center" style="width:14%">Min Stok</th>
                     </tr>
                 </thead>
@@ -274,9 +274,9 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         </td>
 
                         {{-- DOS --}}
-                        <td class="text-center" style="padding-left:calc(4.5rem + 20px)">
+                        <td class="text-center dos-cell">
                             @if($totalDus <= 0 && $totalPack <= 0)
-                                <span class="badge bg-dark" style="font-size:.6rem">Habis</span>
+                                <span class="badge bg-dark dos-badge">Habis</span>
                             @elseif($primaryRow->dosValue !== null)
                                 @php
                                     $badge = match($primaryRow->dosStatus) {
@@ -285,12 +285,12 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                                         default    => 'bg-success',
                                     };
                                 @endphp
-                                <span class="badge {{ $badge }}" style="font-size:.62rem">{{ $primaryRow->dosValue }} hari</span>
+                                <span class="badge {{ $badge }} dos-badge">{{ $primaryRow->dosValue }} hari</span>
                             @else
                                 <span class="text-muted">—</span>
                             @endif
                             @if($primaryRow->avgDailyPack !== null)
-                                <div class="text-muted" style="font-size:.6rem">{{ number_format($primaryRow->avgDailyPack, 1, ',', '.') }} Pack/hari</div>
+                                <div class="dos-rate">{{ number_format($primaryRow->avgDailyPack, 1, ',', '.') }} Pack/hari</div>
                             @endif
                             @if($totalInTransit > 0)
                                 <div class="mt-1"><span class="badge bg-info text-dark" style="font-size:.56rem"
@@ -369,9 +369,11 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                                     Rp {{ number_format($row->subtotal, 0, ',', '.') }}
                                 @else <span class="text-muted">–</span> @endif
                             </td>
-                            <td class="text-center">
+                            {{-- DOS baris detail: dibuat kalem (bukan badge hitam pekat) supaya
+                                 hierarki visual benar — angka DOS utama ada di baris bahan. --}}
+                            <td class="text-center dos-cell">
                                 @if($row->dus <= 0 && $row->pack <= 0)
-                                    <span class="badge bg-dark" style="font-size:.55rem">Habis</span>
+                                    <span class="dos-empty">Habis</span>
                                 @else
                                     <span class="text-muted small">—</span>
                                 @endif
@@ -494,6 +496,31 @@ document.addEventListener('DOMContentLoaded', function() {
 /* Angka Dus/Pack = data utama → dibuat lebih menonjol dari teks sel lain.
    Ukuran dipasang di span-nya sendiri, jadi menang atas warisan dari td. */
 .stock-table .stock-qty { font-size: var(--fs-md); line-height: 1.2; }
+
+/* ── Kolom DOS ────────────────────────────────────────────────────────────
+   Sebelumnya kolom ini dipaksa padding-left ~92px padahal text-center, jadi
+   isinya terdorong ke kanan & tidak pernah rata tengah. Sekarang benar-benar
+   center, dengan badge yang tetap kontras di atas baris bertanda (kuning/merah). */
+.stock-table .dos-cell { white-space: nowrap; line-height: 1.35; }
+.stock-table .dos-badge {
+    font-size: .68rem;
+    padding: .25em .55em;
+    min-width: 64px;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, .12);   /* tepi tipis: tetap terlihat di baris kuning */
+}
+.stock-table .dos-rate {
+    font-size: .62rem;
+    color: #64748b;
+    margin-top: 2px;
+}
+/* Baris detail per-kemasan: penanda kalem, bukan badge hitam pekat */
+.stock-table .dos-empty {
+    font-size: .62rem;
+    color: #94a3b8;
+    border: 1px dashed #cbd5e1;
+    border-radius: 999px;
+    padding: 1px 8px;
+}
 
 /* ── MOBILE ───────────────────────────────────────────────────────────────
    Masalah: .stock-table pakai table-layout:fixed + lebar kolom PERSEN, jadi
