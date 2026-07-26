@@ -141,8 +141,11 @@
                             $pkg        = $item->packaging;
                             $ctb        = $pkg ? ($pkg->crate_to_pack * $pkg->pack_to_base) : 0;   // base per dus
                             $ptb        = $pkg ? (float)$pkg->pack_to_base : 0;                     // base per pack
-                            $priceDus   = $ctb > 0 ? round($item->price_per_base * $ctb) : 0;
-                            $subtotal   = round($item->cost_subtotal);
+                            // Form menampilkan harga BRUTO (katalog); netto dihitung ulang server
+                            // dari diskon invoice saat disimpan.
+                            $grossBase  = (float) ($item->gross_price_per_base ?? $item->price_per_base);
+                            $priceDus   = $ctb > 0 ? round($grossBase * $ctb) : 0;
+                            $subtotal   = round($item->total_in_base * $grossBase);
                         @endphp
                         <tr class="edit-row"
                             id="erow-{{ $idx }}"
@@ -156,7 +159,7 @@
                             <input type="hidden" name="items[{{ $idx }}][ingredient_id]"  value="{{ $item->ingredient_id }}">
                             <input type="hidden" name="items[{{ $idx }}][packaging_id]"   value="{{ $item->packaging_id }}">
                             <input type="hidden" name="items[{{ $idx }}][price_per_base]" class="price-per-base-hidden"
-                                   value="{{ $item->price_per_base }}">
+                                   value="{{ $grossBase }}">
 
                             <td class="fw-semibold">{{ $item->ingredient->name }}</td>
                             <td class="text-muted small">
@@ -220,7 +223,7 @@
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">Rp</span>
                                     <input type="number" class="form-control form-control-sm price-dus-input"
-                                           value="{{ round($item->price_per_base) }}"
+                                           value="{{ round($grossBase) }}"
                                            min="0" step="0.01" placeholder="0"
                                            oninput="onPriceDusChange({{ $idx }})">
                                 </div>
@@ -238,7 +241,7 @@
                         <tr class="table-light">
                             <td colspan="6" class="text-end fw-bold">Grand Total</td>
                             <td class="text-end fw-bold text-success" id="grandTotal">
-                                Rp {{ number_format($mutation->items->sum('cost_subtotal'), 0, ',', '.') }}
+                                Rp {{ number_format($mutation->items->sum(fn($i) => $i->total_in_base * (float)($i->gross_price_per_base ?? $i->price_per_base)), 0, ',', '.') }}
                             </td>
                         </tr>
                     </tfoot>
@@ -246,6 +249,35 @@
             </div>
         </div>
     </div>
+
+    @if(in_array($mutation->type, ['purchase_zhisheng', 'purchase_supplier']))
+    {{-- ═══════════ DISKON INVOICE ═══════════ --}}
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <div class="row align-items-center g-2">
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold mb-0">Diskon Total Invoice (Rp)</label>
+                    <div class="form-text mt-0">Diskon akumulasi satu nota — otomatis dialokasikan proporsional; harga stok tercatat netto.</div>
+                </div>
+                <div class="col-md-4">
+                    <input type="text" id="discountInput" class="form-control text-end" inputmode="numeric" placeholder="0"
+                           value="{{ (float) old('discount_amount', $mutation->discount_amount) > 0 ? number_format((float) old('discount_amount', $mutation->discount_amount), 0, ',', '.') : '' }}">
+                    <input type="hidden" name="discount_amount" id="discountHidden"
+                           value="{{ old('discount_amount', (float) $mutation->discount_amount) }}">
+                </div>
+            </div>
+            @error('discount_amount')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+        </div>
+    </div>
+    <script>
+        document.addEventListener('input', function(e) {
+            if (e.target.id !== 'discountInput') return;
+            var raw = e.target.value.replace(/[^0-9]/g, '');
+            e.target.value = raw ? Number(raw).toLocaleString('id-ID') : '';
+            document.getElementById('discountHidden').value = raw || 0;
+        });
+    </script>
+    @endif
 
     {{-- ═══════════ ACTION BUTTONS ═══════════ --}}
     <div class="d-flex gap-2 flex-wrap">

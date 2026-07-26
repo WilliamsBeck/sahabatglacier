@@ -103,6 +103,62 @@ class MutationController extends Controller
         return view('inventory.mutations.create', compact('stores','sourceStores','myStoreIds','suppliers','ingredients','zhishengId','ingredientJs','suppliersJs','storesMineJs','storesAllJs'));
     }
 
+    /**
+     * Alokasikan diskon invoice (akumulasi satu nota) PRO-RATA ke tiap item.
+     * Prinsip IAS 2 / PSAK 14: diskon pembelian mengurangi nilai persediaan —
+     * harga yang tersimpan di batch FIFO (price_per_base) = harga NETTO, sehingga
+     * Saldo Stok, HPP, transfer, dan opname otomatis memakai biaya riil.
+     * Harga BRUTO (katalog) disimpan di gross_price_per_base untuk auto-fill
+     * harga & tampilan. Idempotent: selalu berangkat dari bruto (aman utk edit draft).
+     */
+    private function allocateInvoiceDiscount(Mutation $mutation): void
+    {
+        $mutation->load('items');
+        $discount = (float) $mutation->discount_amount;
+
+        $grossSubs  = [];
+        $totalGross = 0.0;
+        foreach ($mutation->items as $it) {
+            $gross = (float) ($it->gross_price_per_base ?? $it->price_per_base);
+            $grossSubs[$it->id] = (float) $it->total_in_base * $gross;
+            $totalGross += $grossSubs[$it->id];
+        }
+
+        if ($discount <= 0 || $totalGross <= 0) {
+            // Tanpa diskon: netto = bruto (sekaligus reset bila diskon dihapus saat edit draft)
+            foreach ($mutation->items as $it) {
+                $gross = (float) ($it->gross_price_per_base ?? $it->price_per_base);
+                $it->update([
+                    'gross_price_per_base' => $gross,
+                    'price_per_base'       => $gross,
+                    'cost_subtotal'        => (float) $it->total_in_base * $gross,
+                ]);
+            }
+            return;
+        }
+
+        // Pro-rata per item; sisa pembulatan ditempel ke item terbesar supaya
+        // total netto = total bruto − diskon PERSIS (tanpa selisih rupiah).
+        $alloc = []; $sum = 0.0;
+        foreach ($grossSubs as $id => $gs) {
+            $alloc[$id] = round($discount * $gs / $totalGross, 2);
+            $sum += $alloc[$id];
+        }
+        $largestId = array_search(max($grossSubs), $grossSubs);
+        $alloc[$largestId] = round($alloc[$largestId] + ($discount - $sum), 2);
+
+        foreach ($mutation->items as $it) {
+            $gross  = (float) ($it->gross_price_per_base ?? $it->price_per_base);
+            $netSub = $grossSubs[$it->id] - $alloc[$it->id];
+            $base   = (float) $it->total_in_base;
+            $it->update([
+                'gross_price_per_base' => $gross,
+                'price_per_base'       => $base > 0 ? $netSub / $base : $gross,
+                'cost_subtotal'        => $netSub,
+            ]);
+        }
+    }
+
     public function store(Request $request)
     {
         // Abaikan baris yang qty-nya kosong/0 (mis. dari "Muat Semua Bahan Zhisheng" —
@@ -136,6 +192,7 @@ class MutationController extends Controller
             'items.*.qty_pack'       => 'nullable|integer|min:0',
             'items.*.qty_base'       => 'nullable|numeric|min:0',
             'items.*.price_per_base' => 'required|numeric|min:0',
+            'discount_amount'        => 'nullable|numeric|min:0',
         ], [
             'destination_store_id.required' => 'Toko penerima wajib dipilih.',
             'source_store_id.required'      => 'Toko pengirim wajib dipilih.',
@@ -150,6 +207,20 @@ class MutationController extends Controller
         if ($request->source_store_id && $request->destination_store_id
             && $request->source_store_id == $request->destination_store_id) {
             return back()->withInput()->withErrors(['destination_store_id' => 'Toko pengirim dan toko penerima tidak boleh sama.']);
+        }
+
+        // Diskon invoice: hanya utk pembelian, dan tidak boleh >= total bruto
+        $isPurchaseType = in_array($request->type, ['purchase_zhisheng', 'purchase_supplier']);
+        $discountAmount = $isPurchaseType ? (float) ($request->discount_amount ?? 0) : 0.0;
+        if ($discountAmount > 0) {
+            $totalBruto = collect($request->items)
+                ->sum(fn($it) => $this->convertToBase($it) * (float) $it['price_per_base']);
+            if ($discountAmount >= $totalBruto) {
+                return back()->withInput()->withErrors([
+                    'discount_amount' => 'Diskon (Rp ' . number_format($discountAmount, 0, ',', '.')
+                        . ') tidak boleh sama/melebihi total pembelian (Rp ' . number_format($totalBruto, 0, ',', '.') . ').',
+                ]);
+            }
         }
 
         // Validasi: qty tidak boleh melebihi stok toko pengirim (transfer internal & penjualan eksternal)
@@ -210,7 +281,7 @@ class MutationController extends Controller
         }
 
         $mutation = null;
-        DB::transaction(function () use ($request, $supplierId, &$mutation) {
+        DB::transaction(function () use ($request, $supplierId, $discountAmount, &$mutation) {
             $mutation = Mutation::create([
                 'type'                 => $request->type,
                 'destination_store_id' => $request->destination_store_id,
@@ -219,6 +290,7 @@ class MutationController extends Controller
                 'external_sender'      => $request->type === 'sale_external' ? $request->external_sender : null,
                 'external_receiver'    => $request->type === 'sale_external_out' ? $request->external_receiver : null,
                 'invoice_no'           => $request->invoice_no,
+                'discount_amount'      => $discountAmount,
                 'transaction_date'     => $request->transaction_date,
                 'delivery_date'        => $request->delivery_date,
                 'notes'                => $request->notes,
@@ -235,11 +307,15 @@ class MutationController extends Controller
                     'qty_base'               => $item['qty_base'] ?? null,
                     'total_in_base'          => $totalInBase,
                     'price_per_base'         => $item['price_per_base'],
+                    'gross_price_per_base'   => $item['price_per_base'],
                     'selling_price_per_base' => $item['selling_price_per_base'] ?? null,
                     'cost_subtotal'          => $totalInBase * $item['price_per_base'],
                     'remaining_qty'          => $totalInBase,
                 ]);
             }
+
+            // Diskon invoice → harga batch jadi NETTO (pro-rata)
+            if ($discountAmount > 0) $this->allocateInvoiceDiscount($mutation);
 
             // Simpan sebagai draft — stok belum diupdate
             // User harus konfirmasi setelah barang diterima
@@ -301,6 +377,7 @@ class MutationController extends Controller
             'items.*.qty_pack'  => 'nullable|integer|min:0',
             'items.*.qty_base'  => 'nullable|numeric|min:0',
             'items.*.price_per_base' => 'required|numeric|min:0',
+            'discount_amount'   => 'nullable|numeric|min:0',
         ], [
             'delivery_date.required'       => 'Tanggal penerimaan wajib diisi sebelum konfirmasi.',
             'delivery_date.after_or_equal' => 'Tanggal penerimaan tidak boleh lebih awal dari tanggal pengiriman.',
@@ -319,13 +396,31 @@ class MutationController extends Controller
             }
         }
 
-        DB::transaction(function () use ($request, $mutation) {
+        // Diskon invoice: hanya utk pembelian, tidak boleh >= total bruto
+        $isPurchaseType = in_array($mutation->type, ['purchase_zhisheng', 'purchase_supplier']);
+        $discountAmount = $isPurchaseType ? (float) ($request->discount_amount ?? 0) : (float) $mutation->discount_amount;
+        if ($isPurchaseType && $discountAmount > 0) {
+            $totalBruto = 0.0;
+            foreach ($request->items as $itemData) {
+                $item = $mutation->items->firstWhere('id', $itemData['item_id']);
+                if (!$item) continue;
+                $totalBruto += $this->convertToBaseFromItem($item, $itemData) * (float) $itemData['price_per_base'];
+            }
+            if ($discountAmount >= $totalBruto) {
+                return back()->withInput()->withErrors([
+                    'discount_amount' => 'Diskon tidak boleh sama/melebihi total pembelian (Rp ' . number_format($totalBruto, 0, ',', '.') . ').',
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($request, $mutation, $isPurchaseType, $discountAmount) {
             $mutation->update([
                 'transaction_date' => $request->transaction_date,
                 'delivery_date'    => $request->delivery_date ?: null,
                 'invoice_no'       => $request->invoice_no,
                 'notes'            => $request->notes,
-            ] + ($mutation->type === 'sale_external' && $request->filled('external_sender')
+            ] + ($isPurchaseType ? ['discount_amount' => $discountAmount] : [])
+              + ($mutation->type === 'sale_external' && $request->filled('external_sender')
                     ? ['external_sender' => $request->external_sender] : [])
               + ($mutation->type === 'sale_external_out' && $request->filled('external_receiver')
                     ? ['external_receiver' => $request->external_receiver] : []));
@@ -340,11 +435,16 @@ class MutationController extends Controller
                     'qty_pack'       => $itemData['qty_pack'] ?? null,
                     'qty_base'       => $itemData['qty_base'] ?? null,
                     'total_in_base'  => $totalInBase,
-                    'price_per_base' => $itemData['price_per_base'],
+                    // Harga input user = harga katalog (bruto); netto dihitung ulang di bawah
+                    'price_per_base'       => $itemData['price_per_base'],
+                    'gross_price_per_base' => $itemData['price_per_base'],
                     'cost_subtotal'  => $totalInBase * $itemData['price_per_base'],
                     'remaining_qty'  => $totalInBase,
                 ]);
             }
+
+            // Alokasi ulang diskon (idempotent; juga me-reset ke bruto bila diskon dihapus)
+            if ($isPurchaseType) $this->allocateInvoiceDiscount($mutation);
         });
 
         // Jika user klik "Konfirmasi Sekarang"
@@ -557,14 +657,18 @@ class MutationController extends Controller
             ->orderByRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) DESC')
             ->orderByDesc('mutation_items.id');
 
+        // Auto-fill memakai harga BRUTO (katalog) bila ada — supaya diskon invoice
+        // pembelian sebelumnya tidak menular jadi "harga normal" input berikutnya.
+        $grossExpr = 'COALESCE(mutation_items.gross_price_per_base, mutation_items.price_per_base)';
+
         // 1) Prioritas: pembelian dengan tipe yang sama
         $types = $type ? [$type] : ['purchase_zhisheng', 'purchase_supplier'];
-        $priceBase = (float) ($base()->whereIn('mutations.type', $types)->value('mutation_items.price_per_base') ?? 0);
+        $priceBase = (float) ($base()->whereIn('mutations.type', $types)->selectRaw("$grossExpr as p")->value('p') ?? 0);
 
         // 2) Fallback: harga terakhir dari sumber manapun (mis. opening_stock dari opname)
         //    agar tetap ada referensi walau belum pernah ada pembelian tipe ini.
         if ($priceBase <= 0) {
-            $priceBase = (float) ($base()->value('mutation_items.price_per_base') ?? 0);
+            $priceBase = (float) ($base()->selectRaw("$grossExpr as p")->value('p') ?? 0);
         }
         // price_per_dus jika packaging diberikan
         $priceDus = 0;

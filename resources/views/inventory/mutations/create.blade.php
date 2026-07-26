@@ -174,6 +174,24 @@
         </div>
     </div>
 
+    {{-- ═════ Diskon Invoice (hanya pembelian) ═════ --}}
+    <div class="card mt-3 d-none" id="discountWrap">
+        <div class="card-body py-3">
+            <div class="row align-items-center g-2">
+                <div class="col-md-5">
+                    <label class="form-label fw-semibold mb-0">Diskon Total Invoice (Rp)</label>
+                    <div class="form-text mt-0">Diskon akumulasi satu nota (bukan per item). Otomatis dialokasikan proporsional ke tiap bahan — harga stok tercatat netto.</div>
+                </div>
+                <div class="col-md-4">
+                    <input type="text" name="discount_amount_display" id="discountInput" class="form-control text-end"
+                           inputmode="numeric" placeholder="0" value="{{ old('discount_amount') ? number_format((float) old('discount_amount'), 0, ',', '.') : '' }}">
+                    <input type="hidden" name="discount_amount" id="discountHidden" value="{{ old('discount_amount', 0) }}">
+                </div>
+            </div>
+            @error('discount_amount')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+        </div>
+    </div>
+
     {{-- ═════ Ringkasan Total ═════ --}}
     <div class="card mt-3 border-success">
         <div class="card-body py-3">
@@ -327,6 +345,16 @@ function handleTypeChange() {
 
     var showSupplier = (type === 'purchase_zhisheng' || type === 'purchase_supplier');
     document.getElementById('wrapSupplier').classList.toggle('d-none', !showSupplier);
+    // Diskon invoice hanya utk pembelian (pusat & supplier lokal)
+    var discountWrap = document.getElementById('discountWrap');
+    if (discountWrap) {
+        discountWrap.classList.toggle('d-none', !showSupplier);
+        if (!showSupplier) {
+            document.getElementById('discountInput').value  = '';
+            document.getElementById('discountHidden').value = 0;
+            recalcTotals();
+        }
+    }
     var labelSupplier = document.getElementById('labelSupplier');
     if (labelSupplier) {
         labelSupplier.innerHTML = (type === 'purchase_zhisheng' ? 'Supplier Pusat' : 'Supplier Lokal') + ' <span class="text-danger">*</span>';
@@ -1024,6 +1052,24 @@ function recalcTotals() {
         return;
     }
 
+    // Diskon invoice (kalau ada & tipe pembelian)
+    var discEl   = document.getElementById('discountHidden');
+    var discount = discEl ? (parseFloat(discEl.value) || 0) : 0;
+    var footRows = '';
+    if (discount > 0) {
+        footRows =
+              '<tr class="border-top"><td colspan="3" class="text-end text-muted">Subtotal (bruto)</td>'
+            +   '<td class="text-end text-nowrap">Rp ' + fmt(grand) + '</td></tr>'
+            + '<tr><td colspan="3" class="text-end text-muted">Diskon invoice</td>'
+            +   '<td class="text-end text-danger text-nowrap">− Rp ' + fmt(discount) + '</td></tr>'
+            + '<tr><td colspan="3" class="fw-bold fs-6">TOTAL BAYAR</td>'
+            +   '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(Math.max(0, grand - discount)) + '</td></tr>';
+    } else {
+        footRows =
+              '<tr class="border-top"><td colspan="3" class="fw-bold fs-6">GRAND TOTAL</td>'
+            + '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(grand) + '</td></tr>';
+    }
+
     container.innerHTML =
         '<div class="fw-semibold mb-2"><i class="bi bi-receipt me-1"></i>Ringkasan Total</div>'
         + '<div class="table-responsive">'
@@ -1033,12 +1079,18 @@ function recalcTotals() {
         +   '<th class="text-end">Qty</th><th class="text-end">Subtotal</th>'
         + '</tr></thead>'
         + '<tbody>' + lines.join('') + '</tbody>'
-        + '<tfoot><tr class="border-top">'
-        +   '<td colspan="3" class="fw-bold fs-6">GRAND TOTAL</td>'
-        +   '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(grand) + '</td>'
-        + '</tr></tfoot>'
+        + '<tfoot>' + footRows + '</tfoot>'
         + '</table></div>';
 }
+
+// Input diskon: format titik ribuan + sinkron ke hidden + refresh ringkasan
+document.addEventListener('input', function(e) {
+    if (e.target.id !== 'discountInput') return;
+    var raw = e.target.value.replace(/[^0-9]/g, '');
+    e.target.value = raw ? Number(raw).toLocaleString('id-ID') : '';
+    document.getElementById('discountHidden').value = raw || 0;
+    recalcTotals();
+});
 
 // Auto-recalc setiap kali qty input berubah (delegasi event)
 document.addEventListener('input', function(e) {

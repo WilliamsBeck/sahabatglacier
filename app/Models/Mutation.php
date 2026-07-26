@@ -7,7 +7,7 @@ class Mutation extends Model
 {
     protected $fillable = [
         'reference_no', 'type', 'source_store_id', 'destination_store_id',
-        'supplier_id', 'external_sender', 'external_receiver', 'invoice_no', 'transaction_date', 'delivery_date',
+        'supplier_id', 'external_sender', 'external_receiver', 'invoice_no', 'discount_amount', 'transaction_date', 'delivery_date',
         'status', 'notes', 'created_by', 'confirmed_by',
     ];
 

@@ -89,6 +89,10 @@
                     @endif
                     <tr><td class="text-muted">No. SJ</td>
                         <td>{{ $mutation->invoice_no ?? '-' }}</td></tr>
+                    @if((float) $mutation->discount_amount > 0)
+                    <tr><td class="text-muted">Diskon Invoice</td>
+                        <td class="text-danger fw-semibold">− Rp {{ number_format($mutation->discount_amount, 0, ',', '.') }}</td></tr>
+                    @endif
                     <tr><td class="text-muted">Tgl Pengiriman</td>
                         <td>{{ \Carbon\Carbon::parse($mutation->transaction_date)->format('d M Y') }}</td></tr>
                     <tr><td class="text-muted">Tgl Penerimaan</td>
@@ -191,8 +195,20 @@
                             @endforeach
                         </tbody>
                         <tfoot>
+                            @php $colspanFoot = $mutation->type === 'sale_external_out' ? 6 : 5; @endphp
+                            @if((float) $mutation->discount_amount > 0)
+                                @php $brutoTotal = $mutation->items->sum(fn($i) => $i->total_in_base * (float)($i->gross_price_per_base ?? $i->price_per_base)); @endphp
+                                <tr class="small">
+                                    <td colspan="{{ $colspanFoot }}" class="text-end text-muted">Subtotal (bruto)</td>
+                                    <td class="text-end text-muted">Rp {{ number_format($brutoTotal, 0, ',', '.') }}</td>
+                                </tr>
+                                <tr class="small">
+                                    <td colspan="{{ $colspanFoot }}" class="text-end text-muted">Diskon invoice</td>
+                                    <td class="text-end text-danger">− Rp {{ number_format($mutation->discount_amount, 0, ',', '.') }}</td>
+                                </tr>
+                            @endif
                             <tr class="table-light fw-bold">
-                                <td colspan="{{ $mutation->type === 'sale_external_out' ? 6 : 5 }}" class="text-end">Total Nilai</td>
+                                <td colspan="{{ $colspanFoot }}" class="text-end">Total Nilai{{ (float) $mutation->discount_amount > 0 ? ' (netto)' : '' }}</td>
                                 <td class="text-end text-primary">Rp {{ number_format($grandTotal, 0, ',', '.') }}</td>
                             </tr>
                         </tfoot>

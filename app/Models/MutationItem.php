@@ -8,7 +8,7 @@ class MutationItem extends Model
     protected $fillable = [
         'mutation_id', 'ingredient_id', 'packaging_id',
         'qty_crate', 'qty_pack', 'qty_base', 'total_in_base',
-        'price_per_base', 'selling_price_per_base', 'cost_subtotal', 'remaining_qty',
+        'price_per_base', 'gross_price_per_base', 'selling_price_per_base', 'cost_subtotal', 'remaining_qty',
     ];
 
     public function mutation()  { return $this->belongsTo(Mutation::class); }
