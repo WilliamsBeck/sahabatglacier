@@ -10,7 +10,7 @@
     $n = fn($v) => number_format($v, 0, ',', '.');
 @endphp
 
-<p class="text-muted mb-3 small">Cone &amp; Cup — Rekonsiliasi selisih pemakaian (Selisih = Rusak + Overfill + Tak terjelaskan)</p>
+<p class="text-muted mb-3 small">Cone &amp; Cup — Rekonsiliasi selisih pemakaian (Selisih = Rusak + Overfill + Tidak ada penjelasan)</p>
 
 {{-- Filter --}}
 <div class="card mb-3">
@@ -76,7 +76,7 @@
                             <th class="text-end">Selisih</th>
                             <th class="text-end">Rusak <small class="text-muted">(waste)</small></th>
                             <th class="text-end">Overfill <small class="text-muted">(manual)</small></th>
-                            <th class="text-end">Tak terjelaskan</th>
+                            <th class="text-end">Tidak ada penjelasan</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -107,7 +107,7 @@
         <div class="card-footer d-flex justify-content-between align-items-center">
             <small class="text-muted">
                 <i class="bi bi-info-circle me-1"></i>
-                <strong>Tak terjelaskan</strong> = Selisih − Rusak − Overfill (yang benar-benar hilang/perlu ditelusuri).
+                <strong>Tidak ada penjelasan</strong> = Selisih − Rusak − Overfill (yang benar-benar hilang/perlu ditelusuri).
                 Isi Overfill lalu klik Simpan untuk menghitung ulang.
             </small>
             <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Simpan Overfill</button>

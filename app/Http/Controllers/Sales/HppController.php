@@ -434,7 +434,7 @@ class HppController extends Controller
 
     // ── Sub-tab CONE & CUP: rekonsiliasi selisih pemakaian ──────────────────────
     // Selisih (Terpakai aktual − Terjual ideal) dipecah: Rusak (waste) + Overfill
-    // (manual) + Tak terjelaskan. Cakupan: bahan kategori 'cup' + Ice Cream Cone.
+    // (manual) + Tidak ada penjelasan. Cakupan: bahan kategori 'cup' + Ice Cream Cone.
     public function coneCup(Request $request)
     {
         $storeIds = auth()->user()->accessibleStoreIds();
