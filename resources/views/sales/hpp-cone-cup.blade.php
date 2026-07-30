@@ -88,7 +88,25 @@
                             <td class="text-end fw-semibold {{ $r->selisih > 0 ? 'text-danger' : ($r->selisih < 0 ? 'text-success' : '') }}">
                                 {{ $r->selisih > 0 ? '+' : '' }}{{ $n($r->selisih) }}
                             </td>
-                            <td class="text-end">{{ $n($r->rusak) }}</td>
+                            <td>
+                                {{-- Rusak bisa dikoreksi manual di sini: catatan waste ikut
+                                     terkunci begitu opname di-approve, padahal selisih cup/cone
+                                     sering baru ketahuan setelahnya. Stok TIDAK tersentuh. --}}
+                                <input type="number" min="0" step="1"
+                                       name="rusak[{{ $r->ingredient->id }}]"
+                                       value="{{ $r->rusak ? (int)$r->rusak : '' }}"
+                                       class="form-control form-control-sm text-end {{ $r->is_override ? 'border-warning' : '' }}"
+                                       placeholder="0"
+                                       title="{{ $r->is_override
+                                            ? 'Dikoreksi manual. Angka dari catatan waste: '.$n($r->rusak_waste)
+                                            : 'Otomatis dari catatan waste. Boleh diketik ulang bila perlu koreksi.' }}">
+                                <input type="hidden" name="rusak_base[{{ $r->ingredient->id }}]" value="{{ $r->rusak_waste }}">
+                                @if($r->is_override)
+                                    <div class="text-warning" style="font-size:.62rem;line-height:1.2">
+                                        <i class="bi bi-pencil-fill"></i> koreksi (waste: {{ $n($r->rusak_waste) }})
+                                    </div>
+                                @endif
+                            </td>
                             <td>
                                 <input type="number" min="0" step="1"
                                        name="overfill[{{ $r->ingredient->id }}]"
@@ -108,9 +126,12 @@
             <small class="text-muted">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Tidak ada penjelasan</strong> = Selisih − Rusak − Overfill (yang benar-benar hilang/perlu ditelusuri).
-                Isi Overfill lalu klik Simpan untuk menghitung ulang.
+                Isi Rusak / Overfill lalu klik Simpan untuk menghitung ulang.
+                <br>
+                Kolom <strong>Rusak</strong> otomatis dari catatan waste — boleh diketik ulang untuk koreksi
+                (hanya mengubah laporan ini, tidak mengubah stok). Kosongkan agar kembali mengikuti catatan waste.
             </small>
-            <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Simpan Overfill</button>
+            <button class="btn btn-primary"><i class="bi bi-save me-1"></i>Simpan</button>
         </div>
     </div>
 </form>
