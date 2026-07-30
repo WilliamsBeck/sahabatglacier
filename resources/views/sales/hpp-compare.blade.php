@@ -58,23 +58,12 @@ $hasAnyAktual   = false;
                     </select>
                 </div>
                 <div class="col-md-5">
-                    <label class="form-label small fw-semibold mb-1">
-                        Pilih Toko yang Dibandingkan
-                        <span class="text-muted fw-normal">(bisa lebih dari satu)</span>
-                    </label>
-                    <div class="d-flex flex-wrap gap-2">
-                        @foreach($stores as $s)
-                        <div class="form-check mb-0">
-                            <input class="form-check-input" type="checkbox"
-                                   name="store_ids[]" value="{{ $s->id }}"
-                                   id="chk_{{ $s->id }}"
-                                   {{ in_array($s->id, $selectedIds) ? 'checked' : '' }}>
-                            <label class="form-check-label small" for="chk_{{ $s->id }}">
-                                {{ $s->name }}
-                            </label>
-                        </div>
-                        @endforeach
-                    </div>
+                    <x-multi-check-dropdown
+                        name="store_ids[]"
+                        label="Pilih Toko yang Dibandingkan"
+                        placeholder="Pilih toko… (bisa lebih dari satu)"
+                        :options="$stores->pluck('name', 'id')->all()"
+                        :selected="$selectedIds" />
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-primary btn-sm w-100">

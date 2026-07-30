@@ -11,19 +11,14 @@
     <div class="card-body">
       <form method="GET" action="{{ route('sales.hpp.trend') }}" class="row g-3 align-items-end">
 
-        {{-- Store checkboxes --}}
-        <div class="col-12 col-md-5">
-          <label class="form-label fw-semibold small">Toko</label>
-          <div class="d-flex flex-wrap gap-2">
-            @foreach($stores as $store)
-              <div class="form-check form-check-inline mb-0">
-                <input class="form-check-input" type="checkbox" name="store_ids[]"
-                       value="{{ $store->id }}" id="ts{{ $store->id }}"
-                       {{ in_array($store->id, $selectedIds) ? 'checked' : '' }}>
-                <label class="form-check-label small" for="ts{{ $store->id }}">{{ $store->name }}</label>
-              </div>
-            @endforeach
-          </div>
+        {{-- Pemilih toko: dropdown checkbox (ringkas, tidak menumpuk) --}}
+        <div class="col-12 col-md-3">
+          <x-multi-check-dropdown
+              name="store_ids[]"
+              label="Toko"
+              placeholder="Pilih toko…"
+              :options="$stores->pluck('name', 'id')->all()"
+              :selected="$selectedIds" />
         </div>
 
         {{-- End period --}}

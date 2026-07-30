@@ -22,12 +22,12 @@
     <div class="card-body">
         <form method="GET" action="{{ route('reports.laporan.mutasi-stok') }}" class="row g-3 align-items-end">
             <div class="col-md-3">
-                <label class="form-label fw-semibold small">Toko</label>
-                <select name="store_id" class="form-select form-select-sm">
-                    @foreach($stores as $s)
-                        <option value="{{ $s->id }}" {{ $storeId == $s->id ? 'selected' : '' }}>{{ $s->name }}</option>
-                    @endforeach
-                </select>
+                <x-multi-check-dropdown
+                    name="store_ids[]"
+                    label="Toko"
+                    placeholder="Pilih toko…"
+                    :options="$stores->pluck('name', 'id')->all()"
+                    :selected="$storeIds" />
             </div>
             <div class="col-md-2">
                 <label class="form-label fw-semibold small">Dari Tanggal</label>
@@ -49,41 +49,15 @@
                 $tipeSel = (array) $tipe;   // [] = semua
             @endphp
             <div class="col-md-3">
-                <label class="form-label fw-semibold small">Tipe Mutasi</label>
-                <div class="dropdown">
-                    <button class="btn btn-sm btn-outline-secondary w-100 d-flex justify-content-between align-items-center"
-                            type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside">
-                        <span id="tipeLabel">
-                            @if(empty($tipeSel))
-                                Semua
-                            @elseif(count($tipeSel) === 1)
-                                {{ $tipeOptions[$tipeSel[0]] ?? $tipeSel[0] }}
-                            @else
-                                {{ count($tipeSel) }} tipe dipilih
-                            @endif
-                        </span>
-                        <i class="bi bi-chevron-down ms-1" style="font-size:.7rem"></i>
-                    </button>
-                    <div class="dropdown-menu p-2 shadow-sm" style="min-width:230px">
-                        <div class="form-check mb-1">
-                            <input class="form-check-input" type="checkbox" id="tipeAll"
-                                   {{ empty($tipeSel) ? 'checked' : '' }}>
-                            <label class="form-check-label fw-semibold" for="tipeAll">Semua</label>
-                        </div>
-                        <hr class="my-1">
-                        @foreach($tipeOptions as $val => $lbl)
-                            <div class="form-check">
-                                <input class="form-check-input tipe-cb" type="checkbox" name="tipe[]"
-                                       value="{{ $val }}" id="tipe-{{ $val }}"
-                                       {{ in_array($val, $tipeSel, true) ? 'checked' : '' }}>
-                                <label class="form-check-label" for="tipe-{{ $val }}">{{ $lbl }}</label>
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
+                <x-multi-check-dropdown
+                    name="tipe[]"
+                    label="Tipe Mutasi"
+                    all-label="Semua"
+                    :options="$tipeOptions"
+                    :selected="$tipeSel" />
             </div>
-            <div class="col-md-3 d-flex gap-2 justify-content-end">
-                <button type="submit" class="btn btn-primary btn-laporan">
+            <div class="col-md-2 d-flex">
+                <button type="submit" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-search me-1"></i>Tampilkan
                 </button>
             </div>
@@ -280,26 +254,4 @@ $byType     = $rows->groupBy('type')->map->count();
 </div>
 @endif
 
-@push('scripts')
-<script>
-(function () {
-    var all = document.getElementById('tipeAll');
-    var cbs = Array.prototype.slice.call(document.querySelectorAll('.tipe-cb'));
-    if (!all || !cbs.length) return;
-
-    // "Semua" dicentang → kosongkan pilihan spesifik (server: [] = semua)
-    all.addEventListener('change', function () {
-        if (all.checked) cbs.forEach(function (c) { c.checked = false; });
-    });
-    // Memilih tipe tertentu → "Semua" otomatis lepas.
-    // Kalau tidak ada satupun yang dipilih, kembali ke "Semua".
-    cbs.forEach(function (c) {
-        c.addEventListener('change', function () {
-            var any = cbs.some(function (x) { return x.checked; });
-            all.checked = !any;
-        });
-    });
-})();
-</script>
-@endpush
 @endsection

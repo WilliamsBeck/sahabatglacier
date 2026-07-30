@@ -346,8 +346,22 @@ class LaporanController extends Controller
         return $sel;
     }
 
+    /**
+     * Toko terpilih untuk laporan mutasi — MULTI-PILIH. Selalu dibatasi ke toko yang
+     * boleh diakses user. Bila tidak ada pilihan, pakai toko pertama yang bisa diakses.
+     */
+    private function resolveMutasiStores(Request $request): array
+    {
+        $allowed = auth()->user()->accessibleStoreIds();
+        $raw     = $request->input('store_ids', $request->input('store_id'));  // dukung format lama
+        $sel     = array_values(array_filter(array_map('intval', (array) $raw)));
+        $sel     = array_values(array_intersect($sel, $allowed));
+
+        return $sel ?: array_slice($allowed, 0, 1);
+    }
+
     /** Terapkan filter tipe (multi-pilih) sebagai grup OR pada query mutasi. */
-    private function applyMutasiTipeFilter($query, array $tipe, int $storeId): void
+    private function applyMutasiTipeFilter($query, array $tipe, array $storeIds): void
     {
         if (empty($tipe)) {
             $query->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal',
@@ -355,14 +369,14 @@ class LaporanController extends Controller
             return;
         }
 
-        $query->where(function ($q) use ($tipe, $storeId) {
+        $query->where(function ($q) use ($tipe, $storeIds) {
             foreach ($tipe as $t) {
                 if ($t === 'internal_in') {
-                    // Transfer internal yang MASUK ke toko ini
-                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->where('destination_store_id', $storeId));
+                    // Transfer internal yang MASUK ke toko terpilih
+                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->whereIn('destination_store_id', $storeIds));
                 } elseif ($t === 'internal_out') {
-                    // Transfer internal yang KELUAR dari toko ini
-                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->where('source_store_id', $storeId));
+                    // Transfer internal yang KELUAR dari toko terpilih
+                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->whereIn('source_store_id', $storeIds));
                 } elseif (isset(self::MUTASI_TYPE_MAP[$t])) {
                     $q->orWhereIn('type', self::MUTASI_TYPE_MAP[$t]);
                 }
@@ -373,52 +387,54 @@ class LaporanController extends Controller
     public function mutasiStok(Request $request)
     {
         $stores   = auth()->user()->accessibleStores();
-        $storeId  = $this->resolveStore($request);
+        $storeIds = $this->resolveMutasiStores($request);
+        $storeId  = $storeIds[0] ?? null;   // kompatibilitas view lama
         $dateFrom = $request->date_from ?? now()->startOfMonth()->toDateString();
         $dateTo   = $request->date_to   ?? now()->toDateString();
         $tipe     = $this->resolveMutasiTipe($request);   // array; [] = semua
 
         $rows = collect(); $grandTotal = 0;
 
-        if ($storeId) {
+        if (!empty($storeIds)) {
             $query = Mutation::with(['supplier', 'items.ingredient', 'items.packaging', 'sourceStore', 'destinationStore'])
                 ->where(fn($q) =>
-                    $q->where('destination_store_id', $storeId)
-                      ->orWhere('source_store_id', $storeId)
+                    $q->whereIn('destination_store_id', $storeIds)
+                      ->orWhereIn('source_store_id', $storeIds)
                 )
                 ->where('status', 'confirmed')
                 ->whereRaw('COALESCE(delivery_date, transaction_date) BETWEEN ? AND ?', [$dateFrom, $dateTo]);
 
-            $this->applyMutasiTipeFilter($query, $tipe, (int) $storeId);
+            $this->applyMutasiTipeFilter($query, $tipe, $storeIds);
 
             $rows       = $query->orderBy('transaction_date')->get();
             $grandTotal = $rows->flatMap->items->sum('cost_subtotal');
         }
 
         return view('reports.laporan.mutasi-stok', compact(
-            'stores', 'storeId', 'dateFrom', 'dateTo', 'tipe', 'rows', 'grandTotal'
+            'stores', 'storeId', 'storeIds', 'dateFrom', 'dateTo', 'tipe', 'rows', 'grandTotal'
         ));
     }
 
     public function exportMutasiStok(Request $request)
     {
-        $storeId  = $this->resolveStore($request);
+        $storeIds = $this->resolveMutasiStores($request);
         $dateFrom = $request->date_from ?? now()->startOfMonth()->toDateString();
         $dateTo   = $request->date_to   ?? now()->toDateString();
         $tipe     = $this->resolveMutasiTipe($request);
-        if (!$storeId) abort(403);
+        if (empty($storeIds)) abort(403);
 
-        $store = Store::find($storeId);
+        $storeNames = Store::whereIn('id', $storeIds)->pluck('name');
+        $storeLabel = $storeNames->count() === 1 ? $storeNames->first() : $storeNames->count() . 'toko';
 
         $query = Mutation::with(['supplier', 'items.ingredient', 'items.packaging', 'sourceStore', 'destinationStore'])
             ->where(fn($q) =>
-                $q->where('destination_store_id', $storeId)
-                  ->orWhere('source_store_id', $storeId)
+                $q->whereIn('destination_store_id', $storeIds)
+                  ->orWhereIn('source_store_id', $storeIds)
             )
             ->where('status', 'confirmed')
             ->whereRaw('COALESCE(delivery_date, transaction_date) BETWEEN ? AND ?', [$dateFrom, $dateTo]);
 
-        $this->applyMutasiTipeFilter($query, $tipe, (int) $storeId);
+        $this->applyMutasiTipeFilter($query, $tipe, $storeIds);
 
         $mutations = $query->orderBy('transaction_date')->get();
 
@@ -428,6 +444,8 @@ class LaporanController extends Controller
             'Tgl Transaksi', 'Tipe', 'No Ref', 'No Invoice', 'Supplier/Sumber', 'Toko Tujuan',
             'Bahan', 'Kemasan', 'Dus', 'Pack', 'Pcs/Gr', 'Harga/Dus', 'Subtotal',
         ]];
+        // Kolom "Toko Tujuan" sudah ada; untuk multi-toko, sumber/tujuan tetap terbaca
+        // dari kolom Supplier/Sumber & Toko Tujuan sehingga tidak perlu kolom tambahan.
 
         foreach ($mutations as $m) {
             foreach ($m->items as $i => $item) {
@@ -465,6 +483,6 @@ class LaporanController extends Controller
                    round($mutations->flatMap->items->sum('cost_subtotal'))];
 
         $label = empty($tipe) ? 'semua' : implode('-', $tipe);
-        return Excel::download(new ArrayExport($data), "mutasi_{$label}_{$store->name}_{$dateFrom}_{$dateTo}.xlsx");
+        return Excel::download(new ArrayExport($data), "mutasi_{$label}_{$storeLabel}_{$dateFrom}_{$dateTo}.xlsx");
     }
 }
