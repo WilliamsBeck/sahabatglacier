@@ -307,6 +307,7 @@ class OpnameController extends Controller
                 'unit_base'      => $ing->unit_base,
                 'packaging_id'   => $pkg->id,
                 'pkg_label'      => $labelParts ? implode(' · ', $labelParts) : null,
+                'supplier'       => $pkg->supplier?->name,   // dipakai kolom Supplier di template
                 'system_qty'     => $sysQty,
                 'crate_to_pack'  => $ctrPack,
                 'pack_to_base'   => $packBase,
@@ -331,6 +332,7 @@ class OpnameController extends Controller
                 'unit_base'      => $ing->unit_base,
                 'packaging_id'   => null,
                 'pkg_label'      => null,
+                'supplier'       => null,
                 'system_qty'     => $sysQty,
                 'crate_to_pack'  => 0,
                 'pack_to_base'   => 0,
@@ -1253,17 +1255,20 @@ class OpnameController extends Controller
         $ws->getStyle('A2')->getFont()->setBold(true)->setSize(12);
         $ws->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        // Baris 3: header — A=RowKey(hidden), B=Nama Bahan, C=Kemasan, D-F=FISIK, G=Harga/Dus, H=Catatan
+        // Baris 3: header — A=RowKey(hidden), B=Nama Bahan, C=Supplier, D=Pack/Dus,
+        // E-G=FISIK, H=Harga/Dus, I=Catatan. Kolom Supplier membedakan bahan yang
+        // dipasok >1 supplier (mis. Lemon @15000 dari 2 supplier berbeda).
         $ws->setCellValue('A3', 'ID');
         $ws->setCellValue('B3', 'Nama Bahan');
-        $ws->setCellValue('C3', 'Pack/Dus');
-        $ws->setCellValue('D3', 'FISIK Dus ✏');
-        $ws->setCellValue('E3', 'FISIK Pack ✏');
-        $ws->setCellValue('F3', 'FISIK Gr/Pcs ✏');
-        $ws->setCellValue('G3', 'Harga/Dus ✏');
-        $ws->setCellValue('H3', 'Catatan');
+        $ws->setCellValue('C3', 'Supplier');
+        $ws->setCellValue('D3', 'Pack/Dus');
+        $ws->setCellValue('E3', 'FISIK Dus ✏');
+        $ws->setCellValue('F3', 'FISIK Pack ✏');
+        $ws->setCellValue('G3', 'FISIK Gr/Pcs ✏');
+        $ws->setCellValue('H3', 'Harga/Dus ✏');
+        $ws->setCellValue('I3', 'Catatan');
 
-        $ws->getStyle('A3:H3')->applyFromArray([
+        $ws->getStyle('A3:I3')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => '1e3a5f']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
@@ -1274,22 +1279,23 @@ class OpnameController extends Controller
         foreach ($rows as $r) {
             $ws->setCellValueByColumnAndRow(1, $rowNum, $r['row_key']);
             $ws->setCellValueByColumnAndRow(2, $rowNum, $r['name']);
-            $ws->setCellValueByColumnAndRow(3, $rowNum, ($r['crate_to_pack'] ?? 0) > 0 ? $r['crate_to_pack'] : ($r['unit_base'] ?? '-'));
-            $ws->setCellValueByColumnAndRow(4, $rowNum, ''); // FISIK Dus
-            $ws->setCellValueByColumnAndRow(5, $rowNum, ''); // FISIK Pack
-            $ws->setCellValueByColumnAndRow(6, $rowNum, ''); // FISIK Gr/Pcs
-            $ws->setCellValueByColumnAndRow(7, $rowNum, ''); // Harga/Dus
-            $ws->setCellValueByColumnAndRow(8, $rowNum, ''); // Catatan
+            $ws->setCellValueByColumnAndRow(3, $rowNum, $r['supplier'] ?? '-');
+            $ws->setCellValueByColumnAndRow(4, $rowNum, ($r['crate_to_pack'] ?? 0) > 0 ? $r['crate_to_pack'] : ($r['unit_base'] ?? '-'));
+            $ws->setCellValueByColumnAndRow(5, $rowNum, ''); // FISIK Dus
+            $ws->setCellValueByColumnAndRow(6, $rowNum, ''); // FISIK Pack
+            $ws->setCellValueByColumnAndRow(7, $rowNum, ''); // FISIK Gr/Pcs
+            $ws->setCellValueByColumnAndRow(8, $rowNum, ''); // Harga/Dus
+            $ws->setCellValueByColumnAndRow(9, $rowNum, ''); // Catatan
 
             $ws->getStyle("A{$rowNum}")->applyFromArray([
                 'font' => ['size' => 7, 'color' => ['rgb' => 'CCCCCC']],
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => 'FAFAFA']],
             ]);
-            $ws->getStyle("B{$rowNum}:C{$rowNum}")->applyFromArray([
+            $ws->getStyle("B{$rowNum}:D{$rowNum}")->applyFromArray([
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => 'F2F2F2']],
                 'font' => ['color' => ['rgb' => '444444']],
             ]);
-            $ws->getStyle("D{$rowNum}:G{$rowNum}")->applyFromArray([
+            $ws->getStyle("E{$rowNum}:H{$rowNum}")->applyFromArray([
                 'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => 'FFFDE7']],
                 'font' => ['bold' => true],
             ]);
@@ -1299,20 +1305,21 @@ class OpnameController extends Controller
         // Column widths
         $ws->getColumnDimension('A')->setWidth(4);
         $ws->getColumnDimension('B')->setWidth(34);
-        $ws->getColumnDimension('C')->setWidth(16);
+        $ws->getColumnDimension('C')->setWidth(26);   // Supplier
         $ws->getColumnDimension('D')->setWidth(12);
         $ws->getColumnDimension('E')->setWidth(12);
         $ws->getColumnDimension('F')->setWidth(12);
-        $ws->getColumnDimension('G')->setWidth(14);
-        $ws->getColumnDimension('H')->setWidth(28);
+        $ws->getColumnDimension('G')->setWidth(12);
+        $ws->getColumnDimension('H')->setWidth(14);
+        $ws->getColumnDimension('I')->setWidth(28);
 
         // Style metadata row 1 (kecil & abu)
         $ws->getStyle('A1:E1')->applyFromArray([
             'font' => ['size' => 7, 'color' => ['rgb' => 'CCCCCC']],
         ]);
 
-        // Freeze pane — mulai dari kolom D (setelah Nama Bahan & Kemasan)
-        $ws->freezePane('D4');
+        // Freeze pane — mulai kolom E (setelah Nama, Supplier, Pack/Dus)
+        $ws->freezePane('E4');
 
         $filename = 'template_opname_' . $store->name . '_' . $carbon->format('Ymd') . '.xlsx';
         $writer   = new XlsxWriter($ss);
@@ -1378,6 +1385,24 @@ class OpnameController extends Controller
             return back()->withErrors(['file' => "Opname periode {$month}/{$year} ({$periodType}) untuk toko ini sudah ada."]);
         }
 
+        // ── Kenali posisi kolom dari JUDUL di baris 3 ────────────────────────
+        // Dibaca dari header (bukan posisi tetap) supaya template lama—yang belum
+        // punya kolom Supplier—tetap bisa diimpor setelah layout template berubah.
+        $colMap = ['dus' => 4, 'pack' => 5, 'base' => 6, 'harga' => 7];   // default = layout lama
+        $found  = [];
+        for ($c = 1; $c <= 15; $c++) {
+            $h = strtolower(trim((string) $ws->getCellByColumnAndRow($c, 3)->getValue()));
+            if ($h === '') continue;
+            if (str_contains($h, 'harga'))                              $found['harga'] = $c;
+            elseif (str_contains($h, 'dus'))                            $found['dus']   = $c;  // "FISIK Dus"
+            elseif (str_contains($h, 'pack'))                           $found['pack']  = $c;
+            elseif (str_contains($h, 'gr') || str_contains($h, 'pcs'))  $found['base']  = $c;
+        }
+        // Pakai hasil deteksi hanya bila lengkap; kalau tidak, tetap pakai layout lama.
+        if (count(array_intersect_key($found, $colMap)) === count($colMap)) {
+            $colMap = array_merge($colMap, $found);
+        }
+
         // ── Baca baris data (mulai baris 4) ─────────────────────────────────
         $errors = [];
         $items  = [];
@@ -1388,11 +1413,10 @@ class OpnameController extends Controller
             $rowKey  = trim((string)$ws->getCellByColumnAndRow(1, $rowNum)->getValue());
             if ($rowKey === '') { $rowNum++; continue; }
 
-            // Kolom: A=RowKey, B=Nama, C=Kemasan, D=FisikDus, E=FisikPack, F=FisikGr/Pcs, G=HargaDus, H=Catatan
-            $fisikDus  = $ws->getCellByColumnAndRow(4, $rowNum)->getValue();
-            $fisikPack = $ws->getCellByColumnAndRow(5, $rowNum)->getValue();
-            $fisikBase = $ws->getCellByColumnAndRow(6, $rowNum)->getValue();
-            $hargaDus  = $ws->getCellByColumnAndRow(7, $rowNum)->getValue();
+            $fisikDus  = $ws->getCellByColumnAndRow($colMap['dus'],   $rowNum)->getValue();
+            $fisikPack = $ws->getCellByColumnAndRow($colMap['pack'],  $rowNum)->getValue();
+            $fisikBase = $ws->getCellByColumnAndRow($colMap['base'],  $rowNum)->getValue();
+            $hargaDus  = $ws->getCellByColumnAndRow($colMap['harga'], $rowNum)->getValue();
 
             // Validasi nilai
             foreach ([
