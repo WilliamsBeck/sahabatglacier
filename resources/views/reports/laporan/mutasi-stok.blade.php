@@ -37,17 +37,50 @@
                 <label class="form-label fw-semibold small">Sampai Tanggal</label>
                 <input type="date" name="date_to" class="form-control form-control-sm" value="{{ $dateTo }}">
             </div>
-            <div class="col-md-2">
+            @php
+                $tipeOptions = [
+                    'internal_in'         => 'Internal Masuk',
+                    'internal_out'        => 'Internal Keluar',
+                    'eksternal'           => 'Pembelian Eksternal',
+                    'penjualan_eksternal' => 'Penjualan Eksternal',
+                    'zhisheng'            => 'Zhisheng',
+                    'supplier'            => 'Supplier',
+                ];
+                $tipeSel = (array) $tipe;   // [] = semua
+            @endphp
+            <div class="col-md-3">
                 <label class="form-label fw-semibold small">Tipe Mutasi</label>
-                <select name="tipe" class="form-select form-select-sm">
-                    <option value="semua" {{ $tipe === 'semua' ? 'selected' : '' }}>Semua</option>
-                    <option value="internal_in"  {{ $tipe === 'internal_in'  ? 'selected' : '' }}>Internal Masuk</option>
-                    <option value="internal_out" {{ $tipe === 'internal_out' ? 'selected' : '' }}>Internal Keluar</option>
-                    <option value="eksternal" {{ $tipe === 'eksternal' ? 'selected' : '' }}>Pembelian Eksternal</option>
-                    <option value="penjualan_eksternal" {{ $tipe === 'penjualan_eksternal' ? 'selected' : '' }}>Penjualan Eksternal</option>
-                    <option value="zhisheng"  {{ $tipe === 'zhisheng'  ? 'selected' : '' }}>Zhisheng</option>
-                    <option value="supplier" {{ $tipe === 'supplier' ? 'selected' : '' }}>Supplier</option>
-                </select>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-secondary w-100 d-flex justify-content-between align-items-center"
+                            type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside">
+                        <span id="tipeLabel">
+                            @if(empty($tipeSel))
+                                Semua
+                            @elseif(count($tipeSel) === 1)
+                                {{ $tipeOptions[$tipeSel[0]] ?? $tipeSel[0] }}
+                            @else
+                                {{ count($tipeSel) }} tipe dipilih
+                            @endif
+                        </span>
+                        <i class="bi bi-chevron-down ms-1" style="font-size:.7rem"></i>
+                    </button>
+                    <div class="dropdown-menu p-2 shadow-sm" style="min-width:230px">
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" id="tipeAll"
+                                   {{ empty($tipeSel) ? 'checked' : '' }}>
+                            <label class="form-check-label fw-semibold" for="tipeAll">Semua</label>
+                        </div>
+                        <hr class="my-1">
+                        @foreach($tipeOptions as $val => $lbl)
+                            <div class="form-check">
+                                <input class="form-check-input tipe-cb" type="checkbox" name="tipe[]"
+                                       value="{{ $val }}" id="tipe-{{ $val }}"
+                                       {{ in_array($val, $tipeSel, true) ? 'checked' : '' }}>
+                                <label class="form-check-label" for="tipe-{{ $val }}">{{ $lbl }}</label>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
             </div>
             <div class="col-md-3 d-flex gap-2 justify-content-end">
                 <button type="submit" class="btn btn-primary btn-laporan">
@@ -115,8 +148,12 @@ $byType     = $rows->groupBy('type')->map->count();
             Detail Mutasi —
             {{ \Carbon\Carbon::parse($dateFrom)->isoFormat('D MMM Y') }} s/d {{ \Carbon\Carbon::parse($dateTo)->isoFormat('D MMM Y') }}
         </span>
-        @if($tipe !== 'semua')
-        <span class="badge bg-primary">{{ $tabs[$tipe]['label'] ?? $tipe }}</span>
+        @if(!empty($tipeSel))
+        <span>
+            @foreach($tipeSel as $t)
+                <span class="badge bg-primary">{{ $tipeOptions[$t] ?? $t }}</span>
+            @endforeach
+        </span>
         @endif
     </div>
     <div class="card-body p-0">
@@ -242,4 +279,27 @@ $byType     = $rows->groupBy('type')->map->count();
     <i class="bi bi-info-circle me-1"></i> Pilih toko terlebih dahulu untuk melihat laporan.
 </div>
 @endif
+
+@push('scripts')
+<script>
+(function () {
+    var all = document.getElementById('tipeAll');
+    var cbs = Array.prototype.slice.call(document.querySelectorAll('.tipe-cb'));
+    if (!all || !cbs.length) return;
+
+    // "Semua" dicentang → kosongkan pilihan spesifik (server: [] = semua)
+    all.addEventListener('change', function () {
+        if (all.checked) cbs.forEach(function (c) { c.checked = false; });
+    });
+    // Memilih tipe tertentu → "Semua" otomatis lepas.
+    // Kalau tidak ada satupun yang dipilih, kembali ke "Semua".
+    cbs.forEach(function (c) {
+        c.addEventListener('change', function () {
+            var any = cbs.some(function (x) { return x.checked; });
+            all.checked = !any;
+        });
+    });
+})();
+</script>
+@endpush
 @endsection

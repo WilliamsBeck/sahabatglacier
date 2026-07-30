@@ -323,21 +323,60 @@ class LaporanController extends Controller
     // ══════════════════════════════════════════════════════════════════════
     // 5. LAPORAN MUTASI STOK
     // ══════════════════════════════════════════════════════════════════════
+    /** Peta kode filter → tipe mutasi di database. */
+    private const MUTASI_TYPE_MAP = [
+        'pi'                  => ['sale_internal'],
+        'eksternal'           => ['sale_external'],
+        'penjualan_eksternal' => ['sale_external_out'],
+        'zhisheng'            => ['purchase_zhisheng'],
+        'supplier'            => ['purchase_supplier'],
+    ];
+
+    /**
+     * Normalisasi input filter tipe. Mendukung MULTI-PILIH (checkbox, tipe[]=...)
+     * sekaligus tetap menerima format lama (tipe=zhisheng) agar link/bookmark lama
+     * tidak rusak. Mengembalikan [] bila berarti "semua".
+     */
+    private function resolveMutasiTipe(Request $request): array
+    {
+        $raw = $request->input('tipe', []);
+        $sel = array_values(array_filter((array) $raw, fn($t) => $t !== '' && $t !== null));
+
+        if (empty($sel) || in_array('semua', $sel, true)) return [];  // [] = semua
+        return $sel;
+    }
+
+    /** Terapkan filter tipe (multi-pilih) sebagai grup OR pada query mutasi. */
+    private function applyMutasiTipeFilter($query, array $tipe, int $storeId): void
+    {
+        if (empty($tipe)) {
+            $query->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal',
+                                     'sale_external', 'sale_external_out', 'opening_stock']);
+            return;
+        }
+
+        $query->where(function ($q) use ($tipe, $storeId) {
+            foreach ($tipe as $t) {
+                if ($t === 'internal_in') {
+                    // Transfer internal yang MASUK ke toko ini
+                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->where('destination_store_id', $storeId));
+                } elseif ($t === 'internal_out') {
+                    // Transfer internal yang KELUAR dari toko ini
+                    $q->orWhere(fn($s) => $s->where('type', 'sale_internal')->where('source_store_id', $storeId));
+                } elseif (isset(self::MUTASI_TYPE_MAP[$t])) {
+                    $q->orWhereIn('type', self::MUTASI_TYPE_MAP[$t]);
+                }
+            }
+        });
+    }
+
     public function mutasiStok(Request $request)
     {
         $stores   = auth()->user()->accessibleStores();
         $storeId  = $this->resolveStore($request);
         $dateFrom = $request->date_from ?? now()->startOfMonth()->toDateString();
         $dateTo   = $request->date_to   ?? now()->toDateString();
-        $tipe     = $request->tipe ?? 'semua'; // semua | pi | eksternal | zhisheng | supplier
-
-        $typeMap = [
-            'pi'        => ['sale_internal'],
-            'eksternal' => ['sale_external'],
-            'penjualan_eksternal' => ['sale_external_out'],
-            'zhisheng'  => ['purchase_zhisheng'],
-            'supplier'  => ['purchase_supplier'],
-        ];
+        $tipe     = $this->resolveMutasiTipe($request);   // array; [] = semua
 
         $rows = collect(); $grandTotal = 0;
 
@@ -350,15 +389,7 @@ class LaporanController extends Controller
                 ->where('status', 'confirmed')
                 ->whereRaw('COALESCE(delivery_date, transaction_date) BETWEEN ? AND ?', [$dateFrom, $dateTo]);
 
-            if ($tipe === 'internal_in') {
-                $query->where('type', 'sale_internal')->where('destination_store_id', $storeId);
-            } elseif ($tipe === 'internal_out') {
-                $query->where('type', 'sale_internal')->where('source_store_id', $storeId);
-            } elseif ($tipe !== 'semua' && isset($typeMap[$tipe])) {
-                $query->whereIn('type', $typeMap[$tipe]);
-            } else {
-                $query->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external', 'sale_external_out', 'opening_stock']);
-            }
+            $this->applyMutasiTipeFilter($query, $tipe, (int) $storeId);
 
             $rows       = $query->orderBy('transaction_date')->get();
             $grandTotal = $rows->flatMap->items->sum('cost_subtotal');
@@ -374,19 +405,12 @@ class LaporanController extends Controller
         $storeId  = $this->resolveStore($request);
         $dateFrom = $request->date_from ?? now()->startOfMonth()->toDateString();
         $dateTo   = $request->date_to   ?? now()->toDateString();
-        $tipe     = $request->tipe ?? 'semua';
+        $tipe     = $this->resolveMutasiTipe($request);
         if (!$storeId) abort(403);
 
-        $store   = Store::find($storeId);
-        $typeMap = [
-            'pi'        => ['sale_internal'],
-            'eksternal' => ['sale_external'],
-            'penjualan_eksternal' => ['sale_external_out'],
-            'zhisheng'  => ['purchase_zhisheng'],
-            'supplier'  => ['purchase_supplier'],
-        ];
+        $store = Store::find($storeId);
 
-        $query = Mutation::with(['supplier', 'items.ingredient', 'destinationStore'])
+        $query = Mutation::with(['supplier', 'items.ingredient', 'items.packaging', 'sourceStore', 'destinationStore'])
             ->where(fn($q) =>
                 $q->where('destination_store_id', $storeId)
                   ->orWhere('source_store_id', $storeId)
@@ -394,19 +418,32 @@ class LaporanController extends Controller
             ->where('status', 'confirmed')
             ->whereRaw('COALESCE(delivery_date, transaction_date) BETWEEN ? AND ?', [$dateFrom, $dateTo]);
 
-        if ($tipe === 'internal_in') {
-            $query->where('type', 'sale_internal')->where('destination_store_id', $storeId);
-        } elseif ($tipe === 'internal_out') {
-            $query->where('type', 'sale_internal')->where('source_store_id', $storeId);
-        } elseif ($tipe !== 'semua' && isset($typeMap[$tipe])) {
-            $query->whereIn('type', $typeMap[$tipe]);
-        }
+        $this->applyMutasiTipeFilter($query, $tipe, (int) $storeId);
 
         $mutations = $query->orderBy('transaction_date')->get();
 
-        $data = [['Tgl Transaksi', 'Tipe', 'No Ref', 'No Invoice', 'Supplier/Sumber', 'Toko Tujuan', 'Bahan', 'Qty Base', 'Harga/Base', 'Subtotal']];
+        // Qty dipecah Dus / Pack / Pcs-Gr, dan harga disajikan PER DUS (bukan per base)
+        // supaya laporan sejalan dengan cara orang toko membaca stok.
+        $data = [[
+            'Tgl Transaksi', 'Tipe', 'No Ref', 'No Invoice', 'Supplier/Sumber', 'Toko Tujuan',
+            'Bahan', 'Kemasan', 'Dus', 'Pack', 'Pcs/Gr', 'Harga/Dus', 'Subtotal',
+        ]];
+
         foreach ($mutations as $m) {
             foreach ($m->items as $i => $item) {
+                $pkg = $item->packaging;
+                $ptb = $pkg ? (float) $pkg->pack_to_base : 0;                       // base per pack
+                $ctb = $pkg ? (float) $pkg->crate_to_pack * $ptb : 0;               // base per dus
+
+                // Pecah total_in_base → Dus / Pack / sisa (konsisten dgn tampilan sistem)
+                $sisa = (float) $item->total_in_base;
+                $dus  = $ctb > 0 ? (int) floor($sisa / $ctb) : 0;  $sisa -= $dus * $ctb;
+                $pack = $ptb > 0 ? (int) floor($sisa / $ptb) : 0;  $sisa -= $pack * $ptb;
+
+                $hargaDus = $ctb > 0
+                    ? round((float) $item->price_per_base * $ctb)     // harga per dus
+                    : round((float) $item->price_per_base, 2);        // tanpa kemasan → per satuan
+
                 $data[] = [
                     $i === 0 ? $m->transaction_date->format('d/m/Y') : '',
                     $i === 0 ? $m->type_label : '',
@@ -415,14 +452,19 @@ class LaporanController extends Controller
                     $i === 0 ? ($m->supplier?->name ?? $m->sourceStore?->name ?? '-') : '',
                     $i === 0 ? ($m->destinationStore?->name ?? '-') : '',
                     $item->ingredient?->name ?? '-',
-                    $item->total_in_base,
-                    $item->price_per_base,
-                    $item->cost_subtotal,
+                    $pkg?->packaging_name ?? '-',
+                    $dus  ?: '',
+                    $pack ?: '',
+                    round($sisa, 2) ?: '',
+                    $hargaDus,
+                    round((float) $item->cost_subtotal),
                 ];
             }
         }
-        $data[] = ['', '', '', '', '', '', '', '', 'TOTAL', $mutations->flatMap->items->sum('cost_subtotal')];
+        $data[] = ['', '', '', '', '', '', '', '', '', '', '', 'TOTAL',
+                   round($mutations->flatMap->items->sum('cost_subtotal'))];
 
-        return Excel::download(new ArrayExport($data), "mutasi_{$tipe}_{$store->name}_{$dateFrom}_{$dateTo}.xlsx");
+        $label = empty($tipe) ? 'semua' : implode('-', $tipe);
+        return Excel::download(new ArrayExport($data), "mutasi_{$label}_{$store->name}_{$dateFrom}_{$dateTo}.xlsx");
     }
 }
