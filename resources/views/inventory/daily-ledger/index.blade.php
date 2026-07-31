@@ -70,7 +70,7 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="GET" class="row g-2 align-items-end" id="ledgerFilterForm">
-            <div class="col-md-5">
+            <div class="col-md-4">
                 <label class="form-label small fw-semibold mb-1">Toko</label>
                 <select name="store_id" class="form-select form-select-sm" required>
                     <option value="">— Pilih Toko —</option>
@@ -99,8 +99,9 @@
             </div>
             {{-- Ditampilkan lewat tombol (bukan auto-submit saat ganti filter) supaya
                  tidak memuat ulang halaman berat ini setiap kali dropdown disentuh. --}}
-            <div class="col-md-3 d-flex">
-                <button type="submit" class="btn btn-primary btn-sm w-100">
+            {{-- Tinggi disamakan dgn kotak isian di sebelahnya supaya sejajar rapi --}}
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-primary btn-sm px-4" style="height:36px">
                     <i class="bi bi-search me-1"></i>Tampilkan
                 </button>
             </div>
