@@ -65,8 +65,9 @@ $hasAnyAktual   = false;
                         :options="$stores->pluck('name', 'id')->all()"
                         :selected="$selectedIds" />
                 </div>
-                <div class="col-md-2">
-                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                {{-- Pola tombol disamakan dgn tab HPP lain: paling kanan, rata bawah, ukuran normal --}}
+                <div class="col-md-auto ms-md-auto d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary">
                         <i class="bi bi-bar-chart-line me-1"></i>Bandingkan
                     </button>
                 </div>

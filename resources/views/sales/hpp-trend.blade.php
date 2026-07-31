@@ -58,8 +58,11 @@
           </select>
         </div>
 
-        <div class="col-12 col-md-1">
-          <button type="submit" class="btn btn-primary btn-sm w-100">Tampilkan</button>
+        {{-- Pola tombol disamakan dgn tab HPP lain: paling kanan, rata bawah, ukuran normal --}}
+        <div class="col-12 col-md-auto ms-md-auto d-flex align-items-end">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-search me-1"></i>Tampilkan
+          </button>
         </div>
       </form>
     </div>
