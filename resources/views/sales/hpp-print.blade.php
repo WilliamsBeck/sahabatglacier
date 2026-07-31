@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<title>Analisa HPP — {{ $store->name }} — {{ $monthLabel }}</title>
+<title>Analisa HPP - {{ $store->name }} - {{ $monthLabel }}</title>
 <style>
     /* ── Halaman ─────────────────────────────────────────────────────────── */
     @page { size: A4 portrait; margin: 14mm 12mm 16mm 12mm; }
