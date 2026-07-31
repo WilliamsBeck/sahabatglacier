@@ -1,6 +1,10 @@
 <nav class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-        @if(file_exists(public_path('images/logo.png')))
+        {{-- Sidebar berlatar putih → logo putih tidak akan terlihat.
+             Dipakai versi ubin teal (sama dengan favicon) agar tetap kontras & on-brand. --}}
+        @if(file_exists(public_path('images/favicon-512.png')))
+            <img src="{{ asset('images/favicon-512.png') }}" alt="Glacier" class="brand-logo">
+        @elseif(file_exists(public_path('images/logo.png')))
             <img src="{{ asset('images/logo.png') }}" alt="Glacier" class="brand-logo">
         @else
             <span class="brand-icon">❄️</span>
@@ -51,7 +55,7 @@
 
 
         {{-- Mutasi Stok --}}
-        <a href="#mutasiMenu" class="sidebar-link collapsed btn-back" data-bs-toggle="collapse">
+        <a href="#mutasiMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
             <i class="bi bi-arrow-left-right"></i>
             <span>Mutasi Stok</span>
             <i class="bi bi-chevron-down ms-auto small"></i>

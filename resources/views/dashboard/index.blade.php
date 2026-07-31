@@ -23,8 +23,8 @@
 
     {{-- Nilai Stok (Saldo Harian) --}}
     <div class="col-6 col-xl">
-        <div class="stat-card">
-            <div class="stat-icon ic-indigo"><i class="bi bi-cash-stack"></i></div>
+        <div class="stat-card sg sg-teal">
+            <div class="stat-icon"><i class="bi bi-cash-stack"></i></div>
             <div class="stat-info">
                 <div class="stat-number" style="font-size:1.05rem">
                     Rp {{ number_format($stockValue, 0, ',', '.') }}
@@ -36,8 +36,8 @@
 
     {{-- Toko Aktif --}}
     <div class="col-6 col-xl">
-        <div class="stat-card">
-            <div class="stat-icon ic-blue"><i class="bi bi-shop"></i></div>
+        <div class="stat-card sg sg-indigo">
+            <div class="stat-icon"><i class="bi bi-shop"></i></div>
             <div class="stat-info">
                 <div class="stat-number">{{ $totalActiveStores }}</div>
                 <div class="stat-label">Toko Aktif</div>
@@ -47,8 +47,8 @@
 
     {{-- Low Stock --}}
     <div class="col-6 col-xl">
-        <div class="stat-card">
-            <div class="stat-icon ic-amber"><i class="bi bi-exclamation-triangle"></i></div>
+        <div class="stat-card sg sg-amber">
+            <div class="stat-icon"><i class="bi bi-exclamation-triangle"></i></div>
             <div class="stat-info">
                 <div class="stat-number">{{ $lowStocks->count() }}</div>
                 <div class="stat-label">Stok Menipis (item)</div>
@@ -58,8 +58,8 @@
 
     {{-- Total Waste --}}
     <div class="col-6 col-xl">
-        <div class="stat-card">
-            <div class="stat-icon ic-red"><i class="bi bi-trash3"></i></div>
+        <div class="stat-card sg sg-rose">
+            <div class="stat-icon"><i class="bi bi-trash3"></i></div>
             <div class="stat-info">
                 <div class="stat-number" style="font-size:1.05rem">
                     Rp {{ number_format($totalWaste, 0, ',', '.') }}
@@ -71,8 +71,8 @@
 
     {{-- Total Produksi --}}
     <div class="col-6 col-xl">
-        <div class="stat-card">
-            <div class="stat-icon ic-green"><i class="bi bi-gear"></i></div>
+        <div class="stat-card sg sg-emerald">
+            <div class="stat-icon"><i class="bi bi-gear"></i></div>
             <div class="stat-info">
                 <div class="stat-number">{{ $totalProduksi }}</div>
                 <div class="stat-label">Produksi Bulan Ini (batch)</div>
