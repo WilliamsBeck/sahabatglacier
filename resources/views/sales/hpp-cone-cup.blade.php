@@ -1,5 +1,5 @@
 @extends('layouts.app')
-@section('title','Analisa HPP - Cone & Cup')
+@section('title','Cone & Cup')
 
 @push('styles')
 <style>
