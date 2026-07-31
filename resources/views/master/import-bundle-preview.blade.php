@@ -1,5 +1,5 @@
 @extends('layouts.app')
-@section('title', 'Pratinjau Impor — ' . $cfg['label'])
+@section('title', 'Pratinjau Impor - ' . $cfg['label'])
 
 @section('content')
 <div class="page-header d-flex justify-content-between align-items-start">

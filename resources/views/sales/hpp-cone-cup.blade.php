@@ -1,5 +1,14 @@
 @extends('layouts.app')
-@section('title','Analisa HPP — Cone & Cup')
+@section('title','Analisa HPP - Cone & Cup')
+
+@push('styles')
+<style>
+    /* Sembunyikan panah naik/turun pada input angka — angkanya diketik langsung */
+    .cone-cup-table input[type=number]::-webkit-inner-spin-button,
+    .cone-cup-table input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .cone-cup-table input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+</style>
+@endpush
 
 @section('content')
 @include('sales._hpp_tabs', ['currentHppTab' => 'cone-cup'])
@@ -62,7 +71,7 @@
     <div class="card">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0" style="table-layout:fixed;width:100%">
+                <table class="table table-sm align-middle mb-0 cone-cup-table" style="table-layout:fixed;width:100%">
                     <colgroup>
                         <col style="width:16%"><col style="width:14%"><col style="width:14%">
                         <col style="width:14%"><col style="width:14%"><col style="width:14%">
