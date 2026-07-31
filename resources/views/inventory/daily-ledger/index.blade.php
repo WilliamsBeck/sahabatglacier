@@ -326,7 +326,7 @@
                         </th>
                         @foreach($sectionLabels as $key => $label)
                             @if(count($activeDays[$key]) > 0)
-                                <th colspan="{{ count($activeDays[$key]) }}"
+                                <th colspan="{{ count($activeDays[$key]) }}" class="dl-sec-head"
                                     style="background:{{ $sectionH1[$key] }};color:#fff">
                                     {{ $label }} (DUS)
                                 </th>
@@ -516,6 +516,27 @@
     border-right: 2px solid #666 !important;
 }
 .daily-ledger-table thead .sticky-col { z-index: 3; }
+/* Kolom seksi (Pembelian/Penjualan/Waste): lebarnya dikunci seragam.
+   Tanpa ini lebar kolom ditarik oleh judul seksi di atasnya — seksi berjudul
+   panjang tapi berkolom sedikit (mis. "WASTE (DUS)" dgn 1 tanggal) jadi melebar,
+   sementara seksi berkolom banyak jadi sempit. */
+.daily-ledger-table .dl-sec-col {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    text-align: center;
+}
+/* Judul seksi TIDAK boleh mendorong lebar kolom di bawahnya.
+   Aturan umum tabel ini memakai white-space:nowrap — itu memaksa judul panjang
+   (mis. "PEMBELIAN ZHISHENG (DUS)") jadi satu baris, sehingga kolom di bawahnya
+   ikut melebar. Di sini dibolehkan membungkus (wrap) supaya lebar kolom tetap 44px. */
+.daily-ledger-table .dl-sec-head {
+    white-space: normal !important;
+    word-break: break-word;
+    font-size: 0.58rem;
+    line-height: 1.15;
+    padding: 2px 3px !important;
+}
 /* Sel pemakaian (lazy): tampil sebagai teks, jadi input saat difokus */
 .daily-ledger-table .td-usage-cell {
     text-align: center;
