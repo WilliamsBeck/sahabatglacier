@@ -99,8 +99,8 @@
             </div>
             {{-- Ditampilkan lewat tombol (bukan auto-submit saat ganti filter) supaya
                  tidak memuat ulang halaman berat ini setiap kali dropdown disentuh. --}}
-            {{-- Tinggi disamakan dgn kotak isian di sebelahnya supaya sejajar rapi --}}
-            <div class="col-md-auto">
+            {{-- Didorong ke paling kanan (ms-auto); tinggi disamakan dgn kotak isian --}}
+            <div class="col-md-auto ms-md-auto">
                 <button type="submit" class="btn btn-primary btn-sm px-4" style="height:36px">
                     <i class="bi bi-search me-1"></i>Tampilkan
                 </button>
