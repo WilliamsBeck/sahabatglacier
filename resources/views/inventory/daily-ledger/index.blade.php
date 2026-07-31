@@ -70,9 +70,9 @@
 <div class="card mb-3">
     <div class="card-body py-2">
         <form method="GET" class="row g-2 align-items-end" id="ledgerFilterForm">
-            <div class="col-md-6">
+            <div class="col-md-5">
                 <label class="form-label small fw-semibold mb-1">Toko</label>
-                <select name="store_id" class="form-select form-select-sm filter-auto" required>
+                <select name="store_id" class="form-select form-select-sm" required>
                     <option value="">— Pilih Toko —</option>
                     @foreach($stores as $s)
                         <option value="{{ $s->id }}" {{ request('store_id') == $s->id ? 'selected' : '' }}>
@@ -81,34 +81,30 @@
                     @endforeach
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small fw-semibold mb-1">Bulan</label>
-                <select name="month" class="form-select form-select-sm filter-auto">
+                <select name="month" class="form-select form-select-sm">
                     @foreach(['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'] as $i => $bln)
                         <option value="{{ $i+1 }}" {{ request('month', date('n')) == $i+1 ? 'selected' : '' }}>{{ $bln }}</option>
                     @endforeach
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label small fw-semibold mb-1">Tahun</label>
-                <select name="year" class="form-select form-select-sm filter-auto">
+                <select name="year" class="form-select form-select-sm">
                     @for($y = date('Y'); $y >= date('Y')-3; $y--)
                         <option value="{{ $y }}" {{ request('year', date('Y')) == $y ? 'selected' : '' }}>{{ $y }}</option>
                     @endfor
                 </select>
             </div>
+            {{-- Ditampilkan lewat tombol (bukan auto-submit saat ganti filter) supaya
+                 tidak memuat ulang halaman berat ini setiap kali dropdown disentuh. --}}
+            <div class="col-md-3 d-flex">
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-search me-1"></i>Tampilkan
+                </button>
+            </div>
         </form>
-        <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var form = document.getElementById('ledgerFilterForm');
-            if (!form) return;
-            form.querySelectorAll('.filter-auto').forEach(function(sel) {
-                sel.addEventListener('change', function() {
-                    if (form.querySelector('[name=store_id]').value) form.submit();
-                });
-            });
-        });
-        </script>
     </div>
 </div>
 
