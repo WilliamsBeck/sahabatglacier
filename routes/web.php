@@ -147,6 +147,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('hpp/cone-cup', [HppController::class, 'coneCup'])->name('hpp.cone-cup');
         Route::post('hpp/cone-cup/save', [HppController::class, 'saveOverfill'])->name('hpp.cone-cup.save');
         Route::get('hpp/export', [HppController::class, 'export'])->name('hpp.export');
+        Route::get('hpp/print', [HppController::class, 'printReport'])->name('hpp.print');
     });
 
     // LAPORAN

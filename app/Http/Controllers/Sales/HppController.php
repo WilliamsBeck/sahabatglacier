@@ -443,13 +443,23 @@ class HppController extends Controller
         $stores   = auth()->user()->accessibleStores();
         $storeId  = $request->store_id ?? ($storeIds[0] ?? null);
 
+        $rows = ($storeId && in_array($storeId, $storeIds))
+            ? $this->buildConeCupRows((int) $storeId, $month, $year)
+            : collect();
+
+        return view('sales.hpp-cone-cup', compact('stores', 'storeId', 'month', 'year', 'rows'));
+    }
+
+    /** Baris rekonsiliasi Cone & Cup — dipakai halaman Cone & Cup dan laporan cetak. */
+    private function buildConeCupRows(int $storeId, int $month, int $year)
+    {
         $coneCup = \App\Models\Ingredient::where('category', 'cup')
             ->orWhere('name', 'like', '%cone%')
             ->orderByRaw("category = 'cup' DESC")   // cup dulu, lalu cone
             ->orderBy('id')->get(['id', 'name', 'category']);
 
         $rows = collect();
-        if ($storeId && in_array($storeId, $storeIds)) {
+        {
             // Terjual (ideal) & Terpakai (aktual) — reuse perhitungan HPP.
             $hpp     = $this->calcHppForStore((int)$storeId, $month, $year, 'end_month');
             $hppById = $hpp ? $hpp['ingredientRows']->keyBy(fn($r) => $r->ingredient->id) : collect();
@@ -525,7 +535,42 @@ class HppController extends Controller
             });
         }
 
-        return view('sales.hpp-cone-cup', compact('stores', 'storeId', 'month', 'year', 'rows'));
+        return $rows;
+    }
+
+    /**
+     * Laporan Analisa HPP siap cetak (Ctrl+P → Simpan sebagai PDF).
+     * Memuat: ringkasan, analisa per menu, analisa per bahan, dan rekonsiliasi Cone & Cup.
+     */
+    public function printReport(Request $request)
+    {
+        $storeIds   = auth()->user()->accessibleStoreIds();
+        $storeId    = (int) ($request->store_id ?? ($storeIds[0] ?? 0));
+        $month      = (int) ($request->month ?? now()->month);
+        $year       = (int) ($request->year  ?? now()->year);
+        $periodType = $request->period_type ?? 'end_month';
+
+        abort_unless($storeId && in_array($storeId, $storeIds), 403);
+
+        $result = $this->calcHppForStore($storeId, $month, $year, $periodType);
+        if (!$result) {
+            return redirect()->route('sales.hpp.index', [
+                    'store_id' => $storeId, 'month' => $month, 'year' => $year, 'period_type' => $periodType,
+                ])->with('error', 'Tidak ada data HPP untuk periode ini — belum ada penjualan, omset, maupun stok opname.');
+        }
+
+        return view('sales.hpp-print', [
+            'store'       => \App\Models\Store::find($storeId),
+            'month'       => $month,
+            'year'        => $year,
+            'periodType'  => $periodType,
+            'periodLabel' => $periodType === 'mid_month' ? 'Tengah Bulan (1–15)' : 'Akhir Bulan (1–30/31)',
+            'monthLabel'  => \Carbon\Carbon::create($year, $month)->isoFormat('MMMM Y'),
+            'summary'     => $result['summary'],
+            'menuRows'    => $result['menuRows'],
+            'ingRows'     => $result['ingredientRows'],
+            'coneCupRows' => $this->buildConeCupRows($storeId, $month, $year),
+        ]);
     }
 
     // Simpan overfill manual (per toko/bulan/bahan).
@@ -641,7 +686,12 @@ class HppController extends Controller
         if (!$storeId || !in_array($storeId, $storeIds)) abort(403);
 
         $result = $this->calcHppForStore($storeId, $month, $year, $periodType);
-        if (!$result) abort(404, 'Tidak ada data HPP untuk periode ini.');
+        if (!$result) {
+            // Jangan tampilkan halaman 404 — kembalikan ke halaman HPP dengan pesan jelas.
+            return redirect()->route('sales.hpp.index', [
+                    'store_id' => $storeId, 'month' => $month, 'year' => $year, 'period_type' => $periodType,
+                ])->with('error', 'Tidak ada data HPP untuk periode ini — belum ada penjualan, omset, maupun stok opname. Tidak ada yang bisa diekspor.');
+        }
 
         $store     = \App\Models\Store::find($storeId);
         $label     = \Carbon\Carbon::create($year, $month)->isoFormat('MMMM Y');

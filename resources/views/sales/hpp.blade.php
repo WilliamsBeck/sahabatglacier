@@ -7,6 +7,9 @@
     <a href="{{ route('sales.hpp.export', request()->query()) }}" class="btn btn-outline-success">
         <i class="bi bi-file-earmark-excel me-1"></i>Export Excel
     </a>
+    <a href="{{ route('sales.hpp.print', request()->query()) }}" target="_blank" class="btn btn-outline-danger">
+        <i class="bi bi-file-earmark-pdf me-1"></i>Laporan PDF
+    </a>
     @endif
     @if(($summary ?? null) && ($summary->omset > 0 || $summary->hpp_ideal > 0 || ($summary->hpp_aktual ?? 0) > 0))
         @if($locked ?? false)
