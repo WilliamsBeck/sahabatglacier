@@ -292,7 +292,7 @@
                                 <label class="form-label d-flex align-items-center mb-0 gap-2">
                                     Jika membuat
                                     <input type="text" name="total_output" id="totalOutput"
-                                        class="form-control form-control-sm text-center num-fmt" style="width:110px"
+                                        class="form-control form-control-sm text-center num-dec" style="width:110px"
                                         placeholder="cth: 11.000">
                                     <span class="badge bg-white text-dark border px-2 py-1"><span
                                             id="unitLabelComp">{{ $ingredient->unit_base ?? 'gram' }}</span>
@@ -327,8 +327,8 @@
                                     <div class="col-3">
                                         <div class="input-group input-group-sm">
                                             <input type="text" name="compositions[0][qty_used]"
-                                                class="form-control form-control-sm qty-used-input num-fmt"
-                                                placeholder="cth: 3.000"
+                                                class="form-control form-control-sm qty-used-input num-dec"
+                                                placeholder="cth: 0,8"
                                                 style="border-right: 0; border-radius: 8px 0 0 8px !important;">
                                             <span
                                                 class="input-group-text bg-white small unit-label-comp text-muted fw-semibold"
@@ -564,7 +564,7 @@
                 </div>
                 <div class="col-3">
                     <div class="input-group input-group-sm">
-                        <input type="text" name="compositions[${idx}][qty_used]" class="form-control form-control-sm qty-used-input num-fmt" placeholder="cth: 3.000" style="border-right: 0; border-radius: 8px 0 0 8px !important;">
+                        <input type="text" name="compositions[${idx}][qty_used]" class="form-control form-control-sm qty-used-input num-dec" placeholder="cth: 0,8" style="border-right: 0; border-radius: 8px 0 0 8px !important;">
                         <span class="input-group-text bg-white small unit-label-comp text-muted fw-semibold" style="border: 1px solid #cbd5e1; border-left: 0; border-radius: 0 8px 8px 0;">satuan</span>
                     </div>
                 </div>
@@ -745,6 +745,31 @@
             if (sel) sel.addEventListener('change', togglePanels);
             togglePanels();
 
+            // ── Kolom komposisi boleh DESIMAL (mis. 0,8 pcs) ──────────────────
+            // Formatter ribuan global (.num-fmt) membulatkan angka, sehingga koma
+            // terhapus saat diketik. Kolom ini memakai formatter sendiri: titik
+            // untuk ribuan, koma untuk desimal (maks 4 angka di belakang koma).
+            function fmtDesimal(str) {
+                var s = String(str == null ? '' : str).replace(/[^0-9,]/g, '');
+                var bagian = s.split(',');
+                var utuh   = bagian.shift().replace(/^0+(?=\d)/, '');
+                var pecah  = bagian.length ? bagian.join('').slice(0, 4) : null;
+                var hasil  = utuh === '' ? (pecah !== null ? '0' : '')
+                                         : Number(utuh).toLocaleString('id-ID');
+                return pecah !== null ? hasil + ',' + pecah : hasil;
+            }
+            document.addEventListener('input', function (e) {
+                if (!e.target.classList || !e.target.classList.contains('num-dec')) return;
+                var caret = e.target.selectionStart, panjangLama = e.target.value.length;
+                e.target.value = fmtDesimal(e.target.value);
+                var geser = e.target.value.length - panjangLama;
+                try { e.target.setSelectionRange(caret + geser, caret + geser); } catch (err) {}
+            });
+            document.querySelectorAll('.num-dec').forEach(function (el) {
+                el.setAttribute('inputmode', 'decimal');
+                if (el.value) el.value = fmtDesimal(el.value);
+            });
+
             // ── Hitung "Per 1 <satuan>" tiap baris komposisi ──────────────────
             function num(v) {
                 if (window.NumberFmt && NumberFmt.parse) return NumberFmt.parse(v || '0');
@@ -802,7 +827,7 @@
                 div.innerHTML =
                     '<div class="col-5"><select name="compositions[' + idx + '][child_id]" class="form-select form-select-sm child-select">' + buildCompOptions() + '</select></div>' +
                     '<div class="col-3"><div class="input-group input-group-sm">' +
-                        '<input type="text" name="compositions[' + idx + '][qty_used]" class="form-control form-control-sm qty-used-input num-fmt" placeholder="cth: 3.000" style="border-right:0;border-radius:8px 0 0 8px !important;">' +
+                        '<input type="text" name="compositions[' + idx + '][qty_used]" class="form-control form-control-sm qty-used-input num-dec" placeholder="cth: 0,8" style="border-right:0;border-radius:8px 0 0 8px !important;">' +
                         '<span class="input-group-text bg-white small unit-label-comp text-muted fw-semibold" style="border:1px solid #cbd5e1;border-left:0;border-radius:0 8px 8px 0;">satuan</span>' +
                     '</div></div>' +
                     '<div class="col-3"><input type="text" class="form-control form-control-sm bg-light per-unit-display text-muted fw-bold" readonly placeholder="—"></div>' +
