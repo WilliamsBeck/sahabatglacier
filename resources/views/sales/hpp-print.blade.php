@@ -7,7 +7,10 @@
     /* ── Halaman ─────────────────────────────────────────────────────────── */
     @page { size: A4 portrait; margin: 14mm 12mm 16mm 12mm; }
 
-    * { box-sizing: border-box; }
+    /* Browser membuang warna latar saat mencetak (opsi "Print backgrounds" mati),
+       sehingga header tabel & garis selang-seling hilang dan hasilnya terlihat
+       berantakan padahal di layar rapi. Baris ini memaksa warna ikut tercetak. */
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body {
         font-family: "Segoe UI", Arial, Helvetica, sans-serif;
         font-size: 9.5pt; color: #1e293b; margin: 0; background: #f1f5f9;
@@ -79,9 +82,13 @@
     h2 { page-break-after: avoid; }
 
     @media print {
-        body { background: #fff; }
+        body { background: #fff; font-size: 8.5pt; }
         .sheet { max-width: none; margin: 0; padding: 0; }
         .toolbar { display: none; }
+        /* Lebar kolom dikunci supaya hasil cetak sama persis dengan pratinjau
+           dan tidak melar-menyusut mengikuti panjang isi tiap halaman. */
+        table { table-layout: fixed; }
+        td, th { overflow-wrap: anywhere; }
     }
 </style>
 </head>
@@ -163,11 +170,11 @@
     <table>
         <thead>
             <tr>
-                <th style="width:34%">Menu</th>
-                <th class="r">Terjual</th>
-                <th class="r">HPP / pcs</th>
-                <th class="r">HPP Ideal</th>
-                <th class="r">Kontribusi</th>
+                <th style="width:40%">Menu</th>
+                <th class="r" style="width:12%">Terjual</th>
+                <th class="r" style="width:16%">HPP / pcs</th>
+                <th class="r" style="width:20%">HPP Ideal</th>
+                <th class="r" style="width:12%">Kontribusi</th>
             </tr>
         </thead>
         <tbody>
@@ -202,13 +209,13 @@
     <table>
         <thead>
             <tr>
-                <th style="width:24%">Bahan</th>
-                <th class="r">Pemakaian Ideal</th>
-                <th class="r">Pemakaian Aktual</th>
-                <th class="r">Selisih</th>
-                <th class="r">HPP Ideal</th>
-                <th class="r">HPP Aktual</th>
-                <th class="r">Selisih HPP</th>
+                <th style="width:22%">Bahan</th>
+                <th class="r" style="width:12%">Pemakaian Ideal</th>
+                <th class="r" style="width:12%">Pemakaian Aktual</th>
+                <th class="r" style="width:12%">Selisih</th>
+                <th class="r" style="width:14%">HPP Ideal</th>
+                <th class="r" style="width:14%">HPP Aktual</th>
+                <th class="r" style="width:14%">Selisih HPP</th>
             </tr>
         </thead>
         <tbody>
@@ -221,18 +228,35 @@
                 @endif
                 <tr>
                     <td>{{ $r->ingredient->name }}</td>
+                    {{-- Dus jadi angka utama; satuan dasar (gram/pcs) jadi baris kecil di bawahnya.
+                         Bahan tanpa ukuran dus tetap menampilkan satuan dasarnya sebagai angka utama. --}}
                     <td class="r">
-                        {{ $n($r->ideal_base) }} {{ $r->ingredient->unit_base }}
-                        @if($r->ideal_dus !== null)<br><span class="muted">{{ $n($r->ideal_dus, 2) }} dus</span>@endif
+                        @if($r->ideal_dus !== null)
+                            {{ $n($r->ideal_dus, 2) }} dus
+                            <br><span class="muted">{{ $n($r->ideal_base) }} {{ $r->ingredient->unit_base }}</span>
+                        @else
+                            {{ $n($r->ideal_base) }} {{ $r->ingredient->unit_base }}
+                        @endif
                     </td>
                     <td class="r">
-                        @if($r->has_actual)
+                        @if(!$r->has_actual)
+                            <span class="muted">—</span>
+                        @elseif($r->actual_dus !== null)
+                            {{ $n($r->actual_dus, 2) }} dus
+                            <br><span class="muted">{{ $n($r->actual_base) }} {{ $r->ingredient->unit_base }}</span>
+                        @else
                             {{ $n($r->actual_base) }} {{ $r->ingredient->unit_base }}
-                            @if($r->actual_dus !== null)<br><span class="muted">{{ $n($r->actual_dus, 2) }} dus</span>@endif
-                        @else <span class="muted">—</span> @endif
+                        @endif
                     </td>
                     <td class="r {{ $r->selisih_base === null ? '' : ($r->selisih_base >= 0 ? 'pos' : 'neg') }}">
-                        {{ $r->selisih_base === null ? '—' : ($r->selisih_base >= 0 ? '+' : '−') . $n(abs($r->selisih_base)) }}
+                        @if($r->selisih_base === null)
+                            —
+                        @elseif($r->selisih_dus !== null)
+                            {{ $r->selisih_dus >= 0 ? '+' : '-' }}{{ $n(abs($r->selisih_dus), 2) }} dus
+                            <br><span class="muted">{{ $r->selisih_base >= 0 ? '+' : '-' }}{{ $n(abs($r->selisih_base)) }} {{ $r->ingredient->unit_base }}</span>
+                        @else
+                            {{ $r->selisih_base >= 0 ? '+' : '-' }}{{ $n(abs($r->selisih_base)) }} {{ $r->ingredient->unit_base }}
+                        @endif
                     </td>
                     <td class="r">{{ $rp($r->hpp_ideal) }}</td>
                     <td class="r">{{ $r->has_actual ? $rp($r->hpp_aktual) : '—' }}</td>
@@ -267,12 +291,12 @@
         <thead>
             <tr>
                 <th style="width:28%">Bahan</th>
-                <th class="r">Terjual</th>
-                <th class="r">Terpakai</th>
-                <th class="r">Selisih</th>
-                <th class="r">Rusak</th>
-                <th class="r">Overfill</th>
-                <th class="r">Tidak ada penjelasan</th>
+                <th class="r" style="width:12%">Terjual</th>
+                <th class="r" style="width:12%">Terpakai</th>
+                <th class="r" style="width:12%">Selisih</th>
+                <th class="r" style="width:11%">Rusak</th>
+                <th class="r" style="width:11%">Overfill</th>
+                <th class="r" style="width:14%">Tidak ada penjelasan</th>
             </tr>
         </thead>
         <tbody>
