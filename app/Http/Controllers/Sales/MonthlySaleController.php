@@ -93,7 +93,8 @@ class MonthlySaleController extends Controller
             'month'         => 'required|integer|between:1,12',
             'year'          => 'required|integer|min:2020',
             'period_type'   => 'required|in:end_month,mid_month',
-            'total_revenue' => 'nullable|numeric|min:0',
+            'gross_revenue' => 'nullable|numeric|min:0',
+            'tiktok_diff'   => 'nullable|numeric',   // boleh minus
             'items'         => 'nullable|array',
             'items.*.menu_id'    => 'required_with:items|exists:menus,id',
             'items.*.total_sold' => 'required_with:items|integer|min:0',
@@ -123,15 +124,18 @@ class MonthlySaleController extends Controller
             }
         }
 
-        // Simpan omset per periode
-        $revenue = (float)($request->total_revenue ?? 0);
-        if ($revenue > 0) {
+        // Simpan omset per periode. Kolom total_revenue = bruto + selisih TikTok,
+        // supaya laporan & HPP yang sudah baca kolom itu langsung dapat angka final.
+        $gross  = (float)($request->gross_revenue ?? 0);
+        $tiktok = (float)($request->tiktok_diff ?? 0);
+        if ($gross > 0 || $tiktok != 0) {
             MonthlyRevenue::updateOrCreate(
                 ['store_id'    => $request->store_id,
                  'month'       => $request->month,
                  'year'        => $request->year,
                  'period_type' => $periodType],
-                ['total_revenue' => $revenue,
+                ['total_revenue' => $gross + $tiktok,
+                 'tiktok_diff'   => $tiktok,
                  'recorded_by'   => auth()->id()]
             );
         }
@@ -206,8 +210,16 @@ class MonthlySaleController extends Controller
         // Angka dikirim ber-titik ("1.200"). JS sudah melucuti titik sebelum submit,
         // tapi dibersihkan lagi di sini supaya tetap benar kalau JS gagal jalan.
         $bersih = fn ($v) => ($v === null || $v === '') ? $v : preg_replace('/[^0-9]/', '', (string) $v);
+        // Selisih TikTok boleh minus, jadi tanda "-" di depan ikut dipertahankan.
+        $bersihMinus = function ($v) {
+            if ($v === null || $v === '') return $v;
+            $neg = str_starts_with(trim((string) $v), '-');
+            $n   = preg_replace('/[^0-9]/', '', (string) $v);
+            return $n === '' ? $n : ($neg ? '-' : '') . $n;
+        };
         $request->merge([
-            'total_revenue' => $bersih($request->input('total_revenue')),
+            'gross_revenue' => $bersih($request->input('gross_revenue')),
+            'tiktok_diff'   => $bersihMinus($request->input('tiktok_diff')),
             'items'         => collect($request->input('items', []))
                 ->map(fn ($it) => array_merge($it, ['total_sold' => $bersih($it['total_sold'] ?? null)]))
                 ->all(),
@@ -218,7 +230,8 @@ class MonthlySaleController extends Controller
             'month'         => 'required|integer|between:1,12',
             'year'          => 'required|integer|min:2020',
             'period_type'   => 'required|in:end_month,mid_month',
-            'total_revenue' => 'nullable|numeric|min:0',
+            'gross_revenue' => 'nullable|numeric|min:0',
+            'tiktok_diff'   => 'nullable|numeric',   // boleh minus
             'items'         => 'required|array|min:1',
             'items.*.menu_id'    => 'required|exists:menus,id',
             'items.*.total_sold' => 'required|integer|min:0',
@@ -232,10 +245,12 @@ class MonthlySaleController extends Controller
             }
         }
 
-        // Update omset
-        $revenue = (float)($request->total_revenue ?? 0);
+        // Update omset — kolom total_revenue menyimpan hasil akhir (bruto + selisih)
+        $gross  = (float)($request->gross_revenue ?? 0);
+        $tiktok = (float)($request->tiktok_diff ?? 0);
         MonthlyRevenue::updateOrCreate($p, [
-            'total_revenue' => $revenue,
+            'total_revenue' => $gross + $tiktok,
+            'tiktok_diff'   => $tiktok,
             'recorded_by'   => auth()->id(),
         ]);
 
@@ -533,9 +548,17 @@ class MonthlySaleController extends Controller
         // Qty & omset boleh dikoreksi di halaman pratinjau, dan tampil dgn titik
         // pemisah ribuan. Bersihkan titik di sini supaya tetap valid walau JS gagal.
         $bersih = fn($v) => ($v === null || $v === '') ? $v : preg_replace('/[^0-9]/', '', (string) $v);
+        // Selisih TikTok boleh minus, jadi tanda "-" di depan ikut dipertahankan.
+        $bersihMinus = function ($v) {
+            if ($v === null || $v === '') return $v;
+            $neg = str_starts_with(trim((string) $v), '-');
+            $n   = preg_replace('/[^0-9]/', '', (string) $v);
+            return $n === '' ? $n : ($neg ? '-' : '') . $n;
+        };
         $request->merge([
-            'revenue' => $bersih($request->input('revenue')),
-            'items'   => collect($request->input('items', []))
+            'gross_revenue' => $bersih($request->input('gross_revenue')),
+            'tiktok_diff' => $bersihMinus($request->input('tiktok_diff')),
+            'items'       => collect($request->input('items', []))
                 ->map(fn($it) => array_merge($it, ['total_sold' => $bersih($it['total_sold'] ?? null)]))
                 ->all(),
         ]);
@@ -545,7 +568,8 @@ class MonthlySaleController extends Controller
             'month'       => 'required|integer|between:1,12',
             'year'        => 'required|integer|min:2020',
             'period_type' => 'required|in:mid_month,end_month',
-            'revenue'     => 'nullable|numeric|min:0',
+            'gross_revenue' => 'nullable|numeric|min:0',  // omset bruto
+            'tiktok_diff' => 'nullable|numeric',          // boleh minus
             'items'       => 'nullable|array',
             'items.*.menu_id'    => 'required|exists:menus,id',
             'items.*.total_sold' => 'required|integer|min:0',
@@ -555,7 +579,9 @@ class MonthlySaleController extends Controller
         $month      = (int)$request->month;
         $year       = (int)$request->year;
         $periodType = $request->period_type;
-        $revenue    = (float)($request->revenue ?? 0);
+        $gross      = (float)($request->gross_revenue ?? 0); // bruto
+        $tiktok     = (float)($request->tiktok_diff ?? 0);  // selisih TikTok
+        $revenue    = $gross + $tiktok;                     // total omset
 
         $storeIds = auth()->user()->accessibleStoreIds();
         if (!in_array($storeId, $storeIds)) abort(403);
@@ -566,9 +592,10 @@ class MonthlySaleController extends Controller
 
         $p = ['store_id' => $storeId, 'month' => $month, 'year' => $year, 'period_type' => $periodType];
 
-        if ($revenue > 0) {
+        if ($gross > 0 || $tiktok != 0) {
             MonthlyRevenue::updateOrCreate($p, [
                 'total_revenue' => $revenue,
+                'tiktok_diff'   => $tiktok,
                 'recorded_by'   => auth()->id(),
             ]);
         }

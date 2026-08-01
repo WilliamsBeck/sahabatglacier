@@ -48,16 +48,11 @@
                     </span>
                 </div>
                 {{-- Omset bisa dikoreksi sebelum disimpan --}}
-                <div class="col-12 mt-2">
-                    <label class="form-label text-muted small mb-1">Total Omset</label>
-                    <div class="input-group input-group-sm" style="max-width:260px">
-                        <span class="input-group-text">Rp</span>
-                        <input type="text" id="revenueDisplay" class="form-control text-end fw-semibold"
-                               value="{{ $preview['revenue'] > 0 ? number_format($preview['revenue'], 0, ',', '.') : '' }}"
-                               inputmode="numeric" placeholder="0">
-                        <input type="hidden" name="revenue" id="revenue" value="{{ $preview['revenue'] }}">
-                    </div>
-                </div>
+                @include('sales._omset_fields', [
+                    'colClass' => 'col-md-4 mt-2',
+                    'gross'    => $preview['revenue'] > 0 ? $preview['revenue'] : null,
+                    'tiktok'   => null,
+                ])
             </div>
         </div>
     </div>
@@ -145,17 +140,11 @@
             e.target.value = fmt(angka(e.target));
             hitungTotal();
         }
-        if (e.target.id === 'revenueDisplay') {
-            var v = angka(e.target);
-            e.target.value = fmt(v);
-            document.getElementById('revenue').value = v;
-        }
     });
 
     // Bersihkan titik sebelum dikirim supaya server menerima angka murni
     document.querySelector('form[action*="import"]').addEventListener('submit', function () {
         document.querySelectorAll('.qty-import').forEach(function (el) { el.value = angka(el); });
-        document.getElementById('revenue').value = angka(document.getElementById('revenueDisplay'));
     });
 
     hitungTotal();

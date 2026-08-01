@@ -75,16 +75,12 @@
                         </option>
                     </select>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label fw-semibold">Total Omset Periode Ini <span class="text-danger">*</span></label>
-                    <div class="input-group">
-                        <span class="input-group-text">Rp</span>
-                        <input type="text" name="total_revenue" id="total_revenue"
-                               class="form-control text-end num-fmt"
-                               value="{{ old('total_revenue', '') }}"
-                               placeholder="0" required>
-                    </div>
-                </div>
+                @include('sales._omset_fields', [
+                    'colClass' => 'col-md-4',
+                    'wajib'    => true,
+                    'gross'    => old('gross_revenue'),
+                    'tiktok'   => old('tiktok_diff'),
+                ])
             </div>
         </div>
     </div>

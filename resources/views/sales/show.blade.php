@@ -35,8 +35,19 @@
                     <tr><td class="text-muted">Total Terjual</td>
                         <td class="fw-bold">{{ number_format($sales->filter(fn($x) => $x->menu?->count_in_total ?? true)->sum('total_sold'), 0, ',', '.') }} pcs</td>
                     </tr>
-                    @if($revenue && $revenue->total_revenue > 0)
-                    <tr><td class="text-muted">Omset</td>
+                    @if($revenue && ($revenue->total_revenue > 0 || $revenue->tiktok_diff != 0))
+                    <tr><td class="text-muted">Omset Bruto</td>
+                        <td>Rp {{ number_format($revenue->gross_revenue, 0, ',', '.') }}</td>
+                    </tr>
+                    {{-- Baris selisih hanya tampil kalau memang ada, biar tidak jadi baris kosong --}}
+                    @if($revenue->tiktok_diff != 0)
+                    <tr><td class="text-muted">Selisih TikTok</td>
+                        <td class="{{ $revenue->tiktok_diff < 0 ? 'text-danger' : 'text-success' }}">
+                            {{ $revenue->tiktok_diff < 0 ? '-' : '+' }}Rp {{ number_format(abs($revenue->tiktok_diff), 0, ',', '.') }}
+                        </td>
+                    </tr>
+                    @endif
+                    <tr><td class="text-muted">Total Omset</td>
                         <td class="fw-bold text-primary">Rp {{ number_format($revenue->total_revenue, 0, ',', '.') }}</td>
                     </tr>
                     @endif

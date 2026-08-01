@@ -35,16 +35,11 @@
                         <input type="text" class="form-control"
                                value="{{ $p['period_type'] === 'mid_month' ? '1–15' : '1–30/31' }} {{ $p['month'] }}/{{ $p['year'] }}" disabled>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Omset Periode</label>
-                        <div class="input-group">
-                            <span class="input-group-text">Rp</span>
-                            {{-- text + .num-fmt: tanpa panah spinner, ribuan otomatis bertitik.
-                                 Nilai dibulatkan ke rupiah utuh — desimal .00 dari DB tidak perlu tampil. --}}
-                            <input type="text" name="total_revenue" class="form-control text-end num-fmt"
-                                   value="{{ old('total_revenue', $revenue ? (int) round($revenue->total_revenue) : '') }}"
-                                   placeholder="0">
-                        </div>
+                    <div class="row g-3">
+                        @include('sales._omset_fields', [
+                            'gross'  => old('gross_revenue', $revenue?->gross_revenue),
+                            'tiktok' => old('tiktok_diff',   $revenue?->tiktok_diff),
+                        ])
                     </div>
                 </div>
             </div>
