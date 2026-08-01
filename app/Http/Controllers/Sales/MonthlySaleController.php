@@ -48,9 +48,15 @@ class MonthlySaleController extends Controller
             ->values();
 
         // Ambil aggregat sales & omset per periode
-        $salesMap = MonthlySale::selectRaw('store_id, month, year, period_type, COUNT(*) as menu_count, SUM(total_sold) as total_sold')
-            ->whereIn('store_id', $storeIds)
-            ->groupBy('store_id', 'month', 'year', 'period_type')
+        // Menu yang saklarnya dimatikan (add on & packaging cup) tidak ikut dijumlah
+        // ke total terjual. Baris tetap terhitung di menu_count.
+        $salesMap = MonthlySale::selectRaw(
+                'monthly_sales.store_id, monthly_sales.month, monthly_sales.year, monthly_sales.period_type,
+                 COUNT(*) as menu_count,
+                 SUM(CASE WHEN COALESCE(menus.count_in_total, 1) = 1 THEN monthly_sales.total_sold ELSE 0 END) as total_sold')
+            ->leftJoin('menus', 'menus.id', '=', 'monthly_sales.menu_id')
+            ->whereIn('monthly_sales.store_id', $storeIds)
+            ->groupBy('monthly_sales.store_id', 'monthly_sales.month', 'monthly_sales.year', 'monthly_sales.period_type')
             ->get()->keyBy(fn($r) => "{$r->store_id}_{$r->month}_{$r->year}_{$r->period_type}");
 
         $revenueMap = MonthlyRevenue::whereIn('store_id', $storeIds)->get()

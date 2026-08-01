@@ -33,7 +33,7 @@
                     </tr>
                     <tr><td class="text-muted">Total Menu</td><td>{{ $sales->count() }} menu</td></tr>
                     <tr><td class="text-muted">Total Terjual</td>
-                        <td class="fw-bold">{{ number_format($sales->sum('total_sold'), 0, ',', '.') }} pcs</td>
+                        <td class="fw-bold">{{ number_format($sales->filter(fn($x) => $x->menu?->count_in_total ?? true)->sum('total_sold'), 0, ',', '.') }} pcs</td>
                     </tr>
                     @if($revenue && $revenue->total_revenue > 0)
                     <tr><td class="text-muted">Omset</td>
@@ -77,7 +77,7 @@
                     <tfoot>
                         <tr class="table-light fw-bold">
                             <td>Total</td>
-                            <td class="text-end">{{ number_format($sales->sum('total_sold'), 0, ',', '.') }} pcs</td>
+                            <td class="text-end">{{ number_format($sales->filter(fn($x) => $x->menu?->count_in_total ?? true)->sum('total_sold'), 0, ',', '.') }} pcs</td>
                         </tr>
                     </tfoot>
                 </table>

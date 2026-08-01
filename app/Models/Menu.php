@@ -5,9 +5,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class Menu extends Model
 {
-    protected $fillable = ['name', 'category', 'category_id', 'is_active'];
+    protected $fillable = ['name', 'category', 'category_id', 'is_active', 'count_in_total'];
 
-    protected $casts = ['is_active' => 'boolean'];
+    protected $casts = ['is_active' => 'boolean', 'count_in_total' => 'boolean'];
 
     public function menuCategory()
     {

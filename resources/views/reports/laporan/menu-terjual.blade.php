@@ -136,8 +136,11 @@
                             @php $no = 0; @endphp
                             @foreach($rows->groupBy(fn($r) => $r->menu?->menuCategory?->name ?? 'Lainnya') as $catName => $catRows)
                                 @php
+                                    // Qty kategori ditampilkan APA ADANYA supaya bisa dianalisa.
+                                    // Yang dikecualikan hanya angka TOTAL keseluruhan di bawah.
                                     $catQty = $catRows->sum('total_sold');
                                     $catRev = $catRows->sum('total_revenue');
+                                    $catDihitung = $catRows->contains(fn($r) => $r->menu?->count_in_total ?? true);
                                 @endphp
                                 <tr class="table-light">
                                     <td colspan="2" class="fw-semibold text-uppercase small" style="letter-spacing:.03em">
@@ -145,18 +148,30 @@
                                     </td>
                                     <td class="text-end fw-semibold">{{ number_format($catQty, 0, ',', '.') }}</td>
                                     <td class="text-end fw-semibold text-muted small">
-                                        {{ $totalSold > 0 ? number_format($catQty / $totalSold * 100, 1, ',', '.') : 0 }}%
+                                        @if($catDihitung && $totalSold > 0)
+                                            {{ number_format($catQty / $totalSold * 100, 1, ',', '.') }}%
+                                        @else
+                                            <span title="Kategori ini tidak dijumlah ke total menu terjual">—</span>
+                                        @endif
                                     </td>
                                     <td class="text-end fw-semibold">Rp {{ number_format($catRev, 0, ',', '.') }}</td>
                                 </tr>
                                 @foreach($catRows as $row)
                                     @php $no++; @endphp
+                                    @php $ikutHitung = $row->menu?->count_in_total ?? true; @endphp
                                     <tr>
                                         <td class="text-muted small">{{ $no }}</td>
-                                        <td class="col-name fw-semibold ps-4">{{ $row->menu?->name ?? '-' }}</td>
-                                        <td class="text-end fw-semibold">{{ number_format($row->total_sold, 0, ',', '.') }}</td>
+                                        <td class="col-name fw-semibold ps-4">
+                                            {{ $row->menu?->name ?? '-' }}
+                                            @unless($ikutHitung)
+                                                <span class="badge bg-light text-secondary border ms-1"
+                                                      style="font-size:.6rem;font-weight:500"
+                                                      title="Tidak dihitung ke total menu terjual (atur di Master Data → Menu)">tidak dihitung</span>
+                                            @endunless
+                                        </td>
+                                        <td class="text-end fw-semibold {{ $ikutHitung ? '' : 'text-muted' }}">{{ number_format($row->total_sold, 0, ',', '.') }}</td>
                                         <td class="text-end text-muted small">
-                                            {{ $totalSold > 0 ? number_format($row->total_sold / $totalSold * 100, 1, ',', '.') : 0 }}%
+                                            {{ $ikutHitung && $totalSold > 0 ? number_format($row->total_sold / $totalSold * 100, 1, ',', '.') . '%' : '—' }}
                                         </td>
                                         <td class="text-end">Rp {{ number_format($row->total_revenue, 0, ',', '.') }}</td>
                                     </tr>

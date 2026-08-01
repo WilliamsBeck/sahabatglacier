@@ -221,6 +221,20 @@
                                                 <label class="form-check-label form-label mb-0" for="actMenu"
                                                     style="cursor: pointer;">Set Menu Aktif</label>
                                             </div>
+
+                                            {{-- Add on & packaging cup: qty tetap diisi, tapi tidak
+                                                 dijumlah ke TOTAL TERJUAL di halaman input penjualan. --}}
+                                            <div class="form-check form-switch d-flex align-items-center gap-3 ps-0 mt-3">
+                                                <input class="form-check-input m-0" type="checkbox" name="count_in_total"
+                                                    value="1" id="cntMenu" {{ old('count_in_total', $menu->count_in_total ?? true) ? 'checked' : '' }}
+                                                    @if($isAdminArea) style="pointer-events:none" tabindex="-1" @endif>
+                                                <label class="form-check-label form-label mb-0" for="cntMenu"
+                                                    style="cursor: pointer;">Hitung ke Total Menu Terjual</label>
+                                            </div>
+                                            <div class="form-text mt-1">
+                                                Matikan untuk <strong>add on</strong> &amp; <strong>packaging cup</strong> —
+                                                qty tetap bisa diisi, hanya tidak ikut dijumlah.
+                                            </div>
                                         </div>
 
                                         <div class="mt-auto pt-2">

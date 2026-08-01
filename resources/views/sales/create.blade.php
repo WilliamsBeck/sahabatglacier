@@ -109,6 +109,11 @@
                         </thead>
                         <tbody>
                             @foreach($chunk as $i => $menu)
+                            @php
+                                // Diatur lewat Master Data → Menu ("Hitung ke Total Menu Terjual").
+                                // Qty tetap bisa diisi & disimpan, hanya tidak ikut dijumlah.
+                                $skipTotal = !($menu->count_in_total ?? true);
+                            @endphp
                             <tr>
                                 <td class="fw-semibold">
                                     <input type="hidden" name="items[{{ $i }}][menu_id]" value="{{ $menu->id }}">
@@ -119,6 +124,7 @@
                                            name="items[{{ $i }}][total_sold]"
                                            class="form-control form-control-sm text-center num-fmt"
                                            value="{{ old("items.{$i}.total_sold", '') }}"
+                                           @if($skipTotal) data-skip-total="1" @endif
                                            placeholder="">
                                 </td>
                             </tr>
@@ -202,6 +208,7 @@ modalImportSales.show();
 function updateTotals() {
     var total = 0;
     document.querySelectorAll('input[name$="[total_sold]"]').forEach(function(el) {
+        if (el.dataset.skipTotal) return;   // add on & packaging cup tidak dihitung
         total += parseInt(el.value) || 0;
     });
     document.getElementById('total-qty').textContent = total > 0 ? total.toLocaleString('id-ID') : '—';

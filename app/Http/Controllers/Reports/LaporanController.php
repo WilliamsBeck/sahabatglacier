@@ -53,7 +53,8 @@ class LaporanController extends Controller
                 ->get()
                 ->sortByDesc('total_sold')->values();
 
-            $totalSold    = $rows->sum('total_sold');
+            // Add on & packaging cup tidak dijumlah (saklar di Master Data → Menu)
+            $totalSold    = $rows->filter(fn($r) => $r->menu?->count_in_total ?? true)->sum('total_sold');
             // Omset diambil dari MonthlyRevenue (sama seperti halaman penjualan/HPP),
             // bukan dari kolom per-menu total_revenue yang belum terisi.
             $totalRevenue = MonthlyRevenue::where('store_id', $storeId)
@@ -63,6 +64,8 @@ class LaporanController extends Controller
         }
 
         // Grouping by category for chart
+        // Grafik menampilkan SEMUA kategori (termasuk add on & packaging) supaya
+        // tetap bisa dianalisa — yang dikecualikan hanya angka TOTAL-nya.
         $byCategory = $rows->groupBy(fn($r) => $r->menu?->menuCategory?->name ?? 'Lainnya')
             ->map(fn($g) => $g->sum('total_sold'));
 
@@ -98,7 +101,9 @@ class LaporanController extends Controller
                 $r->total_revenue,
             ];
         }
-        $data[] = ['', '', '', 'TOTAL', $rows->sum('total_sold'), $rows->sum('total_revenue')];
+        $data[] = ['', '', '', 'TOTAL',
+            $rows->filter(fn($r) => $r->menu?->count_in_total ?? true)->sum('total_sold'),
+            $rows->sum('total_revenue')];
 
         return Excel::download(new ArrayExport($data), "menu-terjual_{$store->name}_{$month}-{$year}.xlsx");
     }

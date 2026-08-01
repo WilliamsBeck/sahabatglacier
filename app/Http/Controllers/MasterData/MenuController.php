@@ -51,6 +51,7 @@ class MenuController extends Controller
                 'category'    => $request->category,
                 'category_id' => $request->category_id ?: null,
                 'is_active'   => $request->has('is_active'),
+                'count_in_total' => $request->has('count_in_total'),
             ]);
 
             $effectiveFrom = $request->effective_from ?? now()->toDateString();
@@ -120,6 +121,7 @@ class MenuController extends Controller
                     'category'    => $request->category,
                     'category_id' => $request->category_id ?: null,
                     'is_active'   => $request->has('is_active'),
+                'count_in_total' => $request->has('count_in_total'),
                 ]);
             }
 
