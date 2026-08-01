@@ -350,8 +350,18 @@
                         <tbody>
                             @foreach($ingredientRows as $r)
                             @php
-                                $selClass = $r->selisih_hpp === null ? ''
-                                    : ($r->selisih_hpp < 0 ? 'text-danger' : ($r->selisih_hpp > 0 ? 'text-success' : 'text-muted'));
+                                // Warna mengikuti ANGKA YANG TAMPIL, bukan angka mentah.
+                                // Kolom Dus diwarnai oleh selisih qty-nya sendiri (dulu ikut
+                                // selisih rupiah, jadi +0,02 bisa tampil tanpa warna / merah).
+                                $warna = fn($v) => $v === null ? ''
+                                    : ($v > 0 ? 'text-success' : ($v < 0 ? 'text-danger' : 'text-muted'));
+
+                                $selRp  = $r->selisih_hpp === null ? null : round($r->selisih_hpp);
+                                $selQty = $r->selisih_dus !== null ? round($r->selisih_dus, 2)
+                                        : ($r->selisih_base !== null ? round($r->selisih_base, 2) : null);
+
+                                $selClass    = $warna($selRp);    // kolom rupiah & % selisih
+                                $selClassQty = $warna($selQty);   // kolom Selisih Dus
                                 $fmtDus = fn($v) => $v !== null ? number_format($v, 2, ',', '.') : '—';
                             @endphp
                             <tr>
@@ -389,9 +399,9 @@
                                 </td>
 
                                 {{-- Selisih Dus --}}
-                                <td class="text-end fw-semibold {{ $selClass }}">
+                                <td class="text-end fw-semibold {{ $selClassQty }}">
                                     @if($r->selisih_dus !== null)
-                                        {{ $r->selisih_dus >= 0 ? '+' : '' }}{{ number_format($r->selisih_dus, 2, ',', '.') }}
+                                        {{ $selQty > 0 ? '+' : '' }}{{ number_format($selQty, 2, ',', '.') }}
                                     @elseif($r->selisih_base !== null)
                                         {{ $r->selisih_base >= 0 ? '+' : '' }}{{ number_format($r->selisih_base, 2, ',', '.') }}*
                                     @else
