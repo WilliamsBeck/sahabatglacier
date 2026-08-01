@@ -74,7 +74,32 @@ class MenuController extends Controller
     public function show(Menu $menu)
     {
         $menu->load(['recipes.ingredient', 'recipes.store']);
-        $recipes = $menu->recipes()->orderByDesc('effective_from')->get()->groupBy('recipe_group_id');
+
+        // 1 versi resep yang berlaku utk beberapa toko disimpan sebagai baris
+        // TERPISAH per toko. Kalau semua baris ditampilkan apa adanya, daftar
+        // bahannya terlihat berulang (7 bahan x 3 toko = 21 baris).
+        // Jadi: tampilkan resep SATU toko saja + sebut toko mana yang memakainya.
+        $recipes = $menu->recipes()->orderByDesc('effective_from')->get()
+            ->groupBy('recipe_group_id')
+            ->map(function ($items) {
+                $byStore = $items->groupBy(fn ($r) => $r->store_id ?? 0);
+
+                // Sidik jari resep tiap toko, utk memastikan isinya memang sama
+                $sidik = fn ($rows) => $rows
+                    ->map(fn ($r) => $r->ingredient_id . ':' . $r->qty_usage . ':' . $r->unit)
+                    ->sort()->values()->implode('|');
+                $seragam = $byStore->map($sidik)->unique()->count() === 1;
+
+                return (object) [
+                    'effective_from' => $items->first()->effective_from,
+                    'stores'   => $byStore->map(fn ($rows) => $rows->first()->store?->name ?? 'Semua toko (default)')
+                                          ->values()->sort()->values(),
+                    'seragam'  => $seragam,
+                    'items'    => $byStore->first(),   // resep 1 toko — sama utk toko lain di versi ini
+                    'perStore' => $byStore,            // dipakai hanya kalau ternyata tidak seragam
+                ];
+            });
+
         return view('master.menus.show', compact('menu', 'recipes'));
     }
     public function edit(Menu $menu)   { return $this->renderForm($menu); }

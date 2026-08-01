@@ -33,33 +33,58 @@
     </div>
 </div>
 
-@foreach($recipes as $groupId => $items)
+@foreach($recipes as $groupId => $versi)
     <div class="card mb-3">
         <div class="card-header fw-semibold d-flex justify-content-between">
             <span><i class="bi bi-card-list me-1"></i> Versi Resep</span>
-            <span class="text-muted small">Berlaku sejak {{ \Carbon\Carbon::parse($items->first()->effective_from)->isoFormat('D MMM Y') }}</span>
+            <span class="text-muted small">Berlaku sejak {{ \Carbon\Carbon::parse($versi->effective_from)->isoFormat('D MMM Y') }}</span>
         </div>
-        @php
-            $storeLabel = $items->first()->store?->name ?? 'Semua toko (default)';
-            $allSameStore = $items->every(fn($r) => ($r->store?->name ?? 'Semua toko (default)') === $storeLabel);
-        @endphp
-        <div class="card-body py-1 px-3 border-bottom small text-muted">
-            Toko: <span class="fw-medium text-body">{{ $allSameStore ? $storeLabel : 'Beberapa toko' }}</span>
+        <div class="card-body py-2 px-3 border-bottom small text-muted">
+            Toko: <span class="fw-medium text-body">{{ $versi->stores->implode(', ') }}</span>
+            @if($versi->stores->count() > 1)
+                <span class="text-muted">({{ $versi->stores->count() }} toko, resep sama)</span>
+            @endif
         </div>
-        <div class="table-responsive">
-            <table class="table table-index mb-0 align-middle">
-                <thead><tr><th>Bahan</th><th class="text-end">Qty</th><th>Satuan</th></tr></thead>
-                <tbody>
-                    @foreach($items as $r)
-                    <tr>
-                        <td>{{ $r->ingredient?->name ?? '—' }}</td>
-                        <td class="text-end">{{ number_format($r->qty_usage, 0, ',', '.') }}</td>
-                        <td class="text-muted small">{{ $r->unit }}</td>
-                    </tr>
-                    @endforeach
-                </tbody>
-            </table>
-        </div>
+
+        @if($versi->seragam)
+            {{-- Resep tiap toko identik: cukup ditampilkan sekali --}}
+            <div class="table-responsive">
+                <table class="table table-index mb-0 align-middle">
+                    <thead><tr><th>Bahan</th><th class="text-end">Qty</th><th>Satuan</th></tr></thead>
+                    <tbody>
+                        @foreach($versi->items as $r)
+                        <tr>
+                            <td>{{ $r->ingredient?->name ?? '-' }}</td>
+                            <td class="text-end">{{ number_format($r->qty_usage, 0, ',', '.') }}</td>
+                            <td class="text-muted small">{{ $r->unit }}</td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @else
+            {{-- Jarang terjadi: satu versi tapi isi per toko ternyata beda.
+                 Ditampilkan terpisah supaya perbedaannya kelihatan, bukan disamarkan. --}}
+            @foreach($versi->perStore as $rows)
+                <div class="px-3 pt-2 small fw-semibold">
+                    {{ $rows->first()->store?->name ?? 'Semua toko (default)' }}
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-index mb-0 align-middle">
+                        <thead><tr><th>Bahan</th><th class="text-end">Qty</th><th>Satuan</th></tr></thead>
+                        <tbody>
+                            @foreach($rows as $r)
+                            <tr>
+                                <td>{{ $r->ingredient?->name ?? '-' }}</td>
+                                <td class="text-end">{{ number_format($r->qty_usage, 0, ',', '.') }}</td>
+                                <td class="text-muted small">{{ $r->unit }}</td>
+                            </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endforeach
+        @endif
     </div>
 @endforeach
 
