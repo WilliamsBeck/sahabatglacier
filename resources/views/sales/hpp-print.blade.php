@@ -30,12 +30,16 @@
     .meta b { color: #0f172a; }
 
     /* ── Kartu ringkasan ─────────────────────────────────────────────────── */
-    .cards { display: flex; gap: 6pt; margin-bottom: 14pt; }
-    .card { flex: 1; border: .8pt solid #e2e8f0; border-radius: 4pt; padding: 7pt 8pt;
-            background: #f8fafc; }
+    .cards { display: flex; gap: 6pt; margin-bottom: 14pt; align-items: stretch; }
+    .card { flex: 1 1 0; min-width: 0; border: .8pt solid #e2e8f0; border-radius: 4pt;
+            padding: 7pt 8pt; background: #f8fafc; }
+    /* Kartu Omset memuat angka terpanjang, jadi diberi porsi lebar lebih besar
+       supaya "Rp" tidak terlempar ke baris sendiri. */
+    .card.accent { flex: 1.3 1 0; }
     .card .lbl { font-size: 7.5pt; color: #64748b; text-transform: uppercase;
                  letter-spacing: .4pt; margin-bottom: 3pt; }
-    .card .val { font-size: 12.5pt; font-weight: 700; color: #0f172a; line-height: 1.15; }
+    .card .val { font-size: 10.5pt; font-weight: 700; color: #0f172a; line-height: 1.15;
+                 white-space: nowrap; }   /* angka rupiah tidak boleh dipatahkan */
     .card .sub { font-size: 7.5pt; color: #64748b; margin-top: 2pt; }
     .card.accent { background: #ecfeff; border-color: #a5f3fc; }
     .card.accent .val { color: #006275; }
