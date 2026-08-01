@@ -203,6 +203,16 @@ class MonthlySaleController extends Controller
     // ── Update group ──────────────────────────────────────────────────────────
     public function periodUpdate(Request $request)
     {
+        // Angka dikirim ber-titik ("1.200"). JS sudah melucuti titik sebelum submit,
+        // tapi dibersihkan lagi di sini supaya tetap benar kalau JS gagal jalan.
+        $bersih = fn ($v) => ($v === null || $v === '') ? $v : preg_replace('/[^0-9]/', '', (string) $v);
+        $request->merge([
+            'total_revenue' => $bersih($request->input('total_revenue')),
+            'items'         => collect($request->input('items', []))
+                ->map(fn ($it) => array_merge($it, ['total_sold' => $bersih($it['total_sold'] ?? null)]))
+                ->all(),
+        ]);
+
         $request->validate([
             'store_id'      => 'required|exists:stores,id',
             'month'         => 'required|integer|between:1,12',

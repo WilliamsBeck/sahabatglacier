@@ -39,8 +39,10 @@
                         <label class="form-label fw-semibold">Omset Periode</label>
                         <div class="input-group">
                             <span class="input-group-text">Rp</span>
-                            <input type="number" name="total_revenue" class="form-control" min="0" step="1"
-                                   value="{{ old('total_revenue', $revenue?->total_revenue ?? '') }}"
+                            {{-- text + .num-fmt: tanpa panah spinner, ribuan otomatis bertitik.
+                                 Nilai dibulatkan ke rupiah utuh — desimal .00 dari DB tidak perlu tampil. --}}
+                            <input type="text" name="total_revenue" class="form-control text-end num-fmt"
+                                   value="{{ old('total_revenue', $revenue ? (int) round($revenue->total_revenue) : '') }}"
                                    placeholder="0">
                         </div>
                     </div>
@@ -76,8 +78,9 @@
                                             <span class="{{ $existing ? 'fw-semibold' : 'text-muted' }}">{{ $menu->name }}</span>
                                         </td>
                                         <td>
-                                            <input type="number" name="items[{{ $idx }}][total_sold]"
-                                                   class="form-control form-control-sm" min="0" placeholder="0"
+                                            {{-- text + .num-fmt: panah spinner hilang, ribuan bertitik --}}
+                                            <input type="text" name="items[{{ $idx }}][total_sold]"
+                                                   class="form-control form-control-sm text-end num-fmt" placeholder="0"
                                                    value="{{ old("items.{$idx}.total_sold", $existing?->total_sold ?? 0) }}">
                                         </td>
                                     </tr>

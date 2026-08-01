@@ -84,9 +84,9 @@
                         <td>
                             {{ $item['menu_name'] }}
                             @unless($ikutHitung)
-                                <span class="badge bg-light text-secondary border ms-1"
-                                      style="font-size:.6rem;font-weight:500"
-                                      title="Tidak dihitung ke total menu terjual">tidak dihitung</span>
+                                {{-- Penanda halus: ikon kecil + tooltip, bukan badge --}}
+                                <i class="bi bi-slash-circle ms-1" style="font-size:.72rem;color:#cbd5e1"
+                                   title="Tidak dihitung ke total menu terjual"></i>
                             @endunless
                         </td>
                         <td class="text-end">

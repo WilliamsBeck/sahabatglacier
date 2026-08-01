@@ -164,9 +164,9 @@
                                         <td class="col-name fw-semibold ps-4">
                                             {{ $row->menu?->name ?? '-' }}
                                             @unless($ikutHitung)
-                                                <span class="badge bg-light text-secondary border ms-1"
-                                                      style="font-size:.6rem;font-weight:500"
-                                                      title="Tidak dihitung ke total menu terjual (atur di Master Data → Menu)">tidak dihitung</span>
+                                                {{-- Penanda halus: ikon kecil + tooltip, bukan badge --}}
+                                                <i class="bi bi-slash-circle ms-1" style="font-size:.72rem;color:#cbd5e1"
+                                                   title="Tidak dihitung ke total menu terjual (atur di Master Data → Menu)"></i>
                                             @endunless
                                         </td>
                                         <td class="text-end fw-semibold {{ $ikutHitung ? '' : 'text-muted' }}">{{ number_format($row->total_sold, 0, ',', '.') }}</td>
