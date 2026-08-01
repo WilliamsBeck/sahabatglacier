@@ -407,7 +407,8 @@ class HppController extends Controller
         $month      = (int)($request->month      ?? now()->month);
         $year       = (int)($request->year       ?? now()->year);
         $stores     = auth()->user()->accessibleStores();
-        $storeId    = $request->store_id         ?? ($storeIds[0] ?? null);
+        // Ikut toko yang dipilih di pemilih toko (topbar) bila halaman dibuka tanpa filter
+        $storeId    = $request->store_id ?? session('active_store_id') ?? ($storeIds[0] ?? null);
         $periodType = $request->period_type      ?? 'end_month';
 
         $empty = fn() => view('sales.hpp', [
@@ -457,7 +458,7 @@ class HppController extends Controller
         $month    = (int)($request->month ?? now()->month);
         $year     = (int)($request->year  ?? now()->year);
         $stores   = auth()->user()->accessibleStores();
-        $storeId  = $request->store_id ?? ($storeIds[0] ?? null);
+        $storeId  = $request->store_id ?? session('active_store_id') ?? ($storeIds[0] ?? null);
 
         $rows = ($storeId && in_array($storeId, $storeIds))
             ? $this->buildConeCupRows((int) $storeId, $month, $year)
@@ -547,9 +548,13 @@ class HppController extends Controller
                     'rusak_waste'  => $rusakWaste,   // angka asli dari catatan waste
                     'is_override'  => $isOverride,   // true = sudah dikoreksi manual
                     'overfill'     => $overfill,
-                    // Rusak & Overfill menutup kekurangan, jadi ditambahkan.
-                    // Sisa 0 = selisih sudah terjelaskan sepenuhnya.
-                    'unexplained'  => $selisih + $rusak + $overfill,
+                    // Rusak & Overfill adalah penjelasan: keduanya MENGECILKAN selisih
+                    // menuju nol, dari arah mana pun selisihnya datang.
+                    //   selisih -1.407, rusak 1.409  -> +2   (boros, hampir terjelaskan)
+                    //   selisih     +6, overfill   8 -> -2   (hemat, terlewat dijelaskan)
+                    'unexplained'  => $selisih >= 0
+                        ? $selisih - ($rusak + $overfill)
+                        : $selisih + ($rusak + $overfill),
                 ];
             });
         }

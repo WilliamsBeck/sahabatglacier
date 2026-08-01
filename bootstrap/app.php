@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Blokir semua aksi tulis untuk akun hanya-lihat (role 'viewer') di seluruh web.
         $middleware->web(append: [
             RestrictViewer::class,
+            \App\Http\Middleware\RememberActiveStore::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
