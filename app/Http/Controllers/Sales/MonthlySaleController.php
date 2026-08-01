@@ -487,6 +487,8 @@ class MonthlySaleController extends Controller
                     'menu_name' => $menu->name,
                     'category'  => $menu->menuCategory?->name ?? '-',
                     'total_sold'=> $qty,
+                    // add on & packaging cup: tidak ikut dijumlah ke total menu terjual
+                    'count_in_total' => (bool) ($menu->count_in_total ?? true),
                 ];
             }
         }
@@ -518,6 +520,16 @@ class MonthlySaleController extends Controller
     // ═══════════════════════════════════════════════════════════════════════
     public function importCommit(Request $request)
     {
+        // Qty & omset boleh dikoreksi di halaman pratinjau, dan tampil dgn titik
+        // pemisah ribuan. Bersihkan titik di sini supaya tetap valid walau JS gagal.
+        $bersih = fn($v) => ($v === null || $v === '') ? $v : preg_replace('/[^0-9]/', '', (string) $v);
+        $request->merge([
+            'revenue' => $bersih($request->input('revenue')),
+            'items'   => collect($request->input('items', []))
+                ->map(fn($it) => array_merge($it, ['total_sold' => $bersih($it['total_sold'] ?? null)]))
+                ->all(),
+        ]);
+
         $request->validate([
             'store_id'    => 'required|exists:stores,id',
             'month'       => 'required|integer|between:1,12',
@@ -526,7 +538,7 @@ class MonthlySaleController extends Controller
             'revenue'     => 'nullable|numeric|min:0',
             'items'       => 'nullable|array',
             'items.*.menu_id'    => 'required|exists:menus,id',
-            'items.*.total_sold' => 'required|integer|min:1',
+            'items.*.total_sold' => 'required|integer|min:0',
         ]);
 
         $storeId    = (int)$request->store_id;
@@ -553,9 +565,11 @@ class MonthlySaleController extends Controller
 
         MonthlySale::where($p)->delete();
         foreach ($request->items ?? [] as $item) {
+            $qty = (int) $item['total_sold'];
+            if ($qty === 0) continue;   // qty dikoreksi jadi 0 → tidak perlu disimpan
             MonthlySale::create(array_merge($p, [
                 'menu_id'     => $item['menu_id'],
-                'total_sold'  => (int)$item['total_sold'],
+                'total_sold'  => $qty,
                 'recorded_by' => auth()->id(),
             ]));
         }

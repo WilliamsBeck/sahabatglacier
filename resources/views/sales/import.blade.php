@@ -26,69 +26,92 @@
     <div>Cek data berikut sebelum disimpan. Klik <strong>Konfirmasi & Simpan</strong> jika sudah benar.</div>
 </div>
 
-<div class="card mb-3" style="max-width:680px">
-    <div class="card-body pb-2">
-        <div class="row g-2 small">
-            <div class="col-6">
-                <span class="text-muted">Toko</span><br>
-                <strong>{{ $preview['store_name'] }}</strong>
-            </div>
-            <div class="col-6">
-                <span class="text-muted">Periode</span><br>
-                <strong>{{ $preview['month_name'] }} {{ $preview['year'] }}</strong>
-                <span class="badge bg-secondary ms-1">
-                    {{ $preview['period_type'] === 'mid_month' ? 'Tengah Bulan' : 'Akhir Bulan' }}
-                </span>
-            </div>
-            @if($preview['revenue'] > 0)
-            <div class="col-12 mt-1">
-                <span class="text-muted">Total Omset</span><br>
-                <strong>Rp {{ number_format($preview['revenue'], 0, ',', '.') }}</strong>
-            </div>
-            @endif
-        </div>
-    </div>
-</div>
-
-<div class="card mb-3" style="max-width:680px">
-    <div class="card-header py-2 d-flex justify-content-between align-items-center">
-        <span class="fw-semibold small">Daftar Menu ({{ count($preview['items']) }} item)</span>
-    </div>
-    <div class="table-responsive">
-        <table class="table table-sm table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>Kategori</th>
-                    <th>Menu</th>
-                    <th class="text-end">Qty Terjual</th>
-                </tr>
-            </thead>
-            <tbody>
-                @forelse($preview['items'] as $item)
-                <tr>
-                    <td class="text-muted small">{{ $item['category'] }}</td>
-                    <td>{{ $item['menu_name'] }}</td>
-                    <td class="text-end fw-semibold">{{ number_format($item['total_sold']) }}</td>
-                </tr>
-                @empty
-                <tr><td colspan="3" class="text-center text-muted py-3">Tidak ada data menu dengan qty > 0</td></tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
-</div>
-
 <form method="POST" action="{{ route('sales.monthly.import.commit') }}" style="max-width:680px">
     @csrf
     <input type="hidden" name="store_id"    value="{{ $preview['store_id'] }}">
     <input type="hidden" name="month"       value="{{ $preview['month'] }}">
     <input type="hidden" name="year"        value="{{ $preview['year'] }}">
     <input type="hidden" name="period_type" value="{{ $preview['period_type'] }}">
-    <input type="hidden" name="revenue"     value="{{ $preview['revenue'] }}">
-    @foreach($preview['items'] as $i => $item)
-        <input type="hidden" name="items[{{ $i }}][menu_id]"    value="{{ $item['menu_id'] }}">
-        <input type="hidden" name="items[{{ $i }}][total_sold]" value="{{ $item['total_sold'] }}">
-    @endforeach
+
+    <div class="card mb-3">
+        <div class="card-body pb-2">
+            <div class="row g-2 small">
+                <div class="col-6">
+                    <span class="text-muted">Toko</span><br>
+                    <strong>{{ $preview['store_name'] }}</strong>
+                </div>
+                <div class="col-6">
+                    <span class="text-muted">Periode</span><br>
+                    <strong>{{ $preview['month_name'] }} {{ $preview['year'] }}</strong>
+                    <span class="badge bg-secondary ms-1">
+                        {{ $preview['period_type'] === 'mid_month' ? 'Tengah Bulan' : 'Akhir Bulan' }}
+                    </span>
+                </div>
+                {{-- Omset bisa dikoreksi sebelum disimpan --}}
+                <div class="col-12 mt-2">
+                    <label class="form-label text-muted small mb-1">Total Omset</label>
+                    <div class="input-group input-group-sm" style="max-width:260px">
+                        <span class="input-group-text">Rp</span>
+                        <input type="text" id="revenueDisplay" class="form-control text-end fw-semibold"
+                               value="{{ $preview['revenue'] > 0 ? number_format($preview['revenue'], 0, ',', '.') : '' }}"
+                               inputmode="numeric" placeholder="0">
+                        <input type="hidden" name="revenue" id="revenue" value="{{ $preview['revenue'] }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span class="fw-semibold small">Daftar Menu ({{ count($preview['items']) }} item)</span>
+            <span class="small text-muted">Qty boleh dikoreksi sebelum disimpan</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Kategori</th>
+                        <th>Menu</th>
+                        <th class="text-end" style="width:120px">Qty Terjual</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($preview['items'] as $i => $item)
+                    @php $ikutHitung = $item['count_in_total'] ?? true; @endphp
+                    <tr>
+                        <td class="text-muted small">{{ $item['category'] }}</td>
+                        <td>
+                            {{ $item['menu_name'] }}
+                            @unless($ikutHitung)
+                                <span class="badge bg-light text-secondary border ms-1"
+                                      style="font-size:.6rem;font-weight:500"
+                                      title="Tidak dihitung ke total menu terjual">tidak dihitung</span>
+                            @endunless
+                        </td>
+                        <td class="text-end">
+                            <input type="hidden" name="items[{{ $i }}][menu_id]" value="{{ $item['menu_id'] }}">
+                            <input type="text"
+                                   name="items[{{ $i }}][total_sold]"
+                                   class="form-control form-control-sm text-end qty-import"
+                                   value="{{ number_format($item['total_sold'], 0, ',', '.') }}"
+                                   inputmode="numeric"
+                                   @if(!$ikutHitung) data-skip-total="1" @endif>
+                        </td>
+                    </tr>
+                    @empty
+                    <tr><td colspan="3" class="text-center text-muted py-3">Tidak ada data menu dengan qty > 0</td></tr>
+                    @endforelse
+                </tbody>
+                <tfoot>
+                    <tr class="table-light fw-bold">
+                        <td colspan="2" class="text-end">TOTAL MENU TERJUAL</td>
+                        <td class="text-end" id="importTotal">—</td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
 
     <div class="d-flex gap-2">
         <a href="{{ route('sales.monthly.import.form') }}" class="btn btn-outline-secondary">
@@ -99,6 +122,46 @@
         </button>
     </div>
 </form>
+
+@push('scripts')
+<script>
+(function () {
+    // Format ribuan pakai TITIK (format Indonesia)
+    var fmt   = function (n) { return n ? Number(n).toLocaleString('id-ID') : ''; };
+    var angka = function (el) { return parseInt((el.value || '').replace(/[^0-9]/g, ''), 10) || 0; };
+
+    function hitungTotal() {
+        var total = 0;
+        document.querySelectorAll('.qty-import').forEach(function (el) {
+            if (el.dataset.skipTotal) return;   // add on & packaging cup tidak dihitung
+            total += angka(el);
+        });
+        document.getElementById('importTotal').textContent = total > 0 ? fmt(total) : '—';
+    }
+
+    // Rapikan tampilan angka sambil diketik (nilai dikirim tetap angka murni saat submit)
+    document.addEventListener('input', function (e) {
+        if (e.target.classList.contains('qty-import')) {
+            e.target.value = fmt(angka(e.target));
+            hitungTotal();
+        }
+        if (e.target.id === 'revenueDisplay') {
+            var v = angka(e.target);
+            e.target.value = fmt(v);
+            document.getElementById('revenue').value = v;
+        }
+    });
+
+    // Bersihkan titik sebelum dikirim supaya server menerima angka murni
+    document.querySelector('form[action*="import"]').addEventListener('submit', function () {
+        document.querySelectorAll('.qty-import').forEach(function (el) { el.value = angka(el); });
+        document.getElementById('revenue').value = angka(document.getElementById('revenueDisplay'));
+    });
+
+    hitungTotal();
+})();
+</script>
+@endpush
 
 @else
 {{-- ── UPLOAD FORM ── --}}
