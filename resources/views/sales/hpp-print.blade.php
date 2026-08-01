@@ -281,7 +281,7 @@
                     <td>{{ $c->ingredient->name }}</td>
                     <td class="r">{{ $n($c->terjual) }}</td>
                     <td class="r">{{ $n($c->terpakai) }}</td>
-                    <td class="r {{ $c->selisih > 0 ? 'neg' : ($c->selisih < 0 ? 'pos' : '') }}">
+                    <td class="r {{ $c->selisih > 0 ? 'pos' : ($c->selisih < 0 ? 'neg' : '') }}">
                         {{ $c->selisih > 0 ? '+' : '' }}{{ $n($c->selisih) }}
                     </td>
                     <td class="r">
@@ -289,7 +289,7 @@
                         @if($c->is_override)<br><span class="muted">koreksi (waste: {{ $n($c->rusak_waste) }})</span>@endif
                     </td>
                     <td class="r">{{ $n($c->overfill) }}</td>
-                    <td class="r {{ $c->unexplained > 0 ? 'neg' : '' }}">{{ $n($c->unexplained) }}</td>
+                    <td class="r {{ $c->unexplained > 0 ? 'pos' : ($c->unexplained < 0 ? 'neg' : '') }}">{{ $c->unexplained > 0 ? '+' : '' }}{{ $n($c->unexplained) }}</td>
                 </tr>
             @endforeach
         </tbody>

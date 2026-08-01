@@ -79,6 +79,20 @@
                                 <label class="form-check-label form-label mb-0" for="actIng" style="cursor: pointer;">Set
                                     Bahan Aktif</label>
                             </div>
+
+                            {{-- Bahan di luar resep (mis. Single/Double/Big Bag) selalu punya
+                                 HPP Ideal 0, jadi selisihnya semu. Saklar ini menyamakan
+                                 Ideal dengan Aktual supaya selisihnya nol. --}}
+                            <div class="form-check form-switch d-flex align-items-center gap-3 ps-0 mt-3">
+                                <input class="form-check-input m-0" type="checkbox" name="ideal_follows_actual" value="1" id="idealIkutAktual"
+                                    {{ old('ideal_follows_actual', $ingredient->ideal_follows_actual ?? false) ? 'checked' : '' }}>
+                                <label class="form-check-label form-label mb-0" for="idealIkutAktual" style="cursor: pointer;">
+                                    HPP Ideal ikut HPP Aktual
+                                </label>
+                            </div>
+                            <div class="form-text ms-0" style="margin-left:2.6rem">
+                                Untuk bahan yang tidak ada di resep menu - selisih HPP dibuat nol.
+                            </div>
                         </div>
                     </div>
                 </div>

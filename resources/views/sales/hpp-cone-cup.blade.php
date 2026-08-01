@@ -19,7 +19,7 @@
     $n = fn($v) => number_format($v, 0, ',', '.');
 @endphp
 
-<p class="text-muted mb-3 small">Cone &amp; Cup — Rekonsiliasi selisih pemakaian (Selisih = Rusak + Overfill + Tidak ada penjelasan)</p>
+<p class="text-muted mb-3 small">Cone &amp; Cup - Rekonsiliasi selisih pemakaian (Tidak ada penjelasan = Selisih + Rusak + Overfill)</p>
 
 {{-- Filter --}}
 <div class="card mb-3">
@@ -94,7 +94,8 @@
                             <td class="fw-semibold">{{ $r->ingredient->name }}</td>
                             <td class="text-end">{{ $n($r->terjual) }}</td>
                             <td class="text-end">{{ $n($r->terpakai) }}</td>
-                            <td class="text-end fw-semibold {{ $r->selisih > 0 ? 'text-danger' : ($r->selisih < 0 ? 'text-success' : '') }}">
+                            {{-- + hijau = hemat (terpakai < terjual), - merah = boros --}}
+                            <td class="text-end fw-semibold {{ $r->selisih > 0 ? 'text-success' : ($r->selisih < 0 ? 'text-danger' : '') }}">
                                 {{ $r->selisih > 0 ? '+' : '' }}{{ $n($r->selisih) }}
                             </td>
                             <td>
@@ -122,8 +123,8 @@
                                        value="{{ $r->overfill ? (int)$r->overfill : '' }}"
                                        class="form-control form-control-sm text-end" placeholder="0">
                             </td>
-                            <td class="text-end fw-semibold {{ $r->unexplained > 0 ? 'text-danger' : '' }}">
-                                {{ $n($r->unexplained) }}
+                            <td class="text-end fw-semibold {{ $r->unexplained > 0 ? 'text-success' : ($r->unexplained < 0 ? 'text-danger' : '') }}">
+                                {{ $r->unexplained > 0 ? '+' : '' }}{{ $n($r->unexplained) }}
                             </td>
                         </tr>
                         @endforeach
@@ -134,7 +135,7 @@
         <div class="card-footer d-flex justify-content-between align-items-center">
             <small class="text-muted">
                 <i class="bi bi-info-circle me-1"></i>
-                <strong>Tidak ada penjelasan</strong> = Selisih − Rusak − Overfill (yang benar-benar hilang/perlu ditelusuri).
+                <strong>Tidak ada penjelasan</strong> = Selisih + Rusak + Overfill - sisa yang belum tertutup catatan Rusak/Overfill (minus = perlu ditelusuri).
                 Isi Rusak / Overfill lalu klik Simpan untuk menghitung ulang.
                 <br>
                 Kolom <strong>Rusak</strong> otomatis dari catatan waste — boleh diketik ulang untuk koreksi

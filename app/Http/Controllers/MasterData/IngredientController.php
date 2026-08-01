@@ -54,6 +54,7 @@ class IngredientController extends Controller
             'unit_base' => 'required|in:gram,pcs',
         ]);
         $data['is_active'] = $request->has('is_active');
+        $data['ideal_follows_actual'] = $request->has('ideal_follows_actual');
         $data['category'] = $request->type === 'raw' ? $request->category : null;
 
         $ingredient = Ingredient::create($data);
@@ -118,6 +119,7 @@ class IngredientController extends Controller
             'unit_base' => 'required|in:gram,pcs',
         ]);
         $data['is_active'] = $request->has('is_active');
+        $data['ideal_follows_actual'] = $request->has('ideal_follows_actual');
         $data['category'] = $request->type === 'raw' ? $request->category : null;
         $ingredient->update($data);
 

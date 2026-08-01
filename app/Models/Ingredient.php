@@ -5,12 +5,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class Ingredient extends Model
 {
-    protected $fillable = ['name', 'type', 'category', 'unit_base', 'is_active'];
+    protected $fillable = ['name', 'type', 'category', 'unit_base', 'is_active', 'ideal_follows_actual'];
 
     const CATEGORIES = ['bubuk', 'teh', 'sirup', 'selai', 'solid', 'kemasan'];
     const CATEGORY_ORDER = ['solid', 'bubuk', 'teh', 'sirup', 'selai', 'kemasan'];
 
-    protected $casts = ['is_active' => 'boolean'];
+    protected $casts = ['is_active' => 'boolean', 'ideal_follows_actual' => 'boolean'];
 
     public function packagings()
     {

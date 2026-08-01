@@ -339,7 +339,20 @@ class HppController extends Controller
                 $hppAktual   = $openingVal + $purchaseVal - $salesOutVal - $closingVal;
             }
 
+            // Saklar per bahan (Master Data -> Bahan): "HPP Ideal ikut HPP Aktual".
+            // Dipakai untuk bahan di luar resep menu (mis. Single/Double/Big Bag) yang
+            // Ideal-nya selalu 0 sehingga memunculkan selisih semu.
+            $ikutAktual = $hasActual && ($agg['ingredient']->ideal_follows_actual ?? false);
+            $idealDelta = 0.0;
+            if ($ikutAktual) {
+                $idealBase  = $actualBase;
+                $idealDelta = $hppAktual - $hppIdeal;   // utk dijumlahkan ke total HPP Ideal
+                $hppIdeal   = $hppAktual;
+            }
+
             return (object)[
+                'ideal_ikut_aktual' => $ikutAktual,
+                'ideal_delta'       => $idealDelta,
                 'ingredient'   => $agg['ingredient'],
                 'dus_size'     => $dusSize,
                 'avg_price'    => $avgPrice,
@@ -365,7 +378,10 @@ class HppController extends Controller
         ])->values();
 
         // ── Summary ───────────────────────────────────────────────────────────
-        $totalHppIdeal  = $menuRows->sum('hpp_ideal');
+        // Bahan bersaklar "Ideal ikut Aktual" tidak ada di resep, jadi tidak terhitung
+        // lewat menuRows. Selisihnya ditambahkan supaya total Ideal di kartu ringkasan
+        // dan di tabel bahan tetap sama angkanya.
+        $totalHppIdeal  = $menuRows->sum('hpp_ideal') + $ingredientRows->sum('ideal_delta');
         $totalHppAktual = $ingredientRows->where('has_actual', true)->sum('hpp_aktual');
         $hasAktualAny   = $ingredientRows->where('has_actual', true)->isNotEmpty();
 
@@ -513,7 +529,8 @@ class HppController extends Controller
                     ? (float) $coneTerjualMap[$ing->id]
                     : ($h ? (float) $h->ideal_base : 0.0);
                 $terpakai = ($h && $h->actual_base !== null) ? (float) $h->actual_base : 0.0;
-                $selisih  = $terpakai - $terjual;                 // + = boros
+                // Tanda: + = HEMAT (terpakai lebih kecil dari terjual), - = BOROS.
+                $selisih  = $terjual - $terpakai;
 
                 // Rusak: pakai koreksi manual bila ada, selain itu ikut catatan waste.
                 $rusakWaste = (float) ($rusakMap[$ing->id] ?? 0);
@@ -530,7 +547,9 @@ class HppController extends Controller
                     'rusak_waste'  => $rusakWaste,   // angka asli dari catatan waste
                     'is_override'  => $isOverride,   // true = sudah dikoreksi manual
                     'overfill'     => $overfill,
-                    'unexplained'  => $selisih - $rusak - $overfill,
+                    // Rusak & Overfill menutup kekurangan, jadi ditambahkan.
+                    // Sisa 0 = selisih sudah terjelaskan sepenuhnya.
+                    'unexplained'  => $selisih + $rusak + $overfill,
                 ];
             });
         }

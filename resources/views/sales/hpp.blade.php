@@ -355,7 +355,14 @@
                                 $fmtDus = fn($v) => $v !== null ? number_format($v, 2, ',', '.') : '—';
                             @endphp
                             <tr>
-                                <td class="col-name fw-semibold">{{ $r->ingredient->name }}</td>
+                                <td class="col-name fw-semibold">
+                                    {{ $r->ingredient->name }}
+                                    @if($r->ideal_ikut_aktual ?? false)
+                                        {{-- Penanda halus: Ideal disamakan dgn Aktual (diatur di Master Data -> Bahan) --}}
+                                        <i class="bi bi-link-45deg ms-1" style="font-size:.8rem;color:#cbd5e1"
+                                           title="HPP Ideal mengikuti HPP Aktual - diatur di Master Data > Bahan"></i>
+                                    @endif
+                                </td>
 
                                 {{-- Ideal Dus --}}
                                 <td class="text-end">
