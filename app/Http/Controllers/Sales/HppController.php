@@ -749,16 +749,31 @@ class HppController extends Controller
 
         // Ingredient Rows
         $data[] = ['--- DETAIL PER BAHAN ---'];
-        $data[] = ['Bahan', 'Satuan', 'Harga Avg/Base', 'Pemakaian Ideal (base)', 'HPP Ideal', 'Pemakaian Aktual (base)', 'HPP Aktual', 'Selisih HPP'];
+        // Qty dilaporkan dalam DUS (sama seperti laporan cetak). Kolom satuan dasar
+        // tetap disertakan sebagai rincian. Angka dikirim sebagai bilangan - bukan
+        // teks berformat - supaya bisa langsung dijumlah/di-pivot di Excel.
+        $data[] = [
+            'Bahan', 'Satuan', 'Isi per Dus', 'Harga Avg/Base',
+            'Pemakaian Ideal (Dus)',  'Pemakaian Ideal (base)',
+            'HPP Ideal',
+            'Pemakaian Aktual (Dus)', 'Pemakaian Aktual (base)',
+            'HPP Aktual',
+            'Selisih (Dus)', 'Selisih HPP',
+        ];
+        $dus = fn($v) => $v === null ? '-' : round((float) $v, 2);
         foreach ($ingRows as $r) {
             $data[] = [
                 $r->ingredient->name,
                 $r->ingredient->unit_base,
+                $r->dus_size ?? '-',
                 $r->avg_price,
-                number_format($r->ideal_base, 3, ',', '.'),
+                $dus($r->ideal_dus),
+                round((float) $r->ideal_base, 3),
                 $r->hpp_ideal,
-                $r->actual_base !== null ? number_format($r->actual_base, 3, ',', '.') : '-',
+                $r->has_actual ? $dus($r->actual_dus) : '-',
+                $r->actual_base !== null ? round((float) $r->actual_base, 3) : '-',
                 $r->hpp_aktual ?? '-',
+                $r->has_actual ? $dus($r->selisih_dus) : '-',
                 $r->selisih_hpp ?? '-',
             ];
         }
