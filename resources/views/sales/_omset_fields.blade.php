@@ -38,7 +38,6 @@
                value="{{ $tiktok === null || $tiktok === '' ? '' : (int) round($tiktok) }}"
                inputmode="numeric" placeholder="0">
     </div>
-    <div class="form-text">Boleh minus, contoh: -250.000</div>
 </div>
 
 <div class="{{ $colClass }}">
