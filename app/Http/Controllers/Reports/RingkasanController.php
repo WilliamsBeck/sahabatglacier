@@ -26,22 +26,17 @@ class RingkasanController extends Controller
 
         $rows = $this->computeRows($stores, $month, $year, $periodType, $dateFrom, $dateTo);
 
-        // Trend 6 bulan (chart) — total omset & waste semua toko
+        // Trend 6 bulan (chart) - TOTAL OMSET semua toko.
+        // total_revenue sudah berisi hasil akhir: Omset Bruto + Selisih TikTok.
         $trendMonths = collect();
         for ($i = 5; $i >= 0; $i--) {
             $c = Carbon::create($year, $month, 1)->subMonths($i);
             $omset = MonthlyRevenue::whereIn('store_id', $storeIds)
                 ->where('month', $c->month)->where('year', $c->year)
                 ->where('period_type', $periodType)->sum('total_revenue');
-            $waste = WasteLogItem::whereHas('wasteLog', fn($q) =>
-                $q->whereIn('store_id', $storeIds)
-                  ->whereMonth('waste_date', $c->month)
-                  ->whereYear('waste_date', $c->year)
-            )->sum('subtotal_loss');
             $trendMonths->push((object)[
                 'label' => $c->isoFormat('MMM YY'),
                 'omset' => (float)$omset,
-                'waste' => (float)$waste,
             ]);
         }
 

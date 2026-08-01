@@ -214,7 +214,7 @@ $totalMargin     = $totalOmset > 0 ? (1 - $totalHppIdeal / $totalOmset) * 100 : 
 {{-- TREND CHART --}}
 <div class="card">
     <div class="card-header fw-semibold">
-        <i class="bi bi-graph-up me-1"></i>Tren 6 Bulan Terakhir — Omset & Waste (semua toko)
+        <i class="bi bi-graph-up me-1"></i>Tren 6 Bulan Terakhir - Total Omset (semua toko)
     </div>
     <div class="card-body">
         <canvas id="trendChart" style="max-height:280px"></canvas>
@@ -229,7 +229,6 @@ $totalMargin     = $totalOmset > 0 ? (1 - $totalHppIdeal / $totalOmset) * 100 : 
 @php
 $tLabels = $trendMonths->pluck('label')->values()->all();
 $tOmset  = $trendMonths->pluck('omset')->values()->all();
-$tWaste  = $trendMonths->pluck('waste')->values()->all();
 @endphp
 new Chart(document.getElementById('trendChart'), {
     type: 'bar',
@@ -237,16 +236,9 @@ new Chart(document.getElementById('trendChart'), {
         labels: @json($tLabels),
         datasets: [
             {
-                label: 'Omset',
+                label: 'Total Omset',
                 data: @json($tOmset),
                 backgroundColor: 'rgba(99,102,241,.7)',
-                borderRadius: 6,
-                yAxisID: 'y',
-            },
-            {
-                label: 'Total Waste',
-                data: @json($tWaste),
-                backgroundColor: 'rgba(239,68,68,.7)',
                 borderRadius: 6,
                 yAxisID: 'y',
             },
@@ -254,7 +246,7 @@ new Chart(document.getElementById('trendChart'), {
     },
     options: {
         responsive: true,
-        plugins: { legend: { position: 'top' } },
+        plugins: { legend: { display: false } },   // hanya satu deret, legenda tidak perlu
         scales: {
             y: {
                 beginAtZero: true,
