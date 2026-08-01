@@ -344,10 +344,12 @@ class MonthlySaleController extends Controller
                 'year' => $year, 'period_type' => $periodType,
             ])->pluck('total_sold', 'menu_id');
 
-        $existingRevenue = MonthlyRevenue::where([
+        $existingRev     = MonthlyRevenue::where([
                 'store_id' => $storeId, 'month' => $month,
                 'year' => $year, 'period_type' => $periodType,
-            ])->value('total_revenue') ?? 0;
+            ])->first();
+        $existingTiktok  = (float) ($existingRev->tiktok_diff ?? 0);
+        $existingRevenue = (float) ($existingRev->gross_revenue ?? 0);   // bruto
 
         $menus = Menu::where('menus.is_active', true)->with('menuCategory')->orderedByCategory()->get();
 
@@ -362,40 +364,43 @@ class MonthlySaleController extends Controller
         $ws->setCellValue('C1', $month);
         $ws->setCellValue('D1', $year);
         $ws->setCellValue('E1', $periodType);
-        $ws->setCellValue('F1', $existingRevenue);
-        $ws->getStyle('A1:F1')->applyFromArray([
+        $ws->setCellValue('F1', $existingRevenue);   // bruto
+        $ws->setCellValue('G1', $existingTiktok);    // selisih tiktok
+        $ws->getStyle('A1:G1')->applyFromArray([
             'font' => ['size' => 8, 'color' => ['rgb' => 'AAAAAA']],
         ]);
 
         // Baris 2: judul
-        $title = "TEMPLATE PENJUALAN — {$store->name} — {$monthNames[$month]} {$year} — {$periodLabel}";
+        $title = "TEMPLATE PENJUALAN - {$store->name} - {$monthNames[$month]} {$year} - {$periodLabel}";
         $ws->setCellValue('A2', $title);
         $ws->mergeCells('A2:E2');
         $ws->getStyle('A2')->getFont()->setBold(true)->setSize(12);
         $ws->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        // Baris 3: omset
-        $ws->setCellValue('A3', 'Total Omset Periode (Rp):');
+        // Baris 3: omset bruto — Baris 4: selisih TikTok (boleh minus)
+        $ws->setCellValue('A3', 'Omset Bruto (Rp):');
         $ws->setCellValue('B3', $existingRevenue ?: '');
-        $ws->getStyle('A3')->getFont()->setBold(true);
-        $ws->getStyle('B3')->applyFromArray([
+        $ws->setCellValue('A4', 'Selisih TikTok (Rp):');
+        $ws->setCellValue('B4', $existingTiktok ?: '');
+        $ws->getStyle('A3:A4')->getFont()->setBold(true);
+        $ws->getStyle('B3:B4')->applyFromArray([
             'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => 'FFFDE7']],
             'font' => ['bold' => true],
         ]);
 
-        // Baris 4: header kolom
-        $ws->setCellValue('A4', 'ID Menu (jgn ubah)');
-        $ws->setCellValue('B4', 'Nama Menu');
-        $ws->setCellValue('C4', 'Kategori');
-        $ws->setCellValue('D4', 'QTY TERJUAL (pcs) ✏');
-        $ws->getStyle('A4:D4')->applyFromArray([
+        // Baris 5: header kolom
+        $ws->setCellValue('A5', 'ID Menu (jgn ubah)');
+        $ws->setCellValue('B5', 'Nama Menu');
+        $ws->setCellValue('C5', 'Kategori');
+        $ws->setCellValue('D5', 'QTY TERJUAL (pcs)');
+        $ws->getStyle('A5:D5')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'color' => ['rgb' => '1e3a5f']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
 
-        // Baris 5+: menu
-        $rowNum = 5;
+        // Baris 6+: menu
+        $rowNum = 6;
         foreach ($menus as $menu) {
             $ws->setCellValueByColumnAndRow(1, $rowNum, $menu->id);
             $ws->setCellValueByColumnAndRow(2, $rowNum, $menu->name);
@@ -417,7 +422,7 @@ class MonthlySaleController extends Controller
         $ws->getColumnDimension('B')->setWidth(36);
         $ws->getColumnDimension('C')->setWidth(20);
         $ws->getColumnDimension('D')->setWidth(22);
-        $ws->freezePane('D5');
+        $ws->freezePane('D6');
 
         $filename = "template_penjualan_{$store->name}_{$year}-{$month}_{$periodType}.xlsx";
         $writer   = new XlsxWriter($ss);
@@ -457,11 +462,32 @@ class MonthlySaleController extends Controller
         $month      = (int)$ws->getCell('C1')->getValue();
         $year       = (int)$ws->getCell('D1')->getValue();
         $periodType = $ws->getCell('E1')->getValue();
-        $revenue    = (float)($ws->getCell('F1')->getValue() ?? 0);
+        $revenue    = (float)($ws->getCell('F1')->getValue() ?? 0);   // bruto (cadangan)
+        $tiktok     = (float)($ws->getCell('G1')->getValue() ?? 0);   // selisih (cadangan)
 
-        $revenueFromCell = $ws->getCell('B3')->getValue();
-        if (is_numeric($revenueFromCell) && (float)$revenueFromCell > 0) {
-            $revenue = (float)$revenueFromCell;
+        // Template lama: baris 3 omset, header di baris 4, menu mulai baris 5.
+        // Template baru: baris 3 bruto, baris 4 selisih TikTok, header baris 5, menu baris 6.
+        // Header dicari lewat labelnya supaya template lama yang sudah terlanjur
+        // di-download tetap bisa diimpor tanpa perlu download ulang.
+        $headerRow = 4;
+        for ($r = 3; $r <= 8; $r++) {
+            if (str_starts_with(trim((string) $ws->getCell("A{$r}")->getValue()), 'ID Menu')) {
+                $headerRow = $r;
+                break;
+            }
+        }
+
+        // Baca label omset di baris-baris sebelum header (posisinya beda antar versi)
+        for ($r = 3; $r < $headerRow; $r++) {
+            $label = strtolower(trim((string) $ws->getCell("A{$r}")->getValue()));
+            $nilai = $ws->getCell("B{$r}")->getValue();
+            if (!is_numeric($nilai)) continue;
+
+            if (str_contains($label, 'tiktok')) {
+                $tiktok = (float) $nilai;
+            } elseif ((float) $nilai > 0) {
+                $revenue = (float) $nilai;   // "Omset Bruto" / "Total Omset Periode" (template lama)
+            }
         }
 
         // Validasi metadata
@@ -480,11 +506,11 @@ class MonthlySaleController extends Controller
             return back()->withErrors(['file' => MonthLockService::lockMessage($month, $year)]);
         }
 
-        // ── Baca baris menu (mulai baris 5) ─────────────────────────────────
+        // ── Baca baris menu (tepat setelah baris header) ────────────────────
         $errors  = [];
         $items   = [];
         $menuMap = Menu::where('is_active', true)->with('menuCategory')->get()->keyBy('id');
-        $rowNum  = 5;
+        $rowNum  = $headerRow + 1;
         $maxRow  = $ws->getHighestDataRow();
 
         while ($rowNum <= $maxRow) {
@@ -533,7 +559,8 @@ class MonthlySaleController extends Controller
             'month_name'  => $monthNames[$month],
             'year'        => $year,
             'period_type' => $periodType,
-            'revenue'     => $revenue,
+            'revenue'     => $revenue,   // bruto
+            'tiktok_diff' => $tiktok,
             'items'       => $items,
         ];
 

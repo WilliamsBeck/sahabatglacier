@@ -51,7 +51,7 @@
                 @include('sales._omset_fields', [
                     'colClass' => 'col-md-4 mt-2',
                     'gross'    => $preview['revenue'] > 0 ? $preview['revenue'] : null,
-                    'tiktok'   => null,
+                    'tiktok'   => ($preview['tiktok_diff'] ?? 0) != 0 ? $preview['tiktok_diff'] : null,
                 ])
             </div>
         </div>
