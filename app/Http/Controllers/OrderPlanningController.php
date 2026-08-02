@@ -216,13 +216,19 @@ class OrderPlanningController extends Controller
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
 
-        // Semua bahan AKTIF ikut ditampilkan, bukan hanya yang terpakai di bulan
-        // referensi. Bahan tanpa konsumsi tetap muncul (konsumsi 0) supaya stok &
-        // kebutuhannya tetap terlihat dan bisa diorder manual bila perlu.
+        // Semua bahan AKTIF yang dipasok SUPPLIER PUSAT ikut ditampilkan - bukan
+        // hanya yang terpakai di bulan referensi. Bahan tanpa konsumsi tetap muncul
+        // (konsumsi 0) supaya stoknya terlihat & bisa diorder manual bila perlu.
+        // Bahan yang hanya dipasok supplier lokal tidak diorder ke pusat, jadi
+        // tidak ditampilkan di sini.
+        $pusatAktif = fn($q) => $q->where('is_active', true)
+            ->whereHas('supplier', fn($s) => $s->where('type', 'zhisheng'));
+
         $catSort     = IngredientCategory::pluck('sort_order', 'name')->toArray();
-        $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
+        $ingredients = Ingredient::with(['packagings' => fn($q) => $pusatAktif($q)->orderBy('id')->with('supplier')])
             ->where('is_active', true)
             ->where('type', '!=', 'semi_finished')
+            ->whereHas('packagings', $pusatAktif)
             ->get()
             ->sort(function ($a, $b) use ($catSort) {
                 $ai = $catSort[$a->category] ?? 9999;
@@ -234,6 +240,8 @@ class OrderPlanningController extends Controller
         $tableData = [];
 
         foreach ($ingredients as $ing) {
+            // Kemasan yang dipakai = kemasan dari supplier pusat (relasi sudah difilter),
+            // supaya ukuran dus & konversinya sesuai barang yang benar-benar diorder.
             $pkg = $ing->packagings->first();
             if (!$pkg || $pkg->crate_to_pack <= 0 || $pkg->pack_to_base <= 0) continue;
 
