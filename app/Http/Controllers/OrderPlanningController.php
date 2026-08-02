@@ -216,42 +216,12 @@ class OrderPlanningController extends Controller
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
 
-        // Konsumsi per ingredient. Kemasan pertama (id terkecil) agar konsisten dgn tabel.
-        $allIngIds = $openingMap->keys()->merge($closingMap->keys())
-            ->merge($purchaseMap->keys())->unique();
-        $pkgMap = IngredientPackaging::whereIn('ingredient_id', $allIngIds)
-            ->where('is_active', true)
-            ->orderBy('id')
-            ->get()->groupBy('ingredient_id')->map(fn($g) => $g->first());
-
-        foreach ($allIngIds as $ingId) {
-            $pkg = $pkgMap[$ingId] ?? null;
-            if (!$pkg || $pkg->pack_to_base <= 0) continue;
-
-            // Identik dengan HPP Aktual: SO Awal + masuk − transfer keluar − SO Akhir
-            $consumBase = ($openingMap[$ingId] ?? 0.0) + ($purchaseMap[$ingId] ?? 0.0)
-                        - ($salesOutMap[$ingId] ?? 0.0) - ($closingMap[$ingId] ?? 0.0);
-            if ($consumBase <= 0) continue;
-
-            $usageSums->put($ingId, (object)[
-                'ingredient_id' => $ingId,
-                'total_pack'    => $consumBase / $pkg->pack_to_base,
-                'active_days'   => $daysInRef, // konsumsi sebulan → dibagi rata
-            ]);
-        }
-
-        if ($usageSums->isEmpty()) {
-            return compact('store', 'orderDate', 'deliveryDate', 'coverageEnd', 'daysToCover',
-                'leadTimeDays', 'refMonth', 'refYear', 'daysInRef', 'bufferPct',
-                'stockSource', 'selectedOpname', 'usageSource')
-                + ['tableData' => [],
-                   'message' => 'Tidak ada konsumsi tercatat di bulan referensi (HPP Aktual = 0 untuk semua bahan).'];
-        }
-
-        // Urutan sama dengan SO / pencatatan harian: kategori sort_order → ingredient id
+        // Semua bahan AKTIF ikut ditampilkan, bukan hanya yang terpakai di bulan
+        // referensi. Bahan tanpa konsumsi tetap muncul (konsumsi 0) supaya stok &
+        // kebutuhannya tetap terlihat dan bisa diorder manual bila perlu.
         $catSort     = IngredientCategory::pluck('sort_order', 'name')->toArray();
         $ingredients = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
-            ->whereIn('id', $usageSums->keys())
+            ->where('is_active', true)
             ->where('type', '!=', 'semi_finished')
             ->get()
             ->sort(function ($a, $b) use ($catSort) {
@@ -264,9 +234,22 @@ class OrderPlanningController extends Controller
         $tableData = [];
 
         foreach ($ingredients as $ing) {
-            $usage = $usageSums[$ing->id];
-            $pkg   = $ing->packagings->first();
+            $pkg = $ing->packagings->first();
             if (!$pkg || $pkg->crate_to_pack <= 0 || $pkg->pack_to_base <= 0) continue;
+
+            // Konsumsi acuan, identik dengan HPP Aktual:
+            //   SO Awal + barang masuk - transfer keluar - SO Akhir
+            // Hasil minus (stok justru bertambah) dianggap 0, bukan dibuang.
+            $consumBase = ($openingMap[$ing->id]  ?? 0.0) + ($purchaseMap[$ing->id] ?? 0.0)
+                        - ($salesOutMap[$ing->id] ?? 0.0) - ($closingMap[$ing->id]  ?? 0.0);
+            $totalPack  = max(0.0, $consumBase) / $pkg->pack_to_base;
+
+            $usage = (object)[
+                'ingredient_id' => $ing->id,
+                'total_pack'    => $totalPack,
+                'active_days'   => $daysInRef,   // konsumsi sebulan -> dibagi rata
+            ];
+            $usageSums->put($ing->id, $usage);
 
             $crateToBase  = $pkg->crate_to_pack * $pkg->pack_to_base;
             $avgDailyPack = $usage->total_pack / $daysInRef;
