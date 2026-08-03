@@ -143,12 +143,13 @@ class OpnameController extends Controller
                 // Harga manual (per dus) → per base. Hanya tersimpan kalau user mengisi
                 // (yaitu saat bahan belum punya harga dari data sebelumnya).
                 $pricePerBase = null;
-                if (isset($data['price_per_dus']) && $data['price_per_dus'] !== '' && (float)$data['price_per_dus'] > 0) {
+                $hargaDusInput = $this->rupiah($data['price_per_dus'] ?? null);
+                if ($hargaDusInput !== null && $hargaDusInput > 0) {
                     $crateToBase = $packagingObj
                         ? (float)$packagingObj->crate_to_pack * (float)$packagingObj->pack_to_base : 0;
                     $pricePerBase = $crateToBase > 0
-                        ? (float)$data['price_per_dus'] / $crateToBase
-                        : (float)$data['price_per_dus'];
+                        ? $hargaDusInput / $crateToBase
+                        : $hargaDusInput;
                 }
 
                 OpnameItem::create([
@@ -280,6 +281,12 @@ class OpnameController extends Controller
         // Tandai bahan yang punya > 1 kemasan supaya JS bisa tampilkan sub-label
         $pkgCountByIng = $allPackagings->groupBy('ingredient_id')->map->count();
 
+        // Harga cadangan untuk bahan yang stoknya habis (tidak ada batch tersisa),
+        // supaya kolom harga di halaman input tidak kosong dan harus diketik manual.
+        $idsSemua = $allPackagings->pluck('ingredient_id')
+            ->merge($ingNoPkg->pluck('id'))->unique()->values()->all();
+        $cadangan = $this->hargaCadangan($storeId, $idsSemua);
+
         $result = [];
 
         // Satu entry per kemasan
@@ -290,7 +297,8 @@ class OpnameController extends Controller
             $group     = $batchesByPkg[$pkg->id] ?? collect();
             $totalQty  = $group->sum('remaining_qty');
             $totalVal  = $group->sum(fn($b) => $b->remaining_qty * $b->price_per_base);
-            $priceBase = $totalQty > 0 ? round($totalVal / $totalQty, 6) : 0;
+            $priceBase = $totalQty > 0 ? round($totalVal / $totalQty, 6)
+                                       : round((float)($cadangan[$ing->id] ?? 0), 6);
             $ctrPack   = (int)$pkg->crate_to_pack;
             $packBase  = (float)$pkg->pack_to_base;
             $priceDus  = ($ctrPack && $packBase) ? (int)round($priceBase * $ctrPack * $packBase) : 0;
@@ -322,7 +330,8 @@ class OpnameController extends Controller
             $group     = $batchesByIng[$ing->id] ?? collect();
             $totalQty  = $group->sum('remaining_qty');
             $totalVal  = $group->sum(fn($b) => $b->remaining_qty * $b->price_per_base);
-            $priceBase = $totalQty > 0 ? round($totalVal / $totalQty, 6) : 0;
+            $priceBase = $totalQty > 0 ? round($totalVal / $totalQty, 6)
+                                       : round((float)($cadangan[$ing->id] ?? 0), 6);
 
             $result[] = [
                 'row_key'        => 'ing_' . $ing->id,
@@ -378,6 +387,60 @@ class OpnameController extends Controller
 
     // Harga untuk tampilan: opname approved → pakai harga beku (price_per_base item);
     // draft → harga rata-rata sisa batch terkini (live).
+    /**
+     * Harga cadangan saat stok habis (tidak ada batch FIFO tersisa), berurutan:
+     *   1) harga pembelian TERAKHIR di toko ini
+     *   2) harga dari opname sebelumnya yang sudah approved
+     * Tanpa ini kolom harga tampil kosong dan harus diketik manual tiap kali.
+     */
+    private function hargaCadangan(int $storeId, array $ingIds, ?int $kecualiOpnameId = null): array
+    {
+        if (empty($ingIds)) return [];
+
+        $beliTerakhir = MutationItem::query()
+            ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
+            ->where('mutations.destination_store_id', $storeId)
+            ->where('mutations.status', 'confirmed')
+            ->whereIn('mutations.type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal'])
+            ->whereIn('mutation_items.ingredient_id', $ingIds)
+            ->where('mutation_items.price_per_base', '>', 0)
+            ->orderByDesc(\DB::raw('COALESCE(mutations.delivery_date, mutations.transaction_date)'))
+            ->orderByDesc('mutation_items.id')
+            ->get(['mutation_items.ingredient_id', 'mutation_items.price_per_base'])
+            ->groupBy('ingredient_id')->map(fn($g) => (float) $g->first()->price_per_base);
+
+        $opnameLalu = OpnameItem::query()
+            ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
+            ->where('opnames.store_id', $storeId)
+            ->where('opnames.status', 'approved')
+            ->when($kecualiOpnameId, fn($q) => $q->where('opnames.id', '!=', $kecualiOpnameId))
+            ->whereIn('opname_items.ingredient_id', $ingIds)
+            ->where('opname_items.price_per_base', '>', 0)
+            ->orderByDesc('opnames.opname_date')
+            ->orderByDesc('opnames.id')
+            ->get(['opname_items.ingredient_id', 'opname_items.price_per_base'])
+            ->groupBy('ingredient_id')->map(fn($g) => (float) $g->first()->price_per_base);
+
+        $map = [];
+        foreach ($ingIds as $id) {
+            $map[$id] = (float) ($beliTerakhir[$id] ?? $opnameLalu[$id] ?? 0);
+        }
+        return $map;
+    }
+
+    /**
+     * Baca angka rupiah dari input. Titik = pemisah ribuan, koma = desimal.
+     * JS di halaman sudah melucuti titik sebelum submit, tapi kalau JS gagal
+     * jalan, "750.000" akan terbaca PHP sebagai 750 - harga jadi salah total.
+     * Karena itu dibersihkan lagi di sini.
+     */
+    private function rupiah($v): ?float
+    {
+        if ($v === null || $v === '' || !is_scalar($v)) return null;
+        $bersih = str_replace(',', '.', str_replace('.', '', trim((string) $v)));
+        return is_numeric($bersih) ? (float) $bersih : null;
+    }
+
     private function displayPriceMap(Opname $opname): array
     {
         if ($opname->status === 'approved') {
@@ -485,12 +548,21 @@ class OpnameController extends Controller
             ->groupBy('ingredient_id');
 
         $map = [];
+        $perluCadangan = [];
         foreach ($ingIds as $id) {
             $group    = $batches[$id] ?? collect();
             $totalQty = $group->sum('remaining_qty');
             $totalVal = $group->sum(fn($b) => $b->remaining_qty * $b->price_per_base);
             $map[$id] = $totalQty > 0 ? $totalVal / $totalQty : 0;
+            if ($map[$id] <= 0) $perluCadangan[] = $id;
         }
+
+        // Stok habis (0 dus 0 pack) -> tidak ada batch tersisa sehingga harga
+        // rata-rata jadi 0 dan kolom harga tampil kosong. Isi dengan cadangan.
+        if ($perluCadangan) {
+            $map = array_replace($map, $this->hargaCadangan($opname->store_id, $perluCadangan, $opname->id));
+        }
+
         return $map;
     }
 
@@ -545,12 +617,13 @@ class OpnameController extends Controller
 
                 // Simpan harga/dus → price_per_base. Angka apa pun DIISI (termasuk 0 = gratis
                 // yang disengaja). Field DIKOSONGKAN → biarkan NULL (nanti pakai saran harga).
-                if (isset($data['price_per_dus']) && $data['price_per_dus'] !== '' && is_numeric($data['price_per_dus'])) {
+                $hargaDus = $this->rupiah($data['price_per_dus'] ?? null);
+                if ($hargaDus !== null) {
                     $pkg         = $item->packaging;
                     $crateToBase = $pkg ? (float)$pkg->crate_to_pack * (float)$pkg->pack_to_base : 0;
                     $updateData['price_per_base'] = $crateToBase > 0
-                        ? (float)$data['price_per_dus'] / $crateToBase
-                        : (float)$data['price_per_dus'];
+                        ? $hargaDus / $crateToBase
+                        : $hargaDus;
                 }
 
                 $item->update($updateData);
