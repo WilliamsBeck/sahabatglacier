@@ -182,6 +182,14 @@ class DailyLedgerController extends Controller
         }
 
         // ── Collect all ingredient IDs ─────────────────────────────
+        // SEMUA bahan aktif ikut ditampilkan (sama seperti Saldo Stok), bukan hanya
+        // yang punya transaksi di bulan ini. Tanpa ini, bahan yang kebetulan tidak
+        // ada aktivitas apa pun bulan tersebut hilang total dari daftar, padahal
+        // stoknya sendiri masih ada di Saldo Stok.
+        $activeIngIds = Ingredient::where('is_active', true)
+            ->where('type', '!=', 'semi_finished')
+            ->pluck('id');
+
         $ingIds = collect(array_keys($opnameOpeningMap))   // dari opname bulan lalu
             ->merge(array_keys($carryOverMap))             // dari saldo akhir bulan lalu
             ->merge($openingItems->pluck('ingredient_id')) // dari opening_stock mutation
@@ -189,6 +197,7 @@ class DailyLedgerController extends Controller
             ->merge($saleItems->pluck('ingredient_id'))
             ->merge($wasteItems->pluck('ingredient_id'))   // dari waste
             ->merge(collect($usageMap)->keys())
+            ->merge($activeIngIds)                         // semua bahan aktif
             ->unique()->values();
 
         if ($ingIds->isEmpty()) {
