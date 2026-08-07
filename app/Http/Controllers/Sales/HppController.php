@@ -470,8 +470,12 @@ class HppController extends Controller
     /** Baris rekonsiliasi Cone & Cup — dipakai halaman Cone & Cup dan laporan cetak. */
     private function buildConeCupRows(int $storeId, int $month, int $year)
     {
-        $coneCup = \App\Models\Ingredient::where('category', 'cup')
-            ->orWhere('name', 'like', '%cone%')
+        // Bahan setengah jadi (mis. "Remahan Cone", dibuat dari cone) SENGAJA
+        // dikecualikan — namanya kebetulan mengandung kata "cone", tapi ini bukan
+        // bahan baku yang dipakai langsung di resep menu, jadi tidak relevan
+        // untuk rekonsiliasi terjual vs terpakai di sini.
+        $coneCup = \App\Models\Ingredient::where('type', '!=', 'semi_finished')
+            ->where(fn($q) => $q->where('category', 'cup')->orWhere('name', 'like', '%cone%'))
             ->orderByRaw("category = 'cup' DESC")   // cup dulu, lalu cone
             ->orderBy('id')->get(['id', 'name', 'category']);
 
