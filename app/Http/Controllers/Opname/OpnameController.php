@@ -404,6 +404,7 @@ class OpnameController extends Controller
             ->whereIn('mutations.type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal'])
             ->whereIn('mutation_items.ingredient_id', $ingIds)
             ->where('mutation_items.price_per_base', '>', 0)
+            ->where('mutation_items.total_in_base', '>', 0)   // jaga-jaga: abaikan batch qty 0
             ->orderByDesc(\DB::raw('COALESCE(mutations.delivery_date, mutations.transaction_date)'))
             ->orderByDesc('mutation_items.id')
             ->get(['mutation_items.ingredient_id', 'mutation_items.price_per_base'])
@@ -416,6 +417,11 @@ class OpnameController extends Controller
             ->when($kecualiOpnameId, fn($q) => $q->where('opnames.id', '!=', $kecualiOpnameId))
             ->whereIn('opname_items.ingredient_id', $ingIds)
             ->where('opname_items.price_per_base', '>', 0)
+            // Harga hanya dianggap referensi kalau stok fisiknya BENAR-BENAR ada saat itu.
+            // Tanpa ini: harga yang diketik untuk item 0 dus (tak pernah jadi batch nyata)
+            // ikut jadi "harga terakhir" dan menimpa harga Rp 0 yang justru sudah benar
+            // (mis. barang gratis/donasi yang datang belakangan).
+            ->where('opname_items.physical_qty', '>', 0)
             ->orderByDesc('opnames.opname_date')
             ->orderByDesc('opnames.id')
             ->get(['opname_items.ingredient_id', 'opname_items.price_per_base'])
@@ -554,7 +560,11 @@ class OpnameController extends Controller
             $totalQty = $group->sum('remaining_qty');
             $totalVal = $group->sum(fn($b) => $b->remaining_qty * $b->price_per_base);
             $map[$id] = $totalQty > 0 ? $totalVal / $totalQty : 0;
-            if ($map[$id] <= 0) $perluCadangan[] = $id;
+            // Cadangan HANYA saat stok BENAR-BENAR tidak ada (totalQty 0), bukan saat
+            // stok memang ada tapi harganya kebetulan 0 (mis. barang gratis/donasi).
+            // Sebelumnya dicek dari $map[$id] <= 0, jadi stok nyata ber-harga Rp 0
+            // ikut ditimpa cadangan (harga lama) — padahal Rp 0 itu SUDAH BENAR.
+            if ($totalQty <= 0) $perluCadangan[] = $id;
         }
 
         // Stok habis (0 dus 0 pack) -> tidak ada batch tersisa sehingga harga
