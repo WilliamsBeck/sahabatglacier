@@ -53,6 +53,29 @@ class StockController extends Controller
             ->get(['id', 'ingredient_id', 'packaging_id', 'price_per_base', 'remaining_qty'])
             ->groupBy('ingredient_id');
 
+        // ── Harga beli TERAKHIR (per kemasan, fallback per bahan) ───────────────
+        // Dipakai HANYA untuk menilai baris yang saldonya MINUS (konsumsi tercatat
+        // melebihi pembelian tercatat) — batch FIFO-nya sendiri sudah habis ke 0,
+        // jadi tidak ada apa pun tersisa untuk dirata-rata. Tanpa ini, baris minus
+        // tampil dengan Nilai Rp = 0, padahal kekurangannya tetap punya nilai uang.
+        // Nilainya adalah ESTIMASI (harga terakhir), bukan harga pasti transaksi asli.
+        $lastPriceRows = MutationItem::query()
+            ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
+            ->where('mutations.destination_store_id', $selectedId)
+            ->where('mutations.status', 'confirmed')
+            ->whereIn('mutations.type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal'])
+            ->where('mutation_items.price_per_base', '>', 0)
+            ->orderByRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) DESC')
+            ->orderByDesc('mutation_items.id')
+            ->get(['mutation_items.ingredient_id', 'mutation_items.packaging_id', 'mutation_items.price_per_base']);
+
+        $lastPricePerPkg = $lastPriceRows->whereNotNull('packaging_id')
+            ->groupBy(fn($r) => $r->ingredient_id . '-' . $r->packaging_id)
+            ->map(fn($g) => (float) $g->first()->price_per_base);
+        $lastPricePerIng = $lastPriceRows
+            ->groupBy('ingredient_id')
+            ->map(fn($g) => (float) $g->first()->price_per_base);
+
         // ── Eceran (pcs/gr) dari opname approved TERAKHIR — untuk DIABAIKAN di Saldo Stok ──
         // Saldo Stok hanya memantau Dus+Pack UTUH; eceran (pack terbuka) tidak dihitung.
         // INI DISPLAY-ONLY: saldo FIFO & HPP TIDAK diubah (HPP tetap hitung eceran). Mengubah
@@ -182,7 +205,7 @@ class StockController extends Controller
 
         $rows = collect();
 
-        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays) use ($receivedMap, $demandMap, $looseMap, $onOrderMap) {
+        $buildRow = function ($ing, $pkg, $pkgBatches, $usageRow, $parLevelDays, $leadTimeDays, $orderCycleDays, $dosWindowDays, $safetyStockDays) use ($receivedMap, $demandMap, $looseMap, $onOrderMap, $lastPricePerPkg, $lastPricePerIng) {
             $ptb         = $pkg && $pkg->pack_to_base > 0 ? (float)$pkg->pack_to_base : 0;
             $crateToBase = $pkg ? $pkg->crate_to_pack * $ptb : 0;
 
@@ -214,6 +237,14 @@ class StockController extends Controller
             // Saldo bertanda: kalau dipakai melebihi stok → MINUS; selain itu pack utuh (segel).
             $signed    = ($receivedMap[$k] ?? 0) - ($demandMap[$k] ?? 0);
             $pkgBalance = $signed < -0.001 ? $signed : $wholeBase;
+            $isNegativeStock = $pkgBalance < -0.001;
+
+            // Saldo minus → tidak ada batch FIFO tersisa (selalu habis ke 0), jadi
+            // pkgAvgPrice di atas otomatis 0. Isi dengan harga beli TERAKHIR (opsi
+            // yang dipilih user) supaya nilai kekurangannya tidak tampil Rp 0.
+            if ($isNegativeStock && $pkgAvgPrice <= 0) {
+                $pkgAvgPrice = (float) ($lastPricePerPkg[$k] ?? $lastPricePerIng[$ing->id] ?? 0);
+            }
 
             // Pecah ke Dus/Pack — tangani negatif (hitung pada nilai mutlak, beri tanda)
             $neg = $pkgBalance < 0; $absBal = abs($pkgBalance);
@@ -301,6 +332,7 @@ class StockController extends Controller
                 'ptb'             => $ptb,
                 'crateToBase'     => $crateToBase,
                 'balance'         => $pkgBalance,
+                'isNegative'      => $isNegativeStock,
                 'dus'             => $dus,
                 'pack'            => $pack,
                 'baseRem'         => round($baseRem, 2),

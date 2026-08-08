@@ -206,18 +206,20 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                         if ($itPack) $itParts[] = $itPack.' Pack';
                         $itLabel = $itParts ? implode(' ', $itParts) : 'ada';
 
-                        // Harga rata-rata (weighted by balance)
-                        $avgPriceBase = $totalBalance > 0
-                            ? $ingRows->sum(fn($r) => $r->balance * $r->avgPrice) / $totalBalance
+                        // Harga rata-rata (weighted by balance). != 0 (bukan > 0) supaya
+                        // bahan yang saldonya MINUS juga dapat harga acuan, bukan "-".
+                        $avgPriceBase = $totalBalance != 0
+                            ? abs($ingRows->sum(fn($r) => $r->balance * $r->avgPrice) / $totalBalance)
                             : 0;
                         $avgPerDus  = $primaryRow->crateToBase > 0 ? $avgPriceBase * $primaryRow->crateToBase : 0;
                         $avgPerPack = $primaryRow->ptb > 0 ? $avgPriceBase * $primaryRow->ptb : 0;
 
-                        $hasMultiPkg = $ingRows->count() > 1;
-                        $trClass     = match($primaryRow->dosStatus) {
+                        $isIngNegative = $totalBalance < -0.001;
+                        $hasMultiPkg   = $ingRows->count() > 1;
+                        $trClass       = match($primaryRow->dosStatus) {
                             'critical' => 'table-danger',
                             'warning'  => 'table-warning',
-                            default    => ($totalBalance <= 0 ? 'stock-empty' : ''),
+                            default    => $isIngNegative ? 'stock-negative' : ($totalBalance <= 0 ? 'stock-empty' : ''),
                         };
                     @endphp
 
@@ -243,8 +245,8 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
 
                         {{-- Total Dus --}}
                         <td class="text-end">
-                            @if($totalDus > 0)
-                                <span class="fw-semibold stock-qty">{{ $totalDus }}</span>
+                            @if($totalDus != 0)
+                                <span class="fw-semibold stock-qty {{ $totalDus < 0 ? 'text-danger' : '' }}">{{ $totalDus }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
@@ -252,8 +254,8 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
 
                         {{-- Total Pack --}}
                         <td class="text-end">
-                            @if($totalPack > 0)
-                                <span class="fw-semibold stock-qty">{{ $totalPack }}</span>
+                            @if($totalPack != 0)
+                                <span class="fw-semibold stock-qty {{ $totalPack < 0 ? 'text-danger' : '' }}">{{ $totalPack }}</span>
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
@@ -268,8 +270,15 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
 
                         {{-- Total Subtotal --}}
                         <td class="text-end fw-semibold">
-                            @if($totalSubtotal > 0)
-                                Rp {{ number_format($totalSubtotal, 0, ',', '.') }}
+                            @if($totalSubtotal != 0)
+                                <span class="{{ $totalSubtotal < 0 ? 'text-danger' : '' }}">
+                                    {{ $totalSubtotal < 0 ? '-' : '' }}Rp {{ number_format(abs($totalSubtotal), 0, ',', '.') }}
+                                </span>
+                                @if($isIngNegative)
+                                    <div class="text-danger" style="font-size:.6rem;font-weight:400" title="Konsumsi tercatat melebihi pembelian tercatat. Nilai dihitung dari harga beli terakhir (estimasi), bukan batch FIFO nyata.">
+                                        <i class="bi bi-exclamation-triangle-fill"></i> estimasi kekurangan
+                                    </div>
+                                @endif
                             @else <span class="text-muted">–</span> @endif
                         </td>
 
@@ -331,15 +340,15 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                                 @endif
                             </td>
                             <td class="text-end">
-                                @if($row->dus > 0)
-                                    <span>{{ $row->dus }}</span>
+                                @if($row->dus != 0)
+                                    <span class="{{ $row->dus < 0 ? 'text-danger' : '' }}">{{ $row->dus }}</span>
                                 @else
                                     <span class="text-muted opacity-50 small">-</span>
                                 @endif
                             </td>
                             <td class="text-end">
-                                @if($row->pack > 0)
-                                    <span>{{ $row->pack }}</span>
+                                @if($row->pack != 0)
+                                    <span class="{{ $row->pack < 0 ? 'text-danger' : '' }}">{{ $row->pack }}</span>
                                 @else
                                     <span class="text-muted opacity-50 small">-</span>
                                 @endif
@@ -361,12 +370,18 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                                              title="{{ $tipLines }}">
                                             <i class="bi bi-info-circle"></i> Ø {{ $row->priceLayers->count() }} batch
                                         </div>
+                                    @elseif($row->isNegative)
+                                        <div class="text-muted" style="font-size:.6rem" title="Harga beli terakhir bahan ini — dipakai krn tidak ada batch tersisa (saldo minus).">
+                                            <i class="bi bi-info-circle"></i> harga terakhir
+                                        </div>
                                     @endif
                                 @else <span class="text-muted">–</span> @endif
                             </td>
                             <td class="text-end">
-                                @if($row->subtotal > 0)
-                                    Rp {{ number_format($row->subtotal, 0, ',', '.') }}
+                                @if($row->subtotal != 0)
+                                    <span class="{{ $row->subtotal < 0 ? 'text-danger' : '' }}">
+                                        {{ $row->subtotal < 0 ? '-' : '' }}Rp {{ number_format(abs($row->subtotal), 0, ',', '.') }}
+                                    </span>
                                 @else <span class="text-muted">–</span> @endif
                             </td>
                             {{-- DOS baris detail: dibuat kalem (bukan badge hitam pekat) supaya
@@ -385,20 +400,24 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                 @endforeach
 
                 {{-- Category subtotal --}}
-                @if($catTotal > 0)
+                @if($catTotal != 0)
                 <tr class="subtotal-row small fw-semibold">
                     <td colspan="4" class="text-end text-muted">Total {{ $label }}</td>
-                    <td class="text-end">Rp {{ number_format($catTotal, 0, ',', '.') }}</td>
+                    <td class="text-end {{ $catTotal < 0 ? 'text-danger' : '' }}">
+                        {{ $catTotal < 0 ? '-' : '' }}Rp {{ number_format(abs($catTotal), 0, ',', '.') }}
+                    </td>
                     <td colspan="2"></td>
                 </tr>
                 @endif
                 @endforeach
                 </tbody>
-                @if($grandTotal > 0)
+                @if($grandTotal != 0)
                 <tfoot>
                     <tr class="table-dark fw-bold">
                         <td colspan="4" class="text-end">TOTAL KESELURUHAN</td>
-                        <td class="text-end">Rp {{ number_format($grandTotal, 0, ',', '.') }}</td>
+                        <td class="text-end {{ $grandTotal < 0 ? 'text-danger' : '' }}">
+                            {{ $grandTotal < 0 ? '-' : '' }}Rp {{ number_format(abs($grandTotal), 0, ',', '.') }}
+                        </td>
                         <td colspan="2"></td>
                     </tr>
                 </tfoot>
@@ -573,6 +592,9 @@ document.addEventListener('DOMContentLoaded', function() {
 }
 .stock-table .stock-empty {
     color: #94a3b8;
+}
+.stock-table .stock-negative {
+    background: rgba(220,38,38,.04);
 }
 .tooltip-inner {
     white-space: pre-line;
