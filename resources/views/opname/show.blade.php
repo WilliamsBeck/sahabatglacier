@@ -228,10 +228,19 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         //                    fallback weighted bila tak ada batch.
                         // stok_awal: harga sudah diisi user (termasuk 0) → pakai apa adanya.
                         // NULL (belum diisi) → saran dari FIFO/harga terakhir.
+                        // array_key_exists (bukan ?:) — harga Rp 0 yang NYATA (batch tersisa
+                        // beneran berharga 0, mis. barang gratis) tidak boleh dianggap "kosong"
+                        // lalu ditimpa fallback berikutnya. ?: memperlakukan 0 sama dgn null/kosong.
                         $harga = ($opname->opname_mode === 'stok_awal' && $item->price_per_base !== null)
                             ? (float) $item->price_per_base
-                            : (($fifoPrice[$item->id] ?? null) ?: ($priceMap[$item->ingredient_id] ?? 0));
+                            : (array_key_exists($item->id, $fifoPrice)
+                                ? (float) $fifoPrice[$item->id]
+                                : (float) ($priceMap[$item->ingredient_id] ?? 0));
                         $hargaDus   = ($ctrPack && $packBase) ? $harga * $ctrPack * $packBase : $harga;
+                        // Harga ini punya SUMBER NYATA (bukan angka 0 default krn tak ada info
+                        // sama sekali)? Dipakai di bawah utk memilih: teks "Rp 0" vs kotak isian.
+                        $hargaAdaSumber = array_key_exists($item->id, $fifoPrice)
+                            || ($priceKnown[$item->ingredient_id] ?? false);
                         // Nilai dihitung per komponen (Dus/Pack/Base) dari harga per-dus
                         // yang dibulatkan, agar konsisten & bebas galat floating-point.
                         $pdRound = ($ctrPack && $packBase) ? round($hargaDus) : 0;
@@ -323,8 +332,12 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                              HANYA bisa diisi kalau KOSONG (belum ada harga FIFO); kalau sudah ada
                              harga, tampil teks saja (koreksi harga dilakukan di transaksi pembelian). --}}
                         @php
+                            // bulanan: kotak isian HANYA saat harga BENAR-BENAR tidak diketahui
+                            // (bukan sekadar hargaDus <= 0 — itu juga true utk barang gratis yang
+                            // harga Rp 0-nya sudah pasti benar, seharusnya tampil teks, bukan kotak
+                            // isian kosong yang seolah minta diisi ulang).
                             $showPriceInput = $opname->status !== 'approved'
-                                && ($opname->opname_mode === 'stok_awal' || $hargaDus <= 0);
+                                && ($opname->opname_mode === 'stok_awal' || !$hargaAdaSumber);
                         @endphp
                         <td class="text-end border-start small text-muted">
                             @if($showPriceInput)
@@ -340,7 +353,10 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                                        data-crate="{{ $ctrPack ?? 0 }}"
                                        data-pack="{{ $packBase ?? 1 }}"
                                        data-item="{{ $item->id }}">
-                            @elseif($hargaDus > 0)
+                            @elseif($hargaAdaSumber)
+                                {{-- hargaAdaSumber, bukan hargaDus > 0 — barang gratis (Rp 0) yang
+                                     sudah pasti benar tetap tampil sebagai teks "0", bukan dash "-"
+                                     yang terlihat seperti "tidak ada data". --}}
                                 {{ number_format($hargaDus, 0, ',', '.') }}
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
@@ -379,9 +395,14 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                     // Akumulasi nilai MENTAH per baris, total dibulatkan sekali di akhir
                     // (round-of-sum) agar total akurat & sesuai penjumlahan sebenarnya.
                     $grandTotal = round($opname->items->sum(function($i) use ($priceMap, $fifoPrice, $opname) {
-                        $h = ($opname->opname_mode === 'stok_awal' && $i->price_per_base > 0)
+                        // !== null & array_key_exists (bukan > 0 / ?:) — harga Rp 0 yang nyata
+                        // (barang gratis) harus tetap dihitung sbg 0, bukan jatuh ke harga lain
+                        // yang membuat Nilai Fisik Total jadi lebih besar dari yang sebenarnya.
+                        $h = ($opname->opname_mode === 'stok_awal' && $i->price_per_base !== null)
                             ? (float) $i->price_per_base
-                            : (($fifoPrice[$i->id] ?? null) ?: ($priceMap[$i->ingredient_id] ?? 0));
+                            : (array_key_exists($i->id, $fifoPrice)
+                                ? (float) $fifoPrice[$i->id]
+                                : (float) ($priceMap[$i->ingredient_id] ?? 0));
                         $ctr = (float) ($i->packaging->crate_to_pack ?? 0);
                         $pkb = (float) ($i->packaging->pack_to_base ?? 0);
                         if ($ctr > 0 && $pkb > 0) {

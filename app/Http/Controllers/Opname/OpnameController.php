@@ -367,10 +367,11 @@ class OpnameController extends Controller
         // mutasi diperbaiki) supaya fisik vs sistem tetap akurat.
         $this->refreshDraftSystemQty($opname);
         $opname->setRelation('items', $this->sortedItems($opname));
-        $priceMap   = $this->displayPriceMap($opname);
+        $priceKnown = [];
+        $priceMap   = $this->displayPriceMap($opname, $priceKnown);
         $fifoPrice  = $this->fifoEffectivePrice($opname);
         $lockData   = $this->buildLockData($opname);
-        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice') + $lockData);
+        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice', 'priceKnown') + $lockData);
     }
 
     public function edit(Opname $opname)
@@ -379,10 +380,11 @@ class OpnameController extends Controller
         $opname->load(['items.ingredient', 'items.packaging.supplier', 'store', 'performedBy', 'approvedBy']);
         $this->refreshDraftSystemQty($opname);
         $opname->setRelation('items', $this->sortedItems($opname));
-        $priceMap = $this->displayPriceMap($opname);
+        $priceKnown = [];
+        $priceMap  = $this->displayPriceMap($opname, $priceKnown);
         $fifoPrice = $this->fifoEffectivePrice($opname);
         $lockData = $this->buildLockData($opname);
-        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice') + $lockData);
+        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice', 'priceKnown') + $lockData);
     }
 
     // Harga untuk tampilan: opname approved → pakai harga beku (price_per_base item);
@@ -447,20 +449,29 @@ class OpnameController extends Controller
         return is_numeric($bersih) ? (float) $bersih : null;
     }
 
-    private function displayPriceMap(Opname $opname): array
+    /**
+     * @param array|null $known keluaran: ingredient_id => true bila harga di $map benar-benar
+     *   berasal dari data nyata (batch tersisa ATAU cadangan) — termasuk saat nilainya Rp 0
+     *   (barang gratis, harga itu SUDAH BENAR). false/tidak ada = benar-benar tidak ada data
+     *   sama sekali, kolom harus diisi manual. Dipakai halaman opname untuk MEMBEDAKAN
+     *   "harga Rp 0 yang sudah pasti" dari "belum ada info apa-apa" — dua-duanya sama-sama
+     *   menghasilkan angka 0 di $map, tapi harus ditampilkan beda (teks vs kotak isian).
+     */
+    private function displayPriceMap(Opname $opname, ?array &$known = null): array
     {
         if ($opname->status === 'approved') {
             $map = [];
             foreach ($opname->items as $item) {
-                if (($item->price_per_base ?? 0) > 0) {
+                if ($item->price_per_base !== null) {
                     $map[$item->ingredient_id] = (float) $item->price_per_base;
+                    $known[$item->ingredient_id] = true;
                 }
             }
             // Lengkapi bahan yg belum punya harga beku dengan harga live
-            $live = $this->buildPriceMap($opname);
+            $live = $this->buildPriceMap($opname, $known);
             return $map + $live;
         }
-        return $this->buildPriceMap($opname);
+        return $this->buildPriceMap($opname, $known);
     }
 
     // Harga efektif per item via FIFO BERLAPIS: stok fisik dinilai dari batch
@@ -540,8 +551,10 @@ class OpnameController extends Controller
      * sama persis dengan cara Saldo Stok menghitung harga.
      * Σ(remaining_qty × price_per_base) / Σ(remaining_qty)
      */
-    private function buildPriceMap(Opname $opname): array
+    private function buildPriceMap(Opname $opname, ?array &$known = null): array
     {
+        if ($known === null) $known = [];
+
         $ingIds  = $opname->items->pluck('ingredient_id')->unique()->all();
         $batches = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('destination_store_id', $opname->store_id)
@@ -560,6 +573,9 @@ class OpnameController extends Controller
             $totalQty = $group->sum('remaining_qty');
             $totalVal = $group->sum(fn($b) => $b->remaining_qty * $b->price_per_base);
             $map[$id] = $totalQty > 0 ? $totalVal / $totalQty : 0;
+            // Batch tersisa nyata ditemukan = harga ini VALID walau kebetulan Rp 0
+            // (mis. barang gratis/donasi) — bukan "belum ada info".
+            $known[$id] = $totalQty > 0;
             // Cadangan HANYA saat stok BENAR-BENAR tidak ada (totalQty 0), bukan saat
             // stok memang ada tapi harganya kebetulan 0 (mis. barang gratis/donasi).
             // Sebelumnya dicek dari $map[$id] <= 0, jadi stok nyata ber-harga Rp 0
@@ -570,7 +586,12 @@ class OpnameController extends Controller
         // Stok habis (0 dus 0 pack) -> tidak ada batch tersisa sehingga harga
         // rata-rata jadi 0 dan kolom harga tampil kosong. Isi dengan cadangan.
         if ($perluCadangan) {
-            $map = array_replace($map, $this->hargaCadangan($opname->store_id, $perluCadangan, $opname->id));
+            $cadangan = $this->hargaCadangan($opname->store_id, $perluCadangan, $opname->id);
+            $map = array_replace($map, $cadangan);
+            foreach ($perluCadangan as $id) {
+                // Cadangan ketemu (>0) = harga ini juga valid, walau bukan dari batch tersisa.
+                if (($cadangan[$id] ?? 0) > 0) $known[$id] = true;
+            }
         }
 
         return $map;
@@ -1154,11 +1175,18 @@ class OpnameController extends Controller
     // Hanya item tanpa harga yang diisi dari rata-rata tertimbang FIFO.
     private function freezeItemPrices(Opname $opname): void
     {
-        $priceMap = $this->buildPriceMap($opname); // weighted-avg sisa batch terkini
+        $known    = [];
+        $priceMap = $this->buildPriceMap($opname, $known); // weighted-avg sisa batch terkini
         foreach ($opname->items as $item) {
-            if ((float) $item->price_per_base > 0) continue; // jaga harga per-batch
+            // !== null (bukan > 0): harga Rp 0 yang sudah diketik/dihitung SENGAJA
+            // (barang gratis) harus tetap dijaga, jangan ditimpa rata-rata gabungan.
+            if ($item->price_per_base !== null) continue;
+            // $known: hanya bekukan bila harga BENAR-BENAR punya sumber (batch tersisa
+            // atau cadangan) — walau nilainya 0. Kalau tidak diketahui sama sekali,
+            // biarkan null (tetap "belum ada harga"), jangan dibekukan jadi Rp 0 palsu.
+            if (!($known[$item->ingredient_id] ?? false)) continue;
             $frozen = $priceMap[$item->ingredient_id] ?? null;
-            if ($frozen !== null && $frozen > 0) {
+            if ($frozen !== null) {
                 $item->update(['price_per_base' => $frozen]);
             }
         }
