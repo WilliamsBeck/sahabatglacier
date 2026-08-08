@@ -554,13 +554,14 @@ class HppController extends Controller
                     'is_override'  => $isOverride,   // true = sudah dikoreksi manual
                     'catatan'      => $catatanMap[$ing->id] ?? null,   // isian bebas dari user
                     'overfill'     => $overfill,
-                    // Rusak & Overfill adalah penjelasan: keduanya MENGECILKAN selisih
-                    // menuju nol, dari arah mana pun selisihnya datang.
-                    //   selisih -1.407, rusak 1.409  -> +2   (boros, hampir terjelaskan)
-                    //   selisih     +6, overfill   8 -> -2   (hemat, terlewat dijelaskan)
-                    'unexplained'  => $selisih >= 0
-                        ? $selisih - ($rusak + $overfill)
-                        : $selisih + ($rusak + $overfill),
+                    // Tidak ada penjelasan = Terjual - Terpakai + Rusak - Overfill
+                    //                        = Selisih + Rusak - Overfill (rumus tetap,
+                    //   TIDAK tergantung tanda Selisih — Rusak selalu ditambah, Overfill
+                    //   selalu dikurang).
+                    //   selisih -1.407, rusak 1.409, overfill 0 -> +2
+                    //   selisih     +6, rusak     0, overfill 8 -> -2
+                    //   selisih +2.351, rusak     7, overfill 0 -> +2.358
+                    'unexplained'  => $selisih + $rusak - $overfill,
                 ];
             });
         }

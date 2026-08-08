@@ -19,7 +19,7 @@
     $n = fn($v) => number_format($v, 0, ',', '.');
 @endphp
 
-<p class="text-muted mb-3 small">Cone &amp; Cup - Rekonsiliasi selisih pemakaian (Tidak ada penjelasan = sisa Selisih setelah dijelaskan Rusak &amp; Overfill)</p>
+<p class="text-muted mb-3 small">Cone &amp; Cup - Rekonsiliasi selisih pemakaian (Tidak ada penjelasan = Selisih + Rusak - Overfill)</p>
 
 {{-- Filter --}}
 <div class="card mb-3">
@@ -148,7 +148,7 @@
         <div class="card-footer d-flex justify-content-between align-items-center">
             <small class="text-muted">
                 <i class="bi bi-info-circle me-1"></i>
-                <strong>Tidak ada penjelasan</strong> = Selisih yang belum tertutup Rusak &amp; Overfill. Rusak dan Overfill selalu mengecilkan selisih menuju nol; nol berarti sudah terjelaskan sepenuhnya.
+                <strong>Tidak ada penjelasan</strong> = Selisih + Rusak − Overfill. Rusak selalu ditambahkan, Overfill selalu dikurangkan — tidak tergantung selisihnya hemat atau boros.
                 Isi Rusak / Overfill lalu klik Simpan untuk menghitung ulang.
                 <br>
                 Kolom <strong>Rusak</strong> otomatis dari catatan waste — boleh diketik ulang untuk koreksi
