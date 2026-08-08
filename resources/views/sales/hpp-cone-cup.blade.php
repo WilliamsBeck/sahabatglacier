@@ -73,9 +73,9 @@
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0 cone-cup-table" style="table-layout:fixed;width:100%">
                     <colgroup>
-                        <col style="width:16%"><col style="width:14%"><col style="width:14%">
-                        <col style="width:14%"><col style="width:14%"><col style="width:14%">
-                        <col style="width:14%">
+                        <col style="width:14%"><col style="width:11%"><col style="width:11%">
+                        <col style="width:11%"><col style="width:11%"><col style="width:11%">
+                        <col style="width:12%"><col style="width:19%">
                     </colgroup>
                     <thead class="table-light">
                         <tr>
@@ -86,6 +86,7 @@
                             <th class="text-end">Rusak <small class="text-muted">(waste)</small></th>
                             <th class="text-end">Overfill <small class="text-muted">(manual)</small></th>
                             <th class="text-end">Tidak ada penjelasan</th>
+                            <th>Catatan</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -125,6 +126,14 @@
                             </td>
                             <td class="text-end fw-semibold {{ $r->unexplained > 0 ? 'text-success' : ($r->unexplained < 0 ? 'text-danger' : '') }}">
                                 {{ $r->unexplained > 0 ? '+' : '' }}{{ $n($r->unexplained) }}
+                            </td>
+                            <td>
+                                {{-- Isian bebas — mis. alasan selisih, kejadian di toko, dsb. Tidak ikut dihitung. --}}
+                                <input type="text" maxlength="255"
+                                       name="catatan[{{ $r->ingredient->id }}]"
+                                       value="{{ $r->catatan }}"
+                                       class="form-control form-control-sm"
+                                       placeholder="Catatan (opsional)">
                             </td>
                         </tr>
                         @endforeach

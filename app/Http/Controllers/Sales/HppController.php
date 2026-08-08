@@ -500,10 +500,11 @@ class HppController extends Controller
             // Overfill manual + koreksi manual angka Rusak (null = ikut catatan waste).
             $manualRows   = \App\Models\ConeCupOverfill::where('store_id', $storeId)
                 ->where('month', $month)->where('year', $year)
-                ->get(['ingredient_id', 'qty', 'rusak_override']);
+                ->get(['ingredient_id', 'qty', 'rusak_override', 'note']);
             $overfillMap  = $manualRows->pluck('qty', 'ingredient_id');
             $rusakOverride = $manualRows->whereNotNull('rusak_override')
                 ->pluck('rusak_override', 'ingredient_id');
+            $catatanMap   = $manualRows->pluck('note', 'ingredient_id');
 
             // Terjual khusus CONE: hanya dihitung dari menu kategori "Ice Cone"
             // (bukan dari menu lain yang resepnya kebetulan memakai cone, mis. Sundae).
@@ -528,7 +529,7 @@ class HppController extends Controller
                 }
             }
 
-            $rows = $coneCup->map(function ($ing) use ($hppById, $rusakMap, $overfillMap, $rusakOverride, $coneTerjualMap) {
+            $rows = $coneCup->map(function ($ing) use ($hppById, $rusakMap, $overfillMap, $rusakOverride, $coneTerjualMap, $catatanMap) {
                 $h        = $hppById[$ing->id] ?? null;
                 $terjual  = array_key_exists($ing->id, $coneTerjualMap)
                     ? (float) $coneTerjualMap[$ing->id]
@@ -551,6 +552,7 @@ class HppController extends Controller
                     'rusak'        => $rusak,
                     'rusak_waste'  => $rusakWaste,   // angka asli dari catatan waste
                     'is_override'  => $isOverride,   // true = sudah dikoreksi manual
+                    'catatan'      => $catatanMap[$ing->id] ?? null,   // isian bebas dari user
                     'overfill'     => $overfill,
                     // Rusak & Overfill adalah penjelasan: keduanya MENGECILKAN selisih
                     // menuju nol, dari arah mana pun selisihnya datang.
@@ -617,14 +619,17 @@ class HppController extends Controller
             // supaya baris itu tetap mengikuti catatan waste bila nanti berubah.
             'rusak_base'   => 'nullable|array',
             'rusak_base.*' => 'nullable|numeric',
+            'catatan'      => 'nullable|array',
+            'catatan.*'    => 'nullable|string|max:255',
         ]);
         abort_unless(in_array((int)$request->store_id, auth()->user()->accessibleStoreIds()), 403);
 
         $overfills = $request->overfill ?? [];
         $rusaks    = $request->rusak ?? [];
         $bases     = $request->rusak_base ?? [];
+        $catatans  = $request->catatan ?? [];
 
-        foreach (array_unique(array_merge(array_keys($overfills), array_keys($rusaks))) as $ingId) {
+        foreach (array_unique(array_merge(array_keys($overfills), array_keys($rusaks), array_keys($catatans))) as $ingId) {
             $qty = (float) ($overfills[$ingId] ?? 0);
 
             // Rusak: simpan override HANYA bila berbeda dari angka catatan waste.
@@ -635,10 +640,13 @@ class HppController extends Controller
                 if (abs($input - $base) > 0.001) $rusakOverride = $input;
             }
 
+            $catatan = trim((string) ($catatans[$ingId] ?? ''));
+
             \App\Models\ConeCupOverfill::updateOrCreate(
                 ['store_id' => (int)$request->store_id, 'ingredient_id' => (int)$ingId,
                  'month' => (int)$request->month, 'year' => (int)$request->year],
-                ['qty' => $qty, 'rusak_override' => $rusakOverride, 'created_by' => auth()->id()]
+                ['qty' => $qty, 'rusak_override' => $rusakOverride,
+                 'note' => $catatan !== '' ? $catatan : null, 'created_by' => auth()->id()]
             );
         }
         return back()->with('success', 'Data cone & cup tersimpan.');
