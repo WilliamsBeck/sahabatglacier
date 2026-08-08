@@ -72,10 +72,14 @@
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0 cone-cup-table" style="table-layout:fixed;width:100%">
+                    {{-- table-layout:fixed butuh lebar eksplisit tiap kolom (kolom tanpa
+                         lebar akan kolaps ke 0). Total sengaja > 100% — tabel dibungkus
+                         .table-responsive jadi kelebihannya digulir horizontal, bukan
+                         memepetkan kolom Bahan sampai tak terbaca. --}}
                     <colgroup>
-                        <col style="width:14%"><col style="width:11%"><col style="width:11%">
-                        <col style="width:11%"><col style="width:11%"><col style="width:11%">
-                        <col style="width:12%"><col style="width:19%">
+                        <col style="width:14%"><col style="width:13%"><col style="width:13%">
+                        <col style="width:13%"><col style="width:13%"><col style="width:13%">
+                        <col style="width:13%"><col style="width:22%">
                     </colgroup>
                     <thead class="table-light">
                         <tr>
@@ -133,7 +137,7 @@
                                        name="catatan[{{ $r->ingredient->id }}]"
                                        value="{{ $r->catatan }}"
                                        class="form-control form-control-sm"
-                                       placeholder="Catatan (opsional)">
+                                       placeholder="Opsional">
                             </td>
                         </tr>
                         @endforeach
