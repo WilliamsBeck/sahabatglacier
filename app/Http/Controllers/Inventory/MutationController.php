@@ -111,6 +111,19 @@ class MutationController extends Controller
      * Harga BRUTO (katalog) disimpan di gross_price_per_base untuk auto-fill
      * harga & tampilan. Idempotent: selalu berangkat dari bruto (aman utk edit draft).
      */
+    /**
+     * Harga per dus yang diketik user. Dikirim form sebagai price_per_crate;
+     * kalau tidak ada (form lama / bahan tanpa kemasan) -> null, dan tampilan
+     * akan jatuh balik ke perhitungan lama.
+     */
+    private function hargaPerDus(array $item): ?float
+    {
+        $v = $item['price_per_crate'] ?? null;
+        if ($v === null || $v === '') return null;
+        $bersih = preg_replace('/[^0-9.\-]/', '', str_replace(',', '.', (string) $v));
+        return is_numeric($bersih) ? round((float) $bersih, 2) : null;
+    }
+
     private function allocateInvoiceDiscount(Mutation $mutation): void
     {
         $mutation->load('items');
@@ -192,6 +205,7 @@ class MutationController extends Controller
             'items.*.qty_pack'       => 'nullable|integer|min:0',
             'items.*.qty_base'       => 'nullable|numeric|min:0',
             'items.*.price_per_base' => 'required|numeric|min:0',
+            'items.*.price_per_crate' => 'nullable|numeric|min:0',
             'discount_amount'        => 'nullable|numeric|min:0',
         ], [
             'destination_store_id.required' => 'Toko penerima wajib dipilih.',
@@ -307,6 +321,9 @@ class MutationController extends Controller
                     'qty_base'               => $item['qty_base'] ?? null,
                     'total_in_base'          => $totalInBase,
                     'price_per_base'         => $item['price_per_base'],
+                    // Angka yang DIKETIK user, disimpan utuh — bukan hasil konversi
+                    // bolak-balik dari harga per satuan dasar (dulu bikin 730.000 -> 729.999).
+                    'price_per_crate'        => $this->hargaPerDus($item),
                     'gross_price_per_base'   => $item['price_per_base'],
                     'selling_price_per_base' => $item['selling_price_per_base'] ?? null,
                     'cost_subtotal'          => $totalInBase * $item['price_per_base'],
@@ -377,6 +394,7 @@ class MutationController extends Controller
             'items.*.qty_pack'  => 'nullable|integer|min:0',
             'items.*.qty_base'  => 'nullable|numeric|min:0',
             'items.*.price_per_base' => 'required|numeric|min:0',
+            'items.*.price_per_crate' => 'nullable|numeric|min:0',
             'discount_amount'   => 'nullable|numeric|min:0',
         ], [
             'delivery_date.required'       => 'Tanggal penerimaan wajib diisi sebelum konfirmasi.',
@@ -437,6 +455,7 @@ class MutationController extends Controller
                     'total_in_base'  => $totalInBase,
                     // Harga input user = harga katalog (bruto); netto dihitung ulang di bawah
                     'price_per_base'       => $itemData['price_per_base'],
+                    'price_per_crate'      => $this->hargaPerDus($itemData),
                     'gross_price_per_base' => $itemData['price_per_base'],
                     'cost_subtotal'  => $totalInBase * $itemData['price_per_base'],
                     'remaining_qty'  => $totalInBase,
@@ -794,11 +813,13 @@ class MutationController extends Controller
         $type        = $request->type; // mis. 'purchase_zhisheng'
         $storeId     = $request->store_id;
 
+        $pkg         = $packagingId ? IngredientPackaging::find($packagingId) : null;
+        $crateToBase = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
+
         $base = fn() => MutationItem::query()
             ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
             ->where('mutations.status', 'confirmed')
             ->where('mutation_items.ingredient_id', $ingredient->id)
-            ->where('mutation_items.price_per_base', '>', 0)
             // Pembelian = barang MASUK, jadi tokonya = destination_store_id
             ->when($storeId, fn($q) => $q->where('mutations.destination_store_id', $storeId))
             ->when($packagingId, fn($q) => $q->where('mutation_items.packaging_id', $packagingId))
@@ -809,28 +830,51 @@ class MutationController extends Controller
         // pembelian sebelumnya tidak menular jadi "harga normal" input berikutnya.
         $grossExpr = 'COALESCE(mutation_items.gross_price_per_base, mutation_items.price_per_base)';
 
-        // 1) Prioritas: pembelian dengan tipe yang sama
+        // Urutan sumber rekomendasi HARGA PER DUS:
+        //   1) pembelian terakhir dengan tipe yang sama (mis. pembelian pusat)
+        //   2) harga per dus dari stok opname sebelumnya
+        //   3) tidak ada -> kosongkan, biar diketik manual
+        // Harga/dus diambil APA ADANYA dari price_per_crate bila tersedia; hanya
+        // data lama (price_per_crate NULL) yang dihitung dari harga satuan dasar.
         $types = $type ? [$type] : ['purchase_zhisheng', 'purchase_supplier'];
-        $priceBase = (float) ($base()->whereIn('mutations.type', $types)->selectRaw("$grossExpr as p")->value('p') ?? 0);
 
-        // 2) Fallback: harga terakhir dari sumber manapun (mis. opening_stock dari opname)
-        //    agar tetap ada referensi walau belum pernah ada pembelian tipe ini.
-        if ($priceBase <= 0) {
-            $priceBase = (float) ($base()->selectRaw("$grossExpr as p")->value('p') ?? 0);
-        }
-        // price_per_dus jika packaging diberikan
-        $priceDus = 0;
-        if ($packagingId && $priceBase > 0) {
-            $pkg = IngredientPackaging::find($packagingId);
-            if ($pkg) {
-                $crateToBase = (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base;
-                $priceDus    = $crateToBase > 0 ? (int) round($priceBase * $crateToBase) : 0;
+        $ambilDus = function ($row) use ($crateToBase) {
+            if (!$row) return 0;
+            if ($row->price_per_crate !== null) return (int) round((float) $row->price_per_crate);
+            return $crateToBase > 0 ? (int) round((float) $row->p * $crateToBase) : 0;
+        };
+
+        // 1) Pembelian terakhir dengan tipe yang sama
+        $row = $base()->whereIn('mutations.type', $types)
+            ->where(fn($q) => $q->where('mutation_items.price_per_base', '>', 0)
+                                ->orWhere('mutation_items.price_per_crate', '>', 0))
+            ->selectRaw("$grossExpr as p, mutation_items.price_per_crate")
+            ->first();
+        $priceDus = $ambilDus($row);
+
+        // 2) Belum pernah beli tipe ini -> harga per dus dari stok opname sebelumnya
+        if ($priceDus <= 0) {
+            $opnameRow = \App\Models\OpnameItem::query()
+                ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
+                ->where('opnames.status', 'approved')
+                ->when($storeId, fn($q) => $q->where('opnames.store_id', $storeId))
+                ->where('opname_items.ingredient_id', $ingredient->id)
+                ->when($packagingId, fn($q) => $q->where('opname_items.packaging_id', $packagingId))
+                ->where('opname_items.price_per_base', '>', 0)
+                ->orderByDesc('opnames.opname_date')->orderByDesc('opnames.id')
+                ->selectRaw('opname_items.price_per_base as p')
+                ->first();
+            if ($opnameRow && $crateToBase > 0) {
+                $priceDus = (int) round((float) $opnameRow->p * $crateToBase);
             }
         }
 
+        // price_per_base diturunkan dari harga/dus supaya keduanya selalu sinkron
+        $priceBase = ($priceDus > 0 && $crateToBase > 0) ? $priceDus / $crateToBase : 0;
+
         return response()->json([
             'price_per_base' => $priceBase,
-            'price_per_dus'  => $priceDus,
+            'price_per_dus'  => $priceDus,   // 0 = tidak ada referensi, biar diketik manual
         ]);
     }
 

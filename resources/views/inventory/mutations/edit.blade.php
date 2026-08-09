@@ -144,8 +144,16 @@
                             // Form menampilkan harga BRUTO (katalog); netto dihitung ulang server
                             // dari diskon invoice saat disimpan.
                             $grossBase  = (float) ($item->gross_price_per_base ?? $item->price_per_base);
-                            $priceDus   = $ctb > 0 ? round($grossBase * $ctb) : 0;
-                            $subtotal   = round($item->total_in_base * $grossBase);
+                            // Harga/dus: pakai angka asli yang pernah diketik bila ada.
+                            // Kalau dihitung ulang dari harga per satuan dasar, hasilnya
+                            // bisa meleset 1 rupiah (730.000 -> 729.999) sehingga edit
+                            // terlihat "kembali ke angka semula".
+                            $priceDus   = $item->price_per_crate !== null
+                                ? (int) round($item->price_per_crate)
+                                : ($ctb > 0 ? round($grossBase * $ctb) : 0);
+                            $subtotal   = $ctb > 0
+                                ? round(($item->total_in_base / $ctb) * $priceDus)
+                                : round($item->total_in_base * $grossBase);
                         @endphp
                         <tr class="edit-row"
                             id="erow-{{ $idx }}"
@@ -160,6 +168,9 @@
                             <input type="hidden" name="items[{{ $idx }}][packaging_id]"   value="{{ $item->packaging_id }}">
                             <input type="hidden" name="items[{{ $idx }}][price_per_base]" class="price-per-base-hidden"
                                    value="{{ $grossBase }}">
+                            {{-- Harga/dus dikirim apa adanya — inilah sumber kebenaran tampilan --}}
+                            <input type="hidden" name="items[{{ $idx }}][price_per_crate]" class="price-per-crate-hidden"
+                                   value="{{ $ctb > 0 ? $priceDus : '' }}">
 
                             <td class="fw-semibold">{{ $item->ingredient->name }}</td>
                             <td class="text-muted small">
@@ -327,6 +338,10 @@ function onPriceDusChange(idx) {
 
     var hidden = row.querySelector('.price-per-base-hidden');
     if (hidden) hidden.value = priceBase.toFixed(8);
+
+    // Kirim juga harga/dus persis seperti yang diketik (tanpa konversi)
+    var hiddenCrate = row.querySelector('.price-per-crate-hidden');
+    if (hiddenCrate) hiddenCrate.value = ctb > 0 ? priceDus : '';
 
     recalcRow(idx);
 }

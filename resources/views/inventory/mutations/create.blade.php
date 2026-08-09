@@ -1015,6 +1015,9 @@ function onPriceCrateChange(idx) {
 
     // Set hidden price_per_base (presisi tinggi supaya tidak ada precision loss)
     document.querySelector('#row-' + idx + ' .price-per-base-hidden').value = priceBase.toFixed(8);
+    // Kirim juga harga/dus persis seperti diketik — ini yang dipakai untuk tampilan
+    var hiddenCrate = document.querySelector('#row-' + idx + ' .price-per-crate-hidden');
+    if (hiddenCrate) hiddenCrate.value = crateToBase > 0 ? priceCrate : '';
 
     // Sembunyikan info konversi per-gram (tidak relevan untuk user)
     var info = document.querySelector('#row-' + idx + ' .price-info');
@@ -1264,7 +1267,7 @@ function buildRowHTML(idx, ingOptions) {
             <div class="input-group input-group-sm">
                 <span class="input-group-text">Rp</span>
                 <input type="number" class="form-control form-control-sm" step="0.01" min="0" placeholder="0"
-                       oninput="document.querySelector('#row-${idx} .price-per-base-hidden').value = this.value">
+                       oninput="document.querySelector('#row-${idx} .price-per-base-hidden').value = this.value; document.querySelector('#row-${idx} .price-per-crate-hidden').value = '';">
             </div>
         </div>
         <div class="sale-price d-none mt-1">
@@ -1276,6 +1279,7 @@ function buildRowHTML(idx, ingOptions) {
         </div>
         <span class="text-muted small no-price-label">—</span>
         <input type="hidden" name="items[${idx}][price_per_base]" class="price-per-base-hidden" value="0">
+        <input type="hidden" name="items[${idx}][price_per_crate]" class="price-per-crate-hidden" value="">
     </td>
     <td class="text-center">
         <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row" onclick="removeRow(${idx})" style="display:none" title="Hapus">

@@ -88,7 +88,7 @@
         <div class="input-group input-group-sm">
             <span class="input-group-text">Rp</span>
             <input type="number" class="form-control form-control-sm" step="0.01" min="0" placeholder="0"
-                   oninput="document.querySelector('#row-{{ $idx }} .price-per-base-hidden').value = this.value">
+                   oninput="document.querySelector('#row-{{ $idx }} .price-per-base-hidden').value = this.value; document.querySelector('#row-{{ $idx }} .price-per-crate-hidden').value = '';">
         </div>
     </div>
     <div class="sale-price d-none mt-1">
@@ -100,6 +100,8 @@
     </div>
     <span class="text-muted small no-price-label">—</span>
     <input type="hidden" name="items[{{ $idx }}][price_per_base]" class="price-per-base-hidden" value="{{ $old['price_per_base'] ?? '0' }}">
+    {{-- Harga/dus apa adanya (tanpa konversi) — jadi sumber kebenaran tampilan --}}
+    <input type="hidden" name="items[{{ $idx }}][price_per_crate]" class="price-per-crate-hidden" value="{{ $old['price_per_crate'] ?? '' }}">
 </td>
 
 {{-- Hapus --}}

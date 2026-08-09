@@ -232,7 +232,11 @@
                                 $grandTotal += $item->cost_subtotal;
                                 $pkg = $item->packaging ?? $item->ingredient->packagings->first();
                                 $dusSize = $pkg ? (float)$pkg->crate_to_pack * (float)$pkg->pack_to_base : 0;
-                                $hargaDus = $dusSize > 0 ? (int)round($item->price_per_base * $dusSize) : null;
+                                // Angka asli yang diketik user bila ada; data lama jatuh balik
+                                // ke perhitungan dari harga per satuan dasar (bisa meleset 1 rupiah).
+                                $hargaDus = $item->price_per_crate !== null
+                                    ? (int) round($item->price_per_crate)
+                                    : ($dusSize > 0 ? (int) round($item->price_per_base * $dusSize) : null);
                             @endphp
                             <tr>
                                 <td class="fw-semibold">{{ $item->ingredient->name }}</td>
