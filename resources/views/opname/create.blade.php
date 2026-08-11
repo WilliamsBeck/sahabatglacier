@@ -214,9 +214,16 @@ function parsePriceInput(el) {
 }
 function splitDusPack(baseQty, crate, pack) {
     if (!crate || !pack) return { dus: 0, pack: 0 };
-    var dus = Math.floor(baseQty / (crate * pack));
-    var rem = baseQty - dus * crate * pack;
-    return { dus: dus, pack: Math.floor(rem / pack) };
+    // Tangani NEGATIF (saldo sistem boleh minus): pecah dari nilai mutlak dulu,
+    // baru pasang tandanya ke KEDUA komponen. Math.floor() langsung pada angka
+    // negatif membulat ke arah -tak hingga, jadi -5 base bisa muncul sbg
+    // "-1 Dus + 195 Pack" (matematis benar tapi tidak terbaca) alih-alih "-5 Pack".
+    var neg = baseQty < 0;
+    var abs = Math.abs(baseQty);
+    var dus = Math.floor(abs / (crate * pack));
+    var rem = abs - dus * crate * pack;
+    var pck = Math.floor(rem / pack);
+    return { dus: neg ? -dus : dus, pack: neg ? -pck : pck };
 }
 
 /**
