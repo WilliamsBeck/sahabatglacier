@@ -200,12 +200,18 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                                         ->filter()->implode(' · ') ?: null;
                         if ($isExtraBatch) $pkgLabel = ($pkgLabel ? $pkgLabel . ' · ' : '') . 'Batch ' . $batchNum;
 
-                        // Stok sistem dalam Dus + Pack
+                        // Stok sistem dalam Dus + Pack. Boleh MINUS (pemakaian tercatat
+                        // melebihi pembelian tercatat) — pecah dari NILAI MUTLAK dulu, baru
+                        // pasang tanda ke kedua komponen. floor() langsung pada angka negatif
+                        // membulat ke -tak hingga, jadi -5 base (isi/dus 200) bisa muncul
+                        // sbg "-1 Dus + 195 Pack" alih-alih "0 Dus, -5 Pack".
                         if ($ctrPack && $packBase) {
                             $crateBase  = $ctrPack * $packBase;
-                            $sysDus     = (int) floor($item->system_qty / $crateBase);
-                            $sysPackRem = $item->system_qty - $sysDus * $crateBase;
+                            $absSys     = abs((float) $item->system_qty);
+                            $sysDus     = (int) floor($absSys / $crateBase);
+                            $sysPackRem = $absSys - $sysDus * $crateBase;
                             $sysPack    = (int) floor($sysPackRem / $packBase);
+                            if ($sysNeg) { $sysDus = -$sysDus; $sysPack = -$sysPack; }
                         } else {
                             $sysDus = null; $sysPack = null;
                         }
@@ -214,7 +220,13 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         if ($ctrPack && $packBase) {
                             $physNoPcs  = ($item->physical_crate ?? 0) * $ctrPack * $packBase
                                         + ($item->physical_pack  ?? 0) * $packBase;
-                            $sysRounded = floor($item->system_qty / $packBase) * $packBase;
+                            // Buang sisa pcs/gr dari system_qty — TRUNCATE ke arah nol, bukan
+                            // floor biasa. floor(-5.7) = -6 (menambah 1 pack defisit yang
+                            // sebenarnya tidak ada); yang benar cukup buang pecahan 0.7-nya
+                            // jadi -5, simetris dengan cara sisi positif dibuang (floor(5.7)=5).
+                            $sysRounded = $item->system_qty >= 0
+                                ? floor($item->system_qty / $packBase) * $packBase
+                                : -floor(abs($item->system_qty) / $packBase) * $packBase;
                             $displayVar = $physNoPcs - $sysRounded;
                         } else {
                             $displayVar = $item->variance;
@@ -301,18 +313,20 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                             <td class="text-center small">{{ $item->physical_base !== null ? number_format($item->physical_base, 0, ',', '.') : '' }}{!! $item->physical_base === null ? '<span class="text-muted opacity-50 small">-</span>' : '' !!}</td>
                         @endif
 
-                        {{-- Stok Sistem: kolom Dus --}}
+                        {{-- Stok Sistem: kolom Dus. != 0 (bukan > 0) — komponen Dus boleh
+                             minus (mis. -3 Dus -1 Pack), dan harus tetap terlihat. --}}
                         <td class="text-center border-start {{ $sysNeg ? 'text-danger fw-bold' : '' }}">
                             @if($sysDus !== null)
-                                {!! ($sysDus > 0 ? $sysDus : ($sysNeg ? $sysDus : '<span class="text-muted opacity-50 small">-</span>')) !!}
+                                {!! ($sysDus != 0 ? $sysDus : '<span class="text-muted opacity-50 small">-</span>') !!}
                             @else
                                 {{ number_format($item->system_qty, 0, ',', '.') }}
                             @endif
                         </td>
-                        {{-- Stok Sistem: kolom Pack --}}
+                        {{-- Stok Sistem: kolom Pack. != 0 (bukan > 0) — dulu nilai pack MINUS
+                             disembunyikan jadi "-" (dash), padahal itu justru intinya. --}}
                         <td class="text-center {{ $sysNeg ? 'text-danger fw-bold' : '' }}">
                             @if($sysDus !== null)
-                                {!! ($sysPack > 0 ? $sysPack : '<span class="text-muted opacity-50 small">-</span>') !!}
+                                {!! ($sysPack != 0 ? $sysPack : '<span class="text-muted opacity-50 small">-</span>') !!}
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
