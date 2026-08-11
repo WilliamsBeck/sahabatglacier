@@ -330,7 +330,6 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                             @else
                                 <span class="text-muted opacity-50 small">-</span>
                             @endif
-                            @if($sysNeg)<small class="d-block text-danger">⚠</small>@endif
                         </td>
 
                         {{-- Selisih (Dus/Pack) --}}
