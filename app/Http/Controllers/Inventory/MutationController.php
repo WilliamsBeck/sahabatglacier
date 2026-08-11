@@ -124,16 +124,42 @@ class MutationController extends Controller
         return is_numeric($bersih) ? round((float) $bersih, 2) : null;
     }
 
+    /**
+     * Subtotal (cost_subtotal) dihitung dari HARGA/DUS APA ADANYA, bukan dari
+     * total_in_base x price_per_base. price_per_base ikut presisi 8 desimal, tapi
+     * mengalikannya lagi dengan qty base yang besar (mis. 75.000 gram) tetap bisa
+     * menyimpang beberapa rupiah dari Dus x Harga/Dus yang terlihat di layar.
+     * Dus x Harga/Dus adalah SUMBER KEBENARAN tampilan, jadi subtotal harus
+     * mengikutinya persis — bukan sebaliknya.
+     */
+    private function preciseSubtotal(?int $packagingId, float $totalInBase, ?float $hargaDus, float $pricePerBase): float
+    {
+        if ($hargaDus !== null && $packagingId) {
+            $pkg = IngredientPackaging::find($packagingId);
+            $ctb = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
+            if ($ctb > 0) {
+                return round(($totalInBase / $ctb) * $hargaDus, 2);
+            }
+        }
+        return round($totalInBase * $pricePerBase, 2);
+    }
+
     private function allocateInvoiceDiscount(Mutation $mutation): void
     {
         $mutation->load('items');
         $discount = (float) $mutation->discount_amount;
 
+        // Subtotal BRUTO per item — ikut Dus x Harga/Dus (persis) bila item itu
+        // punya price_per_crate, sama seperti preciseSubtotal(). Dipakai untuk
+        // patokan pro-rata diskon; tanpa ini subtotal bisa drift beberapa rupiah
+        // dari yang terlihat di layar (lihat catatan di preciseSubtotal()).
         $grossSubs  = [];
         $totalGross = 0.0;
         foreach ($mutation->items as $it) {
             $gross = (float) ($it->gross_price_per_base ?? $it->price_per_base);
-            $grossSubs[$it->id] = (float) $it->total_in_base * $gross;
+            $grossSubs[$it->id] = $this->preciseSubtotal(
+                $it->packaging_id, (float) $it->total_in_base, $it->price_per_crate, $gross
+            );
             $totalGross += $grossSubs[$it->id];
         }
 
@@ -144,7 +170,7 @@ class MutationController extends Controller
                 $it->update([
                     'gross_price_per_base' => $gross,
                     'price_per_base'       => $gross,
-                    'cost_subtotal'        => (float) $it->total_in_base * $gross,
+                    'cost_subtotal'        => $grossSubs[$it->id],
                 ]);
             }
             return;
@@ -323,10 +349,14 @@ class MutationController extends Controller
                     'price_per_base'         => $item['price_per_base'],
                     // Angka yang DIKETIK user, disimpan utuh — bukan hasil konversi
                     // bolak-balik dari harga per satuan dasar (dulu bikin 730.000 -> 729.999).
-                    'price_per_crate'        => $this->hargaPerDus($item),
+                    'price_per_crate'        => $hargaDus = $this->hargaPerDus($item),
                     'gross_price_per_base'   => $item['price_per_base'],
                     'selling_price_per_base' => $item['selling_price_per_base'] ?? null,
-                    'cost_subtotal'          => $totalInBase * $item['price_per_base'],
+                    // Ikut Dus x Harga/Dus (persis), bukan total_in_base x price_per_base
+                    // (dulu drift beberapa rupiah dari yang tampil di layar).
+                    'cost_subtotal'          => $this->preciseSubtotal(
+                        $item['packaging_id'] ?? null, $totalInBase, $hargaDus, (float) $item['price_per_base']
+                    ),
                     'remaining_qty'          => $totalInBase,
                 ]);
             }
@@ -455,9 +485,13 @@ class MutationController extends Controller
                     'total_in_base'  => $totalInBase,
                     // Harga input user = harga katalog (bruto); netto dihitung ulang di bawah
                     'price_per_base'       => $itemData['price_per_base'],
-                    'price_per_crate'      => $this->hargaPerDus($itemData),
+                    'price_per_crate'      => $hargaDus = $this->hargaPerDus($itemData),
                     'gross_price_per_base' => $itemData['price_per_base'],
-                    'cost_subtotal'  => $totalInBase * $itemData['price_per_base'],
+                    // Ikut Dus x Harga/Dus (persis) — lihat catatan di preciseSubtotal().
+                    // Diperbarui lagi di bawah oleh allocateInvoiceDiscount() bila ada diskon.
+                    'cost_subtotal'  => $this->preciseSubtotal(
+                        $item->packaging_id, $totalInBase, $hargaDus, (float) $itemData['price_per_base']
+                    ),
                     'remaining_qty'  => $totalInBase,
                 ]);
             }
