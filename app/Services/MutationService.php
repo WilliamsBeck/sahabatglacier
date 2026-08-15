@@ -2,6 +2,8 @@
 namespace App\Services;
 
 use App\Models\Mutation;
+use App\Models\StockLedger;
+use App\Models\StoreStock;
 use Illuminate\Support\Facades\DB;
 use App\Services\FifoService;
 
@@ -167,5 +169,283 @@ class MutationService
     {
         abort_if($mutation->status === 'confirmed', 422, 'Mutasi yang sudah dikonfirmasi tidak bisa dibatalkan.');
         $mutation->update(['status' => 'cancelled']);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FIFO backdate auto-fix — dipakai bareng oleh 2 pemicu:
+    //  1) MutationController: pembelian/sale_external yang tgl terimanya
+    //     lebih AWAL dari transfer yang sudah confirmed (batch baru "menyelip").
+    //  2) DailyLedgerController: pencatatan harian yang dikonfirmasi BELAKANGAN,
+    //     padahal ada transfer confirmed di tanggal setelahnya (transfer itu
+    //     kepakai batch yang seharusnya sudah habis dipakai harian duluan).
+    // Kedua arah sama-sama berujung pada transfer confirmed yang harganya jadi
+    // stale karena urutan FIFO berubah SETELAH transfer itu dikonfirmasi — jadi
+    // logikanya sengaja disatukan di sini supaya tidak mencar & tidak bias
+    // (satu arah dapat auto-fix, arah lain tidak).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Transfer/penjualan KELUAR (sale_internal / sale_external_out) yang sudah
+     * confirmed dari toko $storeId, tanggalnya SETELAH $afterDate, untuk salah
+     * satu pasangan (ingredient_id, packaging_id) di $pairs. Ini daftar kandidat
+     * transfer yang mungkin kepakai batch keliru karena batch/pemakaian di
+     * $afterDate baru "masuk" ke FIFO belakangan.
+     *
+     * @param iterable<array{0:int,1:?int}> $pairs pasangan [ingredient_id, packaging_id]
+     * @return array<int,array{id:int,reference_no:string,date:string}>
+     */
+    public static function confirmedTransfersAfter(int $storeId, iterable $pairs, string $afterDate): array
+    {
+        $pairs = collect($pairs)->filter(fn($p) => !empty($p[0]))->values();
+        if ($pairs->isEmpty()) return [];
+
+        return Mutation::where('source_store_id', $storeId)
+            ->where('status', 'confirmed')
+            ->whereIn('type', ['sale_internal', 'sale_external_out'])
+            ->whereHas('items', function ($q) use ($pairs) {
+                $q->where(function ($qq) use ($pairs) {
+                    foreach ($pairs as [$ingId, $pkgId]) {
+                        $qq->orWhere(function ($q3) use ($ingId, $pkgId) {
+                            $q3->where('ingredient_id', $ingId);
+                            $pkgId === null ? $q3->whereNull('packaging_id') : $q3->where('packaging_id', $pkgId);
+                        });
+                    }
+                });
+            })
+            ->whereRaw('COALESCE(delivery_date, transaction_date) > ?', [$afterDate])
+            ->orderByRaw('COALESCE(delivery_date, transaction_date)')
+            ->get(['id', 'reference_no', 'delivery_date', 'transaction_date'])
+            ->map(fn($m) => [
+                'id'           => $m->id,
+                'reference_no' => $m->reference_no,
+                'date'         => ($m->delivery_date ?? $m->transaction_date)->toDateString(),
+            ])->all();
+    }
+
+    /**
+     * Kebalikan dari confirmedTransfersAfter: dipakai saat mutasi ini MAU
+     * dibatalkan konfirmasinya (Batalkan Konfirmasi). Membatalkan sebuah batch
+     * (pembelian/sale_external) menghilangkannya dari FIFO, dan membatalkan
+     * sebuah transfer mengembalikan qty-nya ke toko sumber + menghapus batch
+     * yang tadi dibuatnya di toko tujuan — DUA-DUANYA bisa menggeser urutan FIFO
+     * utk transfer LAIN yang confirmed di tanggal setelahnya, persis seperti saat
+     * mutasi ini dikonfirmasi (lihat pendingConfirmedTransfersAfter di
+     * MutationController). Dicek di KEDUA toko yang terlibat (sumber & tujuan),
+     * bukan cuma satu arah, supaya tidak bias sebelah.
+     *
+     * @return array<int,array{id:int,reference_no:string,date:string}>
+     */
+    public static function pendingConfirmedTransfersAfterUnconfirm(Mutation $mutation): array
+    {
+        $mutation->loadMissing('items');
+        $storeIds = array_filter([$mutation->source_store_id, $mutation->destination_store_id]);
+        if (empty($storeIds)) return [];
+
+        $pairs = $mutation->items->map(fn($i) => [$i->ingredient_id, $i->packaging_id])->unique()->values();
+        if ($pairs->isEmpty()) return [];
+
+        $upTo = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+
+        $all = [];
+        foreach ($storeIds as $sid) {
+            foreach (self::confirmedTransfersAfter((int) $sid, $pairs, $upTo) as $t) {
+                if ($t['id'] === $mutation->id) continue; // jangan termasuk dirinya sendiri
+                $all[$t['id']] = $t; // dedupe — bisa muncul dari toko sumber & tujuan sekaligus
+            }
+        }
+        return array_values($all);
+    }
+
+    /**
+     * Tanggal pencatatan harian (di toko sumber, bahan-bahan mutasi ini) yang
+     * BELUM dikonfirmasi tapi tanggalnya <= tanggal mutasi ini — dipakai untuk
+     * peringatan lunak saat konfirmasi transfer, dan sebagai "gerbang" sebelum
+     * auto-fix (lihat applyBackdateAutoFix).
+     */
+    public static function pendingUsageDatesBefore(Mutation $mutation): array
+    {
+        if (!$mutation->deductsFromSource() || !$mutation->source_store_id) return [];
+
+        $upTo   = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+        $ingIds = $mutation->items->pluck('ingredient_id')->unique()->all();
+        if (empty($ingIds)) return [];
+
+        return \App\Models\DailyUsage::where('store_id', $mutation->source_store_id)
+            ->whereIn('ingredient_id', $ingIds)
+            ->where('qty_pack', '>', 0)
+            ->where('usage_date', '<=', $upTo)
+            ->whereNotExists(fn($q) => $q->from('daily_confirmations')
+                ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
+                ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
+            ->distinct()->orderBy('usage_date')
+            ->pluck('usage_date')
+            ->map(fn($d) => $d instanceof \Carbon\Carbon ? $d->toDateString() : (string) $d)
+            ->all();
+    }
+
+    /**
+     * Cek kunci periode (bulan / opname / snapshot HPP) untuk mutasi ini — dipakai
+     * bareng oleh unconfirm() (aksi manual) dan autoFixTransferPrice() (auto-fix).
+     * null = tidak terkunci, boleh dibatalkan konfirmasinya.
+     */
+    public static function unconfirmLockReason(Mutation $mutation): ?string
+    {
+        $txDate = $mutation->transaction_date;
+        if (MonthLockService::isLocked('mutation', $mutation->id, $txDate->month, $txDate->year)) {
+            return MonthLockService::lockMessage($txDate->month, $txDate->year);
+        }
+        $lockDate = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+        $lc = \Carbon\Carbon::parse($lockDate);
+        foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
+            if (\App\Models\Opname::isDateLocked((int) $sid, $lockDate)) {
+                return \App\Models\Opname::lockMessageFor((int) $sid);
+            }
+            if (\App\Models\HppSnapshot::isDateLocked((int) $sid, $lockDate)) {
+                return \App\Models\HppSnapshot::lockMessageFor((int) $sid, $lc->month, $lc->year);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Balikkan efek stok mutasi ini & kembalikan ke draft — inti dari "Batalkan
+     * Konfirmasi", diekstrak supaya bisa dipanggil ulang oleh auto-fix tanpa lewat
+     * HTTP. TIDAK mengecek kunci — panggil unconfirmLockReason() dulu di pemanggil.
+     */
+    public static function doUnconfirm(Mutation $mutation): void
+    {
+        DB::transaction(function () use ($mutation) {
+            $mutation->loadMissing('items');
+
+            // Pasangan (toko × bahan) yang perlu dihitung ulang — dua arah, sama spt destroy()
+            $pairs = [];
+            foreach ($mutation->items as $item) {
+                if ($mutation->source_store_id && in_array($mutation->type, ['sale_internal', 'sale_external_out'])) {
+                    $pairs[$mutation->source_store_id . '-' . $item->ingredient_id] =
+                        ['store_id' => $mutation->source_store_id, 'ingredient_id' => $item->ingredient_id];
+                }
+                if ($mutation->destination_store_id) {
+                    $pairs[$mutation->destination_store_id . '-' . $item->ingredient_id] =
+                        ['store_id' => $mutation->destination_store_id, 'ingredient_id' => $item->ingredient_id];
+                }
+            }
+
+            // Hapus jejak ledger mutasi ini, lalu susun ulang balance_after-nya
+            $ledgerPairs = StockLedger::where('reference_type', 'Mutation')
+                ->where('reference_id', $mutation->id)
+                ->get(['store_id', 'ingredient_id'])
+                ->unique(fn($e) => $e->store_id . '-' . $e->ingredient_id)
+                ->values();
+
+            StockLedger::where('reference_type', 'Mutation')
+                ->where('reference_id', $mutation->id)
+                ->delete();
+
+            foreach ($ledgerPairs as $pair) {
+                $balance = 0;
+                foreach (StockLedger::where('store_id', $pair->store_id)
+                            ->where('ingredient_id', $pair->ingredient_id)
+                            ->orderBy('movement_date')->orderBy('id')->get() as $entry) {
+                    $balance += $entry->qty_change;
+                    $entry->update(['balance_after' => $balance]);
+                }
+                StoreStock::updateOrCreate(
+                    ['store_id' => $pair->store_id, 'ingredient_id' => $pair->ingredient_id],
+                    ['stock_balance' => $balance]
+                );
+            }
+
+            // Kembali ke draft. remaining_qty dikembalikan penuh supaya saat dikonfirmasi
+            // ulang batch-nya mulai bersih (tidak membawa sisa deduksi lama).
+            $mutation->items()->update(['remaining_qty' => DB::raw('total_in_base')]);
+            $mutation->update(['status' => 'draft', 'confirmed_by' => null]);
+
+            // Setelah status jadi draft, item mutasi ini tidak lagi dihitung sebagai batch
+            // maupun deduksi → recalculate merapikan sisa batch toko terdampak.
+            foreach ($pairs as $p) {
+                FifoService::recalculate($p['store_id'], $p['ingredient_id']);
+            }
+        });
+    }
+
+    /**
+     * Auto-fix harga transfer yang jadi stale akibat pembelian/pencatatan harian
+     * backdated. Sama persis dengan Batalkan Konfirmasi lalu Konfirmasi lagi
+     * secara manual — HANYA jalan kalau periode transfer ini TIDAK terkunci
+     * (bulan / opname / HPP), sama seperti kalau user melakukannya sendiri.
+     * true = berhasil diperbaiki, false = dilewati krn terkunci.
+     */
+    public static function autoFixTransferPrice(Mutation $transfer): bool
+    {
+        if ($transfer->status !== 'confirmed' || $transfer->type === 'opening_stock') return false;
+        if (self::unconfirmLockReason($transfer) !== null) return false;
+
+        self::doUnconfirm($transfer);
+        self::confirm($transfer->fresh());
+        return true;
+    }
+
+    /**
+     * Jalankan auto-fix ke daftar transfer terdampak (dari confirmedTransfersAfter
+     * / pendingConfirmedTransfersAfterUnconfirm), dipanggil SETELAH pemicunya
+     * sendiri (konfirmasi ATAU batalkan-konfirmasi pembelian/pencatatan harian/
+     * waste) selesai. Satu fungsi dipakai oleh SEMUA jalur pemicu supaya
+     * perilakunya tidak bisa mencar/bias antar tempat.
+     *
+     * $checkUsageGate = true (arah KONFIRMASI, mis. dikonfirmasi belakangan):
+     * transfer yang MASIH punya pencatatan harian lain yang belum dikonfirmasi
+     * (sebelum tanggalnya sendiri) SENGAJA dilewati dulu (bukan diperbaiki
+     * setengah-setengah) — supaya tidak disegarkan berkali-kali dgn harga yang
+     * masih akan berubah lagi begitu sisa harinya dikonfirmasi. Nanti otomatis
+     * kena giliran begitu hari terakhir yang tersisa itu selesai dikonfirmasi.
+     *
+     * $checkUsageGate = false (arah BATALKAN KONFIRMASI): gerbang di atas SENGAJA
+     * dimatikan. Kalau dipakai di arah ini, gerbangnya akan SELALU non-kosong —
+     * tanggal yang baru saja dibatalkan itu sendiri langsung terhitung "belum
+     * dikonfirmasi", jadi auto-fix tidak akan pernah jalan. Membatalkan konfirmasi
+     * adalah keadaan akhir yang pasti (bukan "masih menunggu lebih banyak
+     * konfirmasi menyusul" spt arah konfirmasi), jadi harga harus langsung
+     * mencerminkan kondisi terkini — bukan ditunda.
+     *
+     * @return array{fixed: string[], locked: string[]} reference_no yang berhasil
+     *   diperbaiki, dan reference_no+tanggal yang dilewati karena terkunci.
+     */
+    public static function applyBackdateAutoFix(array $affected, bool $checkUsageGate = true): array
+    {
+        $fixed = []; $locked = [];
+        foreach ($affected as $a) {
+            $transfer = Mutation::find($a['id']);
+            if (!$transfer) continue;
+            $transfer->loadMissing('items');
+
+            if ($checkUsageGate && !empty(self::pendingUsageDatesBefore($transfer))) continue;
+
+            if (self::autoFixTransferPrice($transfer)) {
+                $fixed[] = $a['reference_no'];
+            } else {
+                $locked[] = $a['reference_no'] . ' (' . \Carbon\Carbon::parse($a['date'])->isoFormat('D MMM Y') . ')';
+            }
+        }
+        return ['fixed' => $fixed, 'locked' => $locked];
+    }
+
+    /**
+     * Tempel ringkasan auto-fix ke pesan sukses (redirect biasa, bukan JSON) &
+     * flash daftar yang terkunci — dipakai bareng oleh SEMUA controller yang
+     * memicu applyBackdateAutoFix lewat redirect (Mutasi, Waste). Ditangkap oleh
+     * banner global di layouts/app.blade.php lewat session('backdate_locked').
+     */
+    public static function withBackdateFixMessage($redirect, string $baseMsg, array $result)
+    {
+        $msg = $baseMsg;
+        if ($result['fixed']) {
+            $msg .= ' Harga ' . count($result['fixed']) . ' transfer ikut disegarkan otomatis ('
+                  . implode(', ', $result['fixed']) . ').';
+        }
+        $redirect = $redirect->with('success', $msg);
+        if ($result['locked']) {
+            $redirect = $redirect->with('backdate_locked', $result['locked']);
+        }
+        return $redirect;
     }
 }

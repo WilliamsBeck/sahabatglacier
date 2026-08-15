@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Inventory;
 use App\Http\Controllers\Controller;
 use App\Models\{DailyUsage, DailyConfirmation, Ingredient, IngredientCategory, MutationItem, Opname, Store, WasteLogItem};
 use App\Services\FifoService;
+use App\Services\MutationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -709,13 +710,39 @@ class DailyLedgerController extends Controller
                 ], 422);
             }
 
+            // Pasangan (ingredient_id, packaging_id) yg pemakaiannya bakal dibatalkan —
+            // dicek SEBELUM dihapus. Membatalkan konfirmasi tanggal ini mengembalikan
+            // qty-nya ke FIFO (batch jadi tersedia lagi), yang bisa menggeser urutan
+            // utk transfer LAIN yang confirmed setelah tanggal ini — sama seperti saat
+            // tanggal ini DIKONFIRMASI, cuma arahnya kebalik (lihat
+            // MutationService::pendingConfirmedTransfersAfterUnconfirm).
+            $pairsBefore = DailyUsage::where('store_id', $storeId)
+                ->where('usage_date', $date->toDateString())
+                ->where('qty_pack', '>', 0)
+                ->get(['ingredient_id', 'packaging_id'])
+                ->map(fn($u) => [$u->ingredient_id, $u->packaging_id])
+                ->unique(fn($p) => $p[0] . '-' . $p[1])
+                ->values()->all();
+            $affectedUnconfirm = MutationService::confirmedTransfersAfter($storeId, $pairsBefore, $date->toDateString());
+
             $existing->delete();
 
             // Setelah batal konfirmasi → recalculate FIFO supaya pemakaian hari itu
             // dikembalikan ke saldo stok (karena tidak terkonfirmasi lagi)
             $this->recalcAffectedIngredients($storeId, $date->toDateString());
 
-            return response()->json(['status' => 'draft']);
+            // Auto-fix: transfer yang jadi stale krn pemakaian hari ini dibatalkan —
+            // checkUsageGate=false (lihat penjelasan lengkap di
+            // MutationService::applyBackdateAutoFix): tanggal yg baru dibatalkan ini
+            // sendiri akan selalu terhitung "belum dikonfirmasi", jadi kalau gerbang
+            // itu dipakai di sini auto-fix tidak akan pernah jalan.
+            $resultUnconfirm = MutationService::applyBackdateAutoFix($affectedUnconfirm, checkUsageGate: false);
+
+            return response()->json([
+                'status' => 'draft',
+                'fixed'  => $resultUnconfirm['fixed'],
+                'locked' => $resultUnconfirm['locked'],
+            ]);
         }
 
         // ── Konfirmasi: pastikan semua tgl sebelumnya sudah dikonfirmasi ──────
@@ -744,6 +771,21 @@ class DailyLedgerController extends Controller
             }
         }
 
+        // Pasangan (ingredient_id, packaging_id) yg ada pemakaiannya di tanggal ini —
+        // dicek SEBELUM konfirmasi supaya daftar transfer terdampak masih akurat
+        // (belum ikut berubah oleh recalculate di bawah). Kalau ternyata ada transfer
+        // yang sudah confirmed SETELAH tanggal ini & pakai bahan/kemasan yang sama,
+        // transfer itu mungkin kepakai batch yang keliru karena pemakaian tgl ini baru
+        // "masuk" ke FIFO sekarang (lihat MutationService::confirmedTransfersAfter).
+        $pairs = DailyUsage::where('store_id', $storeId)
+            ->where('usage_date', $date->toDateString())
+            ->where('qty_pack', '>', 0)
+            ->get(['ingredient_id', 'packaging_id'])
+            ->map(fn($u) => [$u->ingredient_id, $u->packaging_id])
+            ->unique(fn($p) => $p[0] . '-' . $p[1])
+            ->values()->all();
+        $affected = MutationService::confirmedTransfersAfter($storeId, $pairs, $date->toDateString());
+
         DailyConfirmation::create([
             'store_id'          => $storeId,
             'confirmation_date' => $date->toDateString(),
@@ -753,7 +795,16 @@ class DailyLedgerController extends Controller
         // Setelah konfirmasi → recalculate FIFO supaya pemakaian hari itu MENGURANGI saldo stok
         $this->recalcAffectedIngredients($storeId, $date->toDateString());
 
-        return response()->json(['status' => 'confirmed']);
+        // Auto-fix: transfer yang kepakai batch keliru karena pencatatan harian ini
+        // baru dikonfirmasi belakangan — logika & syarat kunci periode sama persis
+        // dengan auto-fix di sisi pembelian (lihat MutationService::applyBackdateAutoFix).
+        $result = MutationService::applyBackdateAutoFix($affected);
+
+        return response()->json([
+            'status' => 'confirmed',
+            'fixed'  => $result['fixed'],
+            'locked' => $result['locked'],
+        ]);
     }
 
     /**
