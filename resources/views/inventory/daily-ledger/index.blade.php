@@ -143,6 +143,10 @@
             return ['dus' => 0, 'pack' => $neg ? -$p : $p, 'base' => 0.0];
         }
         $ctb  = $packaging->crate_to_pack * $packaging->pack_to_base;
+        if ($ctb <= 0) {
+            $p = (int)round($b);
+            return ['dus' => 0, 'pack' => $neg ? -$p : $p, 'base' => 0.0];
+        }
         $dus  = (int)floor($b / $ctb);
         $pack = (int)floor(($b - $dus * $ctb) / $packaging->pack_to_base);
         $rem  = $b - $dus * $ctb - $pack * $packaging->pack_to_base;
@@ -933,9 +937,26 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
                 : 'Klik untuk konfirmasi tgl ' + day;
             el.querySelector('.confirm-icon').textContent = confirmed ? '✓' : '·';
 
+            var msg = confirmed ? 'Tgl ' + day + ' dikonfirmasi ✓' : 'Konfirmasi tgl ' + day + ' dibatalkan';
+            var fixed = (res.data.fixed || []).length;
+            if (fixed > 0) {
+                msg += ' · ' + fixed + ' transfer disegarkan otomatis';
+            }
             st.style.color  = confirmed ? '#198754' : '#6c757d';
-            st.textContent  = confirmed ? 'Tgl ' + day + ' dikonfirmasi ✓' : 'Konfirmasi tgl ' + day + ' dibatalkan';
-            setTimeout(function() { st.textContent = ''; st.style.color = ''; }, 2000);
+            st.textContent  = msg;
+            setTimeout(function() { st.textContent = ''; st.style.color = ''; }, fixed > 0 ? 4000 : 2000);
+
+            // Transfer yang terdampak tapi TIDAK ikut diperbaiki (periode terkunci) —
+            // ditampilkan lebih menonjol lewat uiAlert, bukan toast singkat, supaya
+            // tidak terlewat (sama seperti peringatan serupa di sisi Mutasi).
+            if ((res.data.locked || []).length > 0 && window.uiAlert) {
+                window.uiAlert(
+                    'Harga transfer berikut TIDAK ikut disegarkan otomatis karena periodenya sudah terkunci:\n' +
+                    res.data.locked.join('\n') +
+                    '\n\nPeriksa manual bila perlu (Batalkan Konfirmasi → Konfirmasi ulang di halaman Mutasi).',
+                    { type: 'warning', title: 'Beberapa transfer perlu dicek manual' }
+                );
+            }
         })
         .catch(function() {
             document.getElementById('saveStatus').textContent = '⚠ Gagal terhubung ke server';

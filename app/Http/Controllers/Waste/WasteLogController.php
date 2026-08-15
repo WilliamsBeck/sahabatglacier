@@ -2,7 +2,7 @@
 namespace App\Http\Controllers\Waste;
 use App\Http\Controllers\Controller;
 use App\Models\{WasteLog, WasteLogItem, Ingredient, IngredientPackaging, Store};
-use App\Services\{FifoService, StockLedgerService};
+use App\Services\{FifoService, StockLedgerService, MutationService};
 use App\Exports\ArrayExport;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
@@ -133,6 +133,18 @@ class WasteLogController extends Controller
             return back()->withInput()->with('error',
                 \App\Models\HppSnapshot::lockMessageFor((int)$request->store_id, $wc->month, $wc->year));
         }
+
+        // Pasangan (ingredient_id, packaging_id) yg dipakai di input ini — dicek
+        // SEBELUM waste disimpan supaya daftar transfer terdampak masih akurat
+        // (waste tidak punya status draft/konfirmasi spt Pencatatan Harian — begitu
+        // disimpan langsung memotong stok, jadi cek & auto-fix-nya jadi satu alur
+        // dgn store(), bukan langkah terpisah). Lihat MutationService::applyBackdateAutoFix.
+        $wastePairs = collect(array_merge($request->items ?? [], $request->reworks ?? []))
+            ->filter(fn($i) => !empty($i['ingredient_id']))
+            ->map(fn($i) => [(int) $i['ingredient_id'], !empty($i['packaging_id']) ? (int) $i['packaging_id'] : null])
+            ->unique(fn($p) => $p[0] . '-' . $p[1])
+            ->values()->all();
+        $affected = MutationService::confirmedTransfersAfter((int) $request->store_id, $wastePairs, $request->waste_date);
 
         try {
         DB::transaction(function () use ($request) {
@@ -312,7 +324,15 @@ class WasteLogController extends Controller
             throw $e;
         }
 
-        return redirect()->route('waste.logs.index')->with('success','Waste berhasil dicatat.');
+        // Auto-fix: transfer yang kepakai batch keliru karena waste ini baru
+        // dicatat belakangan — logika & syarat kunci periode sama persis dgn
+        // auto-fix di Mutasi & Pencatatan Harian (lihat MutationService).
+        $result = MutationService::applyBackdateAutoFix($affected);
+        return MutationService::withBackdateFixMessage(
+            redirect()->route('waste.logs.index'),
+            'Waste berhasil dicatat.',
+            $result
+        );
     }
 
     public function show(WasteLog $log)
