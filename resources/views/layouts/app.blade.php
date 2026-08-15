@@ -120,6 +120,27 @@
                     <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
                 </div>
             @endif
+            {{-- Sebagian transfer tidak ikut auto-fix (backdated purchase) krn periodenya
+                 sudah terkunci — bulan/opname/HPP. Global (bukan per-halaman) karena
+                 flash-nya bisa mendarat di index ATAU show tergantung tombol Konfirmasi
+                 mana yang dipakai. --}}
+            @if(session('backdate_locked'))
+                <div class="alert alert-warning d-flex align-items-start gap-2">
+                    <i class="bi bi-lock-fill fs-5 mt-1"></i>
+                    <div class="flex-fill">
+                        <strong>Sebagian transfer tidak ikut disegarkan otomatis</strong>
+                        <div class="small mt-1">
+                            Periodenya sudah terkunci (bulan/opname/HPP), jadi harganya <strong>tidak diubah</strong> —
+                            supaya laporan yang sudah final tidak berubah tanpa Anda sadari:
+                        </div>
+                        <ul class="small mt-2 mb-0">
+                            @foreach(session('backdate_locked') as $t)
+                                <li>{{ $t }}</li>
+                            @endforeach
+                        </ul>
+                    </div>
+                </div>
+            @endif
             @if($errors->any())
                 <div class="alert alert-danger alert-dismissible fade show js-auto-dismiss">
                     <strong><i class="bi bi-exclamation-triangle me-1"></i>Ada kesalahan input:</strong>
