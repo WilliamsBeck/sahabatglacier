@@ -129,6 +129,15 @@ class MutationService
                 if (abs($price - (float) $item->price_per_base) > 0.0001) {
                     $item->update([
                         'price_per_base' => $price,
+                        // Harga/dus & harga bruto WAJIB ikut disegarkan. Accessor
+                        // MutationItem::harga_per_dus mengutamakan price_per_crate,
+                        // jadi kalau kolom itu dibiarkan berisi angka yang diketik user,
+                        // Detail Mutasi akan menampilkan harga LAMA padahal FIFO sudah
+                        // berubah — beda dengan Saldo Stok yang selalu menurunkan
+                        // harga/dus dari price_per_base (StockController). Rumus
+                        // pembulatannya disamakan persis supaya kedua halaman cocok.
+                        'price_per_crate'      => $ctb > 0 ? round($price * $ctb) : null,
+                        'gross_price_per_base' => $price,
                         'cost_subtotal'  => (float) $item->total_in_base * $price,
                     ]);
                     $item->refresh();
@@ -150,6 +159,11 @@ class MutationService
                     'qty_base'               => 0,
                     'total_in_base'          => $base,
                     'price_per_base'         => $price,
+                    // Diisi eksplisit (bukan dibiarkan NULL) supaya Detail Mutasi &
+                    // Saldo Stok menampilkan harga/dus yang sama — lihat catatan di
+                    // cabang satu-lapisan di atas.
+                    'price_per_crate'        => $ctb > 0 ? round($price * $ctb) : null,
+                    'gross_price_per_base'   => $price,
                     'selling_price_per_base' => $item->selling_price_per_base,
                     'cost_subtotal'          => $base * $price,
                     'remaining_qty'          => $base,
