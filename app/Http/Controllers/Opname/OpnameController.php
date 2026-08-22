@@ -3,7 +3,7 @@ namespace App\Http\Controllers\Opname;
 
 use App\Http\Controllers\Controller;
 use App\Models\{Opname, OpnameItem, Ingredient, IngredientPackaging, MutationItem, Mutation, StockLedger, UnlockRequest, DailyUsage};
-use App\Services\{StockLedgerService, FifoService, MonthLockService};
+use App\Services\{StockLedgerService, FifoService, MonthLockService, MutationService};
 use App\Exports\ArrayExport;
 use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Http\Request;
@@ -1087,6 +1087,16 @@ class OpnameController extends Controller
             $opname->load('items');
         }
 
+        // Transfer yang bisa jadi stale: penyesuaian selisih & batch bootstrap dari
+        // opname ini menggeser FIFO, jadi transfer SETELAH tanggal opname bisa jadi
+        // memakai batch yang keliru. Dikumpulkan SEBELUM approve supaya daftarnya
+        // belum terpengaruh perubahan di bawah.
+        // Catatan: transfer yang jatuh di dalam periode yang ikut TERKUNCI oleh opname
+        // ini otomatis dilewati oleh applyBackdateAutoFix dan dilaporkan sbg terkunci —
+        // yang tertolong adalah transfer di luar jendela kunci (mis. opname tengah
+        // bulan hanya mengunci tgl 1–15, transfer tgl 20 masih bisa disegarkan).
+        $affectedByOpname = $this->transfersAfterOpname($opname);
+
         DB::transaction(function () use ($opname) {
             $opname->update(['status' => 'approved', 'approved_by' => auth()->id()]);
 
@@ -1254,10 +1264,32 @@ class OpnameController extends Controller
             $this->freezeItemPrices($opname);
         });
 
+        $result = MutationService::applyBackdateAutoFix($affectedByOpname);
+
         // Redirect eksplisit ke SHOW (bukan back()) — kalau approve dipicu dari halaman
         // edit, back() akan membuka edit lagi padahal sudah approved → error 403.
-        return redirect()->route('opname.opnames.show', $opname)
-            ->with('success', 'Opname disetujui. Stok otomatis disesuaikan.');
+        return MutationService::withBackdateFixMessage(
+            redirect()->route('opname.opnames.show', $opname),
+            'Opname disetujui. Stok otomatis disesuaikan.',
+            $result
+        );
+    }
+
+    /**
+     * Transfer/penjualan keluar yang sudah confirmed SETELAH tanggal opname ini,
+     * untuk bahan×kemasan yang ada di opname. Dipakai oleh approve/unapprove/destroy
+     * — ketiganya sama-sama menggeser FIFO lewat penyesuaian selisih & batch bootstrap.
+     */
+    private function transfersAfterOpname(Opname $opname): array
+    {
+        $opname->loadMissing('items');
+        $pairs = collect($opname->items)
+            ->map(fn($i) => [(int) $i->ingredient_id, $i->packaging_id ? (int) $i->packaging_id : null])
+            ->unique(fn($p) => $p[0] . '-' . $p[1])->values()->all();
+
+        return MutationService::confirmedTransfersAfter(
+            (int) $opname->store_id, $pairs, $opname->opname_date->toDateString()
+        );
     }
 
     // Kunci harga ke setiap opname item.

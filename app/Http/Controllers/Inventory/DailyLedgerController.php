@@ -607,16 +607,33 @@ class DailyLedgerController extends Controller
             ->where('confirmation_date', $request->date)
             ->exists();
 
+        $fix = ['fixed' => [], 'locked' => []];
         if ($isConfirmed) {
             FifoService::recalculate((int)$request->store_id, (int)$request->ingredient_id);
+
+            // Pemakaian di tanggal yang SUDAH dikonfirmasi ikut memotong FIFO, jadi
+            // mengubah angkanya bisa membuat transfer setelah tanggal ini memakai
+            // batch yang keliru — sama persis dengan kasus konfirmasi tanggal.
+            $fix = $this->autoFixAfterUsageChange(
+                (int) $request->store_id,
+                [[(int) $request->ingredient_id, $request->packaging_id ?: null]],
+                $request->date
+            );
+        }
+
+        $note = $isConfirmed
+            ? 'Tersimpan & saldo stok telah diupdate.'
+            : 'Tersimpan sebagai draft. Saldo stok belum berkurang — konfirmasi tanggal dulu untuk mengurangi stok.';
+        if ($fix['fixed']) {
+            $note .= ' Harga ' . count($fix['fixed']) . ' transfer ikut disegarkan otomatis.';
         }
 
         return response()->json([
             'ok'          => true,
             'is_confirmed' => $isConfirmed,
-            'note'        => $isConfirmed
-                ? 'Tersimpan & saldo stok telah diupdate.'
-                : 'Tersimpan sebagai draft. Saldo stok belum berkurang — konfirmasi tanggal dulu untuk mengurangi stok.',
+            'note'        => $note,
+            'fixed'       => $fix['fixed'],
+            'locked'      => $fix['locked'],
         ]);
     }
 
@@ -640,16 +657,31 @@ class DailyLedgerController extends Controller
         $affectedIngs = [];
         $errors       = [];
         $cleared      = 0;
+        // Pasangan (bahan × kemasan) & tanggal PALING AWAL yang benar-benar terhapus
+        // di tanggal yang sudah dikonfirmasi — dipakai untuk auto-fix harga transfer.
+        $fixPairs     = [];
+        $earliestDate = null;
 
-        \DB::transaction(function () use ($data, $storeId, &$affectedIngs, &$errors, &$cleared) {
+        \DB::transaction(function () use ($data, $storeId, &$affectedIngs, &$errors, &$cleared, &$fixPairs, &$earliestDate) {
             foreach ($data['cells'] as $c) {
                 if ($err = $this->lockError($storeId, $c['date'])) { $errors[$err] = true; continue; }
                 $q = DailyUsage::where('store_id', $storeId)
                     ->where('ingredient_id', (int) $c['ingredient_id'])
                     ->where('usage_date', $c['date']);
                 empty($c['packaging_id']) ? $q->whereNull('packaging_id') : $q->where('packaging_id', (int) $c['packaging_id']);
-                $cleared += $q->delete();
+                $n = $q->delete();
+                $cleared += $n;
                 $affectedIngs[(int) $c['ingredient_id']] = true;
+
+                // Hanya sel yang BENAR-BENAR terhapus di tanggal terkonfirmasi yang
+                // menggeser FIFO; sel kosong / tanggal draft tidak mengubah apa pun.
+                if ($n > 0 && DailyConfirmation::where('store_id', $storeId)
+                        ->where('confirmation_date', $c['date'])->exists()) {
+                    $pkgId = empty($c['packaging_id']) ? null : (int) $c['packaging_id'];
+                    $fixPairs[(int) $c['ingredient_id'] . '-' . $pkgId] = [(int) $c['ingredient_id'], $pkgId];
+                    $d = \Carbon\Carbon::parse($c['date'])->toDateString();
+                    if ($earliestDate === null || $d < $earliestDate) $earliestDate = $d;
+                }
             }
         });
 
@@ -658,10 +690,16 @@ class DailyLedgerController extends Controller
             FifoService::recalculate($storeId, (int) $ingId);
         }
 
+        $fix = $earliestDate
+            ? $this->autoFixAfterUsageChange($storeId, array_values($fixPairs), $earliestDate)
+            : ['fixed' => [], 'locked' => []];
+
         return response()->json([
             'ok'      => true,
             'cleared' => $cleared,
             'errors'  => array_keys($errors),
+            'fixed'   => $fix['fixed'],
+            'locked'  => $fix['locked'],
         ]);
     }
 
@@ -798,13 +836,41 @@ class DailyLedgerController extends Controller
         // Auto-fix: transfer yang kepakai batch keliru karena pencatatan harian ini
         // baru dikonfirmasi belakangan — logika & syarat kunci periode sama persis
         // dengan auto-fix di sisi pembelian (lihat MutationService::applyBackdateAutoFix).
-        $result = MutationService::applyBackdateAutoFix($affected);
+        // checkUsageGate=true HANYA di sini: user menekan tanggal 1..30 satu per satu,
+        // gerbang ini mencegah transfer yang sama dibongkar-pasang berkali-kali.
+        $result = MutationService::applyBackdateAutoFix($affected, checkUsageGate: true);
 
         return response()->json([
             'status' => 'confirmed',
             'fixed'  => $result['fixed'],
             'locked' => $result['locked'],
         ]);
+    }
+
+    /**
+     * Auto-fix transfer yang jadi stale karena PEMAKAIAN HARIAN berubah di tanggal
+     * yang sudah dikonfirmasi (kalau tanggalnya belum dikonfirmasi, pemakaian itu
+     * tidak masuk FIFO sama sekali → tidak ada yang bergeser, tidak perlu dipanggil).
+     *
+     * Dipakai bareng oleh saveUsage / bulkDeleteUsage / import supaya ketiganya
+     * tidak bisa berperilaku beda. Logika intinya sama persis dengan auto-fix di
+     * Mutasi & Waste — lihat MutationService::applyBackdateAutoFix.
+     *
+     * Aman dipanggil SETELAH recalculate: confirmedTransfersAfter hanya membaca
+     * kolom status/tipe/tanggal/item mutasi, yang tidak diubah oleh recalculate
+     * (recalculate cuma menyentuh remaining_qty & store_stocks).
+     *
+     * @param array<int,array{0:int,1:?int}> $pairs pasangan [ingredient_id, packaging_id]
+     * @param string $earliestDate tanggal PALING AWAL yang berubah — transfer setelah
+     *        tanggal ini yang dicek. Untuk perubahan banyak sel, pakai tanggal termuda.
+     * @return array{fixed: string[], locked: string[]}
+     */
+    private function autoFixAfterUsageChange(int $storeId, array $pairs, string $earliestDate): array
+    {
+        if (empty($pairs)) return ['fixed' => [], 'locked' => []];
+
+        $affected = MutationService::confirmedTransfersAfter($storeId, $pairs, $earliestDate);
+        return MutationService::applyBackdateAutoFix($affected);
     }
 
     /**
@@ -1313,6 +1379,24 @@ class DailyLedgerController extends Controller
         $errors   = [];
         $affectedIngs = [];
 
+        // Tanggal yang sudah dikonfirmasi di bulan ini — dimuat SEKALI (bukan query
+        // per sel) supaya import ribuan sel tidak jadi lambat. Perubahan di tanggal
+        // draft tidak masuk FIFO, jadi tidak perlu memicu auto-fix harga transfer.
+        $confirmedDates = DailyConfirmation::where('store_id', $storeId)
+            ->whereYear('confirmation_date', $year)
+            ->whereMonth('confirmation_date', $month)
+            ->pluck('confirmation_date')
+            ->map(fn($d) => $d instanceof Carbon ? $d->toDateString() : (string) $d)
+            ->flip()->all();
+
+        $fixPairs = []; $earliestDate = null;
+        $catatPerubahan = function ($ingId, $pkgId, string $dateStr) use (&$fixPairs, &$earliestDate, $confirmedDates) {
+            if (!isset($confirmedDates[$dateStr])) return;
+            $pkgId = $pkgId === null ? null : (int) $pkgId;
+            $fixPairs[(int) $ingId . '-' . $pkgId] = [(int) $ingId, $pkgId];
+            if ($earliestDate === null || $dateStr < $earliestDate) $earliestDate = $dateStr;
+        };
+
         \DB::beginTransaction();
         try {
             for ($r = $dataStartRow; $r <= $highestRow; $r++) {
@@ -1344,6 +1428,7 @@ class DailyLedgerController extends Controller
                             ->delete();
                         if ($deleted) {
                             $affectedIngs[$ingId] = true;
+                            $catatPerubahan($ingId, $pkgId, $dateStr);
                         }
                         continue;
                     }
@@ -1367,6 +1452,7 @@ class DailyLedgerController extends Controller
                             ]);
                             $updated++;
                             $affectedIngs[$ingId] = true;
+                            $catatPerubahan($ingId, $pkgId, $dateStr);
                         }
                     } else {
                         DailyUsage::create([
@@ -1379,6 +1465,7 @@ class DailyLedgerController extends Controller
                         ]);
                         $inserted++;
                         $affectedIngs[$ingId] = true;
+                        $catatPerubahan($ingId, $pkgId, $dateStr);
                     }
                 }
             }
@@ -1393,9 +1480,22 @@ class DailyLedgerController extends Controller
             FifoService::recalculate($storeId, $ingId);
         }
 
+        // Auto-fix harga transfer yang jadi stale karena pemakaian di tanggal
+        // terkonfirmasi ikut berubah lewat import.
+        $fix = $earliestDate
+            ? $this->autoFixAfterUsageChange($storeId, array_values($fixPairs), $earliestDate)
+            : ['fixed' => [], 'locked' => []];
+
         $lockMsg = Opname::lockMessageFor($storeId);
         $msg = "Import selesai: {$inserted} baru, {$updated} diperbarui";
         if ($skipped > 0) $msg .= ". ⚠️ {$skipped} data dilewati karena periode terkunci — {$lockMsg}";
+        if ($fix['fixed']) {
+            $msg .= '. Harga ' . count($fix['fixed']) . ' transfer ikut disegarkan otomatis';
+        }
+        if ($fix['locked']) {
+            $msg .= '. ⚠️ ' . count($fix['locked']) . ' transfer tidak bisa disegarkan (periode terkunci): '
+                  . implode(', ', $fix['locked']);
+        }
         if (count($errors) > 0) {
             $msg .= ". Error: " . implode('; ', array_slice($errors, 0, 5));
             if (count($errors) > 5) $msg .= ' (dan ' . (count($errors) - 5) . ' lainnya)';

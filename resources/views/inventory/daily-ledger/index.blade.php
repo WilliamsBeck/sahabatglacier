@@ -595,6 +595,19 @@ var confirmUrl    = '{{ route("inventory.daily-ledger.confirm-date") }}';
 var csrfToken  = '{{ csrf_token() }}';
 var saveTimers = {};
 
+// Transfer yang terdampak tapi TIDAK bisa disegarkan otomatis (periode terkunci).
+// Ditampilkan lewat uiAlert — bukan toast singkat — supaya tidak terlewat. Dipakai
+// bareng oleh simpan sel, hapus massal, dan toggle konfirmasi tanggal.
+function laporTransferTerkunci(locked) {
+    if (!locked || !locked.length || !window.uiAlert) return;
+    window.uiAlert(
+        'Harga transfer berikut TIDAK ikut disegarkan otomatis karena periodenya sudah terkunci:\n' +
+        locked.join('\n') +
+        '\n\nPeriksa manual bila perlu (Batalkan Konfirmasi → Konfirmasi ulang di halaman Mutasi).',
+        { type: 'warning', title: 'Beberapa transfer perlu dicek manual' }
+    );
+}
+
 // ── Lazy input: sel pemakaian tampil sebagai teks; <input> dibuat hanya saat difokus.
 //    Ini memangkas ribuan input dari DOM → load jauh lebih cepat & scroll tidak nge-lag.
 var ledgerTable = document.querySelector('.daily-ledger-table');
@@ -739,8 +752,12 @@ if (ledgerTable) {
                     updateRowSummary(tr);
                     return;
                 }
-                status.textContent = 'Tersimpan ✓';
-                setTimeout(function() { status.textContent = ''; }, 1500);
+                var nFix = ((res.data && res.data.fixed) || []).length;
+                status.textContent = nFix > 0
+                    ? 'Tersimpan ✓ · ' + nFix + ' transfer disegarkan otomatis'
+                    : 'Tersimpan ✓';
+                setTimeout(function() { status.textContent = ''; }, nFix > 0 ? 4000 : 1500);
+                laporTransferTerkunci(res.data && res.data.locked);
             })
             .catch(function() { status.textContent = '⚠ Gagal simpan'; });
         }, 500);
@@ -846,8 +863,12 @@ if (ledgerTable) {
             if (res.data && res.data.errors && res.data.errors.length) {
                 status.textContent = '⚠ Sebagian terkunci'; window.location.reload(); return; // resync
             }
-            status.textContent = 'Terhapus ✓';
-            setTimeout(function() { status.textContent = ''; }, 1500);
+            var nFix = ((res.data && res.data.fixed) || []).length;
+            status.textContent = nFix > 0
+                ? 'Terhapus ✓ · ' + nFix + ' transfer disegarkan otomatis'
+                : 'Terhapus ✓';
+            setTimeout(function() { status.textContent = ''; }, nFix > 0 ? 4000 : 1500);
+            laporTransferTerkunci(res.data && res.data.locked);
         })
         .catch(function() { status.textContent = '⚠ Gagal hapus'; window.location.reload(); });
     });
@@ -946,17 +967,7 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
             st.textContent  = msg;
             setTimeout(function() { st.textContent = ''; st.style.color = ''; }, fixed > 0 ? 4000 : 2000);
 
-            // Transfer yang terdampak tapi TIDAK ikut diperbaiki (periode terkunci) —
-            // ditampilkan lebih menonjol lewat uiAlert, bukan toast singkat, supaya
-            // tidak terlewat (sama seperti peringatan serupa di sisi Mutasi).
-            if ((res.data.locked || []).length > 0 && window.uiAlert) {
-                window.uiAlert(
-                    'Harga transfer berikut TIDAK ikut disegarkan otomatis karena periodenya sudah terkunci:\n' +
-                    res.data.locked.join('\n') +
-                    '\n\nPeriksa manual bila perlu (Batalkan Konfirmasi → Konfirmasi ulang di halaman Mutasi).',
-                    { type: 'warning', title: 'Beberapa transfer perlu dicek manual' }
-                );
-            }
+            laporTransferTerkunci(res.data.locked);
         })
         .catch(function() {
             document.getElementById('saveStatus').textContent = '⚠ Gagal terhubung ke server';

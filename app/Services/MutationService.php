@@ -392,25 +392,26 @@ class MutationService
      * waste) selesai. Satu fungsi dipakai oleh SEMUA jalur pemicu supaya
      * perilakunya tidak bisa mencar/bias antar tempat.
      *
-     * $checkUsageGate = true (arah KONFIRMASI, mis. dikonfirmasi belakangan):
-     * transfer yang MASIH punya pencatatan harian lain yang belum dikonfirmasi
-     * (sebelum tanggalnya sendiri) SENGAJA dilewati dulu (bukan diperbaiki
-     * setengah-setengah) — supaya tidak disegarkan berkali-kali dgn harga yang
-     * masih akan berubah lagi begitu sisa harinya dikonfirmasi. Nanti otomatis
-     * kena giliran begitu hari terakhir yang tersisa itu selesai dikonfirmasi.
+     * $checkUsageGate MURNI OPTIMASI, BUKAN soal benar/salah. Perbaikannya sendiri
+     * (autoFixTransferPrice) selalu menghitung ulang dari keadaan FIFO SAAT INI —
+     * dan FIFO cuma memasukkan pemakaian harian yang sudah dikonfirmasi. Jadi harga
+     * hasil hitung ulang selalu konsisten dengan yang sistem percayai sekarang;
+     * tidak pernah "setengah jadi". Karena itu defaultnya false (selalu perbaiki).
      *
-     * $checkUsageGate = false (arah BATALKAN KONFIRMASI): gerbang di atas SENGAJA
-     * dimatikan. Kalau dipakai di arah ini, gerbangnya akan SELALU non-kosong —
-     * tanggal yang baru saja dibatalkan itu sendiri langsung terhitung "belum
-     * dikonfirmasi", jadi auto-fix tidak akan pernah jalan. Membatalkan konfirmasi
-     * adalah keadaan akhir yang pasti (bukan "masih menunggu lebih banyak
-     * konfirmasi menyusul" spt arah konfirmasi), jadi harga harus langsung
-     * mencerminkan kondisi terkini — bukan ditunda.
+     * true dipakai HANYA di DailyLedgerController::confirmDate cabang konfirmasi:
+     * di sana user menekan tanggal 1,2,3,...,30 satu per satu, dan tanpa gerbang ini
+     * transfer yang sama akan dibongkar-pasang berkali-kali (30x transaksi DB) untuk
+     * hasil akhir yang sama. Gerbangnya menunda sampai tanggal terakhir yang tersisa
+     * selesai dikonfirmasi, lalu memperbaiki sekali saja.
+     *
+     * JANGAN pakai true di jalur "batalkan konfirmasi tanggal": tanggal yang baru
+     * dibatalkan itu sendiri langsung terhitung "belum dikonfirmasi", sehingga
+     * gerbangnya tidak akan pernah lolos dan auto-fix tidak pernah jalan.
      *
      * @return array{fixed: string[], locked: string[]} reference_no yang berhasil
      *   diperbaiki, dan reference_no+tanggal yang dilewati karena terkunci.
      */
-    public static function applyBackdateAutoFix(array $affected, bool $checkUsageGate = true): array
+    public static function applyBackdateAutoFix(array $affected, bool $checkUsageGate = false): array
     {
         $fixed = []; $locked = [];
         foreach ($affected as $a) {

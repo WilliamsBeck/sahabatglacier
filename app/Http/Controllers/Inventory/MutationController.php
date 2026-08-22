@@ -580,6 +580,14 @@ class MutationController extends Controller
             }
         }
 
+        // Transfer lain yang bisa jadi stale karena batch/qty mutasi ini hilang —
+        // WAJIB dikumpulkan SEBELUM items dihapus (setelah dihapus, pasangan
+        // bahan×kemasan-nya sudah tidak bisa dibaca lagi). Hanya relevan untuk
+        // mutasi confirmed; draft tidak pernah menyentuh FIFO.
+        $affected = $mutation->status === 'confirmed'
+            ? MutationService::pendingConfirmedTransfersAfterUnconfirm($mutation)
+            : [];
+
         DB::transaction(function () use ($mutation) {
             // Jika sudah confirmed, hapus ledger dan hitung ulang saldo stok
             if ($mutation->status === 'confirmed') {
@@ -652,8 +660,17 @@ class MutationController extends Controller
             }
         });
 
-        return redirect()->route('inventory.mutations.index')
-            ->with('success', 'Mutasi berhasil dihapus.');
+        // Auto-fix transfer yang harganya mengacu ke batch yang barusan dihapus.
+        // checkUsageGate=false: batch-nya benar-benar HILANG, jadi mempertahankan
+        // harga lama (yang menunjuk batch tak ada) lebih buruk daripada menghitung
+        // ulang sekarang — sama alasannya dengan Batalkan Konfirmasi.
+        $result = MutationService::applyBackdateAutoFix($affected, checkUsageGate: false);
+
+        return MutationService::withBackdateFixMessage(
+            redirect()->route('inventory.mutations.index'),
+            'Mutasi berhasil dihapus.',
+            $result
+        );
     }
 
     public function show(Mutation $mutation)

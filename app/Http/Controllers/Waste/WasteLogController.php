@@ -448,6 +448,24 @@ class WasteLogController extends Controller
                 \App\Models\HppSnapshot::lockMessageFor($log->store_id, $wc->month, $wc->year));
         }
 
+        // Transfer yang bisa jadi stale — dikumpulkan SEBELUM item lama dihapus.
+        // Pakai gabungan pasangan LAMA + BARU, dan tanggal PALING AWAL antara tanggal
+        // lama & baru, karena tanggal waste boleh digeser saat edit.
+        $log->loadMissing('items');
+        $pairsEdit = collect($log->items)
+            ->map(fn($i) => [(int) $i->ingredient_id, $i->packaging_id ? (int) $i->packaging_id : null])
+            ->concat(
+                collect(array_merge($request->items ?? [], $request->reworks ?? []))
+                    ->filter(fn($i) => !empty($i['ingredient_id']))
+                    ->map(fn($i) => [(int) $i['ingredient_id'], !empty($i['packaging_id']) ? (int) $i['packaging_id'] : null])
+            )
+            ->unique(fn($p) => $p[0] . '-' . $p[1])->values()->all();
+        $tglLama  = $log->waste_date->toDateString();
+        $tglBaru  = \Carbon\Carbon::parse($request->waste_date)->toDateString();
+        $affected = MutationService::confirmedTransfersAfter(
+            (int) $log->store_id, $pairsEdit, min($tglLama, $tglBaru)
+        );
+
         try {
         DB::transaction(function () use ($request, $log) {
             $storeId = $log->store_id;
@@ -644,7 +662,12 @@ class WasteLogController extends Controller
             throw $e;
         }
 
-        return redirect()->route('waste.logs.show', $log)->with('success', 'Waste berhasil diupdate.');
+        $result = MutationService::applyBackdateAutoFix($affected);
+        return MutationService::withBackdateFixMessage(
+            redirect()->route('waste.logs.show', $log),
+            'Waste berhasil diupdate.',
+            $result
+        );
     }
 
     public function destroy(WasteLog $log)
@@ -660,6 +683,14 @@ class WasteLogController extends Controller
             return back()->with('error',
                 \App\Models\HppSnapshot::lockMessageFor($log->store_id, $wc->month, $wc->year));
         }
+
+        // Dikumpulkan SEBELUM item dihapus — setelah itu pasangan bahan×kemasannya
+        // sudah tidak bisa dibaca lagi.
+        $log->loadMissing('items');
+        $pairsHapus = collect($log->items)
+            ->map(fn($i) => [(int) $i->ingredient_id, $i->packaging_id ? (int) $i->packaging_id : null])
+            ->unique(fn($p) => $p[0] . '-' . $p[1])->values()->all();
+        $affected = MutationService::confirmedTransfersAfter((int) $log->store_id, $pairsHapus, $wd);
 
         DB::transaction(function () use ($log) {
             $storeId = $log->store_id;
@@ -680,6 +711,11 @@ class WasteLogController extends Controller
             }
         });
 
-        return redirect()->route('waste.logs.index')->with('success', 'Waste berhasil dihapus.');
+        $result = MutationService::applyBackdateAutoFix($affected);
+        return MutationService::withBackdateFixMessage(
+            redirect()->route('waste.logs.index'),
+            'Waste berhasil dihapus.',
+            $result
+        );
     }
 }
