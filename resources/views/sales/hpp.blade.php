@@ -14,7 +14,8 @@
     @if(($summary ?? null) && ($summary->omset > 0 || $summary->hpp_ideal > 0 || ($summary->hpp_aktual ?? 0) > 0))
         @if($locked ?? false)
             <span class="badge bg-dark align-self-center"><i class="bi bi-lock-fill me-1"></i>Terkunci</span>
-            @if(auth()->user()->isSuperAdmin())
+            {{-- Tanpa batasan peran, sejajar dengan tombol Kunci HPP di bawah.
+                 Akun hanya-lihat tetap tidak bisa menekannya (diblokir RestrictViewer). --}}
             <form method="POST" action="{{ route('sales.hpp.unlock') }}" class="m-0"
                   data-confirm="Buka kunci HPP periode ini? Angka akan kembali dihitung live." data-confirm-type="warning" data-confirm-ok="Ya, buka kunci">
                 @csrf
@@ -24,7 +25,6 @@
                 <input type="hidden" name="period_type" value="{{ $periodType }}">
                 <button class="btn btn-outline-secondary"><i class="bi bi-unlock me-1"></i>Buka Kunci HPP</button>
             </form>
-            @endif
         @else
             <form method="POST" action="{{ route('sales.hpp.lock') }}" class="m-0"
                   data-confirm="Kunci HPP periode ini? Angka dibekukan sebagai snapshot agar tidak berubah." data-confirm-type="info" data-confirm-ok="Ya, kunci">

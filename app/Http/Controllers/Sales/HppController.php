@@ -694,17 +694,26 @@ class HppController extends Controller
         return back()->with('success', 'HPP periode ini berhasil dikunci (snapshot tersimpan).');
     }
 
-    // ── Buka kunci HPP (hanya Super Admin) ───────────────────────────────────
+    // ── Buka kunci HPP ───────────────────────────────────────────────────────
+    // Boleh dilakukan Super Admin maupun Admin Area, sejajar dengan tombol Kunci HPP
+    // (lock() juga tidak dibatasi peran). Akun hanya-lihat tetap tertutup otomatis
+    // oleh middleware RestrictViewer yang memblokir semua request non-GET.
     public function unlock(Request $request)
     {
-        abort_unless(auth()->user()->isSuperAdmin(), 403, 'Hanya Super Admin yang dapat membuka kunci HPP.');
         $request->validate([
             'store_id'    => 'required|exists:stores,id',
             'month'       => 'required|integer|between:1,12',
             'year'        => 'required|integer|min:2020',
             'period_type' => 'required|in:mid_month,end_month',
         ]);
-        \App\Models\HppSnapshot::where('store_id', (int)$request->store_id)
+        // WAJIB, sama seperti lock(): dulu tidak ada karena hanya Super Admin yang
+        // boleh masuk sini — dan Super Admin memang punya akses ke semua toko. Begitu
+        // Admin Area ikut diizinkan, tanpa cek ini dia bisa membuka kunci HPP toko
+        // yang bukan wilayahnya.
+        $storeId = (int) $request->store_id;
+        abort_unless(in_array($storeId, auth()->user()->accessibleStoreIds()), 403);
+
+        \App\Models\HppSnapshot::where('store_id', $storeId)
             ->where('month', (int)$request->month)->where('year', (int)$request->year)
             ->where('period_type', $request->period_type)->delete();
 

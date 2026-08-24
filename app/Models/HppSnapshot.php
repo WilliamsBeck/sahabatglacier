@@ -51,6 +51,6 @@ class HppSnapshot extends Model
     {
         $bulan = \Carbon\Carbon::create($year, $month, 1)->isoFormat('MMMM Y');
         return "HPP periode {$bulan} sudah dikunci. Opname & mutasi periode ini tidak bisa diubah. "
-             . "Buka kunci HPP dulu (Super Admin) jika perlu koreksi.";
+             . "Buka kunci HPP dulu di halaman Analisa HPP jika perlu koreksi.";
     }
 }
