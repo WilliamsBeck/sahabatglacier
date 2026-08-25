@@ -961,12 +961,20 @@ class MutationController extends Controller
         }
         $crateToBase = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
 
+        // Rekomendasi harga HANYA berlaku per toko. Tanpa toko, filter di bawah dulu
+        // tidak aktif sehingga angka bisa terambil dari toko LAIN — padahal harga
+        // antar toko bisa berbeda (ongkos kirim, batch, periode). Lebih baik kosong
+        // dan diketik manual daripada meminjam angka toko lain tanpa disadari.
+        if (!$storeId) {
+            return ['price_per_base' => 0, 'price_per_dus' => 0];
+        }
+
         $base = fn() => MutationItem::query()
             ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
             ->where('mutations.status', 'confirmed')
             ->where('mutation_items.ingredient_id', $ingredientId)
             // Pembelian = barang MASUK, jadi tokonya = destination_store_id
-            ->when($storeId, fn($q) => $q->where('mutations.destination_store_id', $storeId))
+            ->where('mutations.destination_store_id', $storeId)
             ->when($packagingId, fn($q) => $q->where('mutation_items.packaging_id', $packagingId))
             ->orderByRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) DESC')
             ->orderByDesc('mutation_items.id');
@@ -1002,7 +1010,7 @@ class MutationController extends Controller
             $opnameRow = \App\Models\OpnameItem::query()
                 ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
                 ->where('opnames.status', 'approved')
-                ->when($storeId, fn($q) => $q->where('opnames.store_id', $storeId))
+                ->where('opnames.store_id', $storeId)   // per toko, sama seperti di atas
                 ->where('opname_items.ingredient_id', $ingredientId)
                 ->when($packagingId, fn($q) => $q->where('opname_items.packaging_id', $packagingId))
                 ->where('opname_items.price_per_base', '>', 0)

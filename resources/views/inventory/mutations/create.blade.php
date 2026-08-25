@@ -994,7 +994,8 @@ function onPackagingChange(idx) {
     if (isSourceSale(type) && ingInput && ingInput.value) {
         fetchStockPrice(ingInput.value, idx);
     }
-    // Tipe Pembelian → auto-fill Harga/Dus dari pembelian terakhir GLOBAL (semua toko, per kemasan).
+    // Tipe Pembelian → auto-fill Harga/Dus dari pembelian terakhir DI TOKO TUJUAN
+    // (per kemasan). BUKAN dari semua toko — harga antar toko bisa berbeda.
     // Hanya kalau field harga masih kosong/0 → tidak menimpa input manual.
     // Dilewati saat pemuatan massal — di sana harga diambil sekaligus dalam 1 request.
     if (!sedangMuatMassal && ['purchase_zhisheng','purchase_supplier'].includes(type) && ingInput && ingInput.value) {
@@ -1205,6 +1206,19 @@ function loadZhishengItems() {
     var type   = document.getElementById('typeSelect').value;
     var suppId = document.getElementById('supplierSelect') ? document.getElementById('supplierSelect').value : '';
     if (type !== 'purchase_zhisheng' || !suppId) return;
+
+    // Toko tujuan WAJIB dipilih dulu: harga rekomendasi diambil dari riwayat toko itu.
+    // Tanpa toko, server sengaja tidak memberi rekomendasi (biar tidak meminjam harga
+    // toko lain), jadi semua baris akan tampil kosong tanpa penjelasan.
+    var tokoTujuan = (document.getElementById('destStoreSelect') || {}).value || '';
+    if (!tokoTujuan) {
+        if (window.uiAlert) {
+            uiAlert('Pilih Toko Tujuan terlebih dahulu. Harga rekomendasi diambil dari '
+                  + 'riwayat pembelian toko tersebut, bukan dari toko lain.',
+                  { type: 'info', title: 'Toko tujuan belum dipilih' });
+        }
+        return;
+    }
 
     // Kumpulkan pasangan (bahan baku × kemasan Zhisheng)
     var pairs = [];
