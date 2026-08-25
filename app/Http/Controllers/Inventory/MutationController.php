@@ -855,17 +855,67 @@ class MutationController extends Controller
     // user mengisi manual (lebih aman daripada terisi angka toko lain).
     public function lastPrice(Ingredient $ingredient, Request $request)
     {
-        $packagingId = $request->packaging_id;
-        $type        = $request->type; // mis. 'purchase_zhisheng'
-        $storeId     = $request->store_id;
+        return response()->json($this->hitungHargaTerakhir(
+            $ingredient->id, $request->packaging_id, $request->type, $request->store_id
+        ));
+    }
 
-        $pkg         = $packagingId ? IngredientPackaging::find($packagingId) : null;
+    /**
+     * Versi BANYAK SEKALIGUS dari lastPrice.
+     *
+     * Tombol "Muat semua bahan Zhisheng" dulu memanggil lastPrice satu per baris —
+     * puluhan request AJAX serentak (55 baris = 55 request). Di hosting sebagian
+     * gagal/timeout dan errornya ditelan .catch() kosong di sisi JS, sehingga
+     * sebagian baris tampil tanpa harga rekomendasi padahal datanya ADA.
+     * Satu request untuk semua baris menghilangkan sumber kegagalan itu —
+     * pola yang sama dipakai bulkDeleteUsage di Pencatatan Harian.
+     *
+     * Logikanya TIDAK diduplikasi: sama-sama memanggil hitungHargaTerakhir(),
+     * jadi hasil per baris dijamin identik dengan endpoint satuan.
+     */
+    public function lastPriceBulk(Request $request)
+    {
+        $data = $request->validate([
+            'type'                  => 'nullable|string',
+            'store_id'              => 'nullable|integer',
+            'pairs'                 => 'required|array|min:1|max:500',
+            'pairs.*.ingredient_id' => 'required|integer',
+            'pairs.*.packaging_id'  => 'nullable|integer',
+        ]);
+
+        $hasil = [];
+        foreach ($data['pairs'] as $p) {
+            $ingId = (int) $p['ingredient_id'];
+            $pkgId = $p['packaging_id'] ?? null;
+            $hasil[$ingId . '-' . ($pkgId ?: '')] = $this->hitungHargaTerakhir(
+                $ingId, $pkgId, $data['type'] ?? null, $data['store_id'] ?? null
+            );
+        }
+
+        return response()->json(['prices' => $hasil]);
+    }
+
+    /** Cache kemasan per-request: versi massal memanggil ini puluhan kali. */
+    private array $cacheKemasan = [];
+
+    /** Inti perhitungan harga rekomendasi — dipakai bareng versi satuan & massal. */
+    private function hitungHargaTerakhir(int $ingredientId, $packagingId, $type, $storeId): array
+    {
+        // Tanpa cache, versi massal menembak 1 query pencarian kemasan per baris
+        // (55 baris = 55 query sia-sia, banyak yang kemasannya berulang).
+        $pkg = null;
+        if ($packagingId) {
+            $key = (int) $packagingId;
+            $pkg = $this->cacheKemasan[$key]
+                ??= IngredientPackaging::find($key) ?: false;
+            if ($pkg === false) $pkg = null;
+        }
         $crateToBase = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
 
         $base = fn() => MutationItem::query()
             ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
             ->where('mutations.status', 'confirmed')
-            ->where('mutation_items.ingredient_id', $ingredient->id)
+            ->where('mutation_items.ingredient_id', $ingredientId)
             // Pembelian = barang MASUK, jadi tokonya = destination_store_id
             ->when($storeId, fn($q) => $q->where('mutations.destination_store_id', $storeId))
             ->when($packagingId, fn($q) => $q->where('mutation_items.packaging_id', $packagingId))
@@ -904,7 +954,7 @@ class MutationController extends Controller
                 ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
                 ->where('opnames.status', 'approved')
                 ->when($storeId, fn($q) => $q->where('opnames.store_id', $storeId))
-                ->where('opname_items.ingredient_id', $ingredient->id)
+                ->where('opname_items.ingredient_id', $ingredientId)
                 ->when($packagingId, fn($q) => $q->where('opname_items.packaging_id', $packagingId))
                 ->where('opname_items.price_per_base', '>', 0)
                 ->orderByDesc('opnames.opname_date')->orderByDesc('opnames.id')
@@ -918,10 +968,10 @@ class MutationController extends Controller
         // price_per_base diturunkan dari harga/dus supaya keduanya selalu sinkron
         $priceBase = ($priceDus > 0 && $crateToBase > 0) ? $priceDus / $crateToBase : 0;
 
-        return response()->json([
+        return [
             'price_per_base' => $priceBase,
             'price_per_dus'  => $priceDus,   // 0 = tidak ada referensi, biar diketik manual
-        ]);
+        ];
     }
 
     // API: ambil info harga stok bahan di toko tertentu (untuk pembelian internal)

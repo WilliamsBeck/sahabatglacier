@@ -171,6 +171,8 @@
             <button type="button" id="btnLoadZhisheng" class="btn btn-sm btn-outline-primary d-none" onclick="loadZhishengItems()">
                 <i class="bi bi-lightning-charge me-1"></i> Muat Semua Bahan Zhisheng
             </button>
+            {{-- Status pengambilan harga rekomendasi (berapa baris terisi / gagal) --}}
+            <span id="hargaStatus" class="small text-muted align-self-center ms-2"></span>
         </div>
     </div>
 
@@ -1211,6 +1213,7 @@ function loadZhishengItems() {
 
     document.querySelectorAll('.item-row').forEach(function (r) { r.remove(); });
 
+    var barisTerpasang = [];
     pairs.forEach(function (pair) {
         addRow();
         var idx = rowCount - 1;
@@ -1222,10 +1225,73 @@ function loadZhishengItems() {
         var pkgSel = document.querySelector('#row-' + idx + ' .packaging-select');
         if (pkgSel && String(pkgSel.value) !== String(pair.pkg)) {
             pkgSel.value = pair.pkg;
-            if (String(pkgSel.value) === String(pair.pkg)) onPackagingChange(idx);  // auto-isi harga
+            if (String(pkgSel.value) === String(pair.pkg)) onPackagingChange(idx);
         }
+        barisTerpasang.push({ idx: idx, ing: pair.ing, pkg: pair.pkg });
     });
     updateRemoveButtons();
+
+    // Harga rekomendasi diambil SEKALI untuk semua baris. Sebelumnya tiap baris
+    // menembak /last-price sendiri-sendiri (55 baris = 55 request serentak);
+    // di hosting sebagian gagal/timeout dan errornya tidak terlihat, sehingga
+    // sebagian baris tampil tanpa harga padahal datanya ada.
+    isiHargaRekomendasiMassal(barisTerpasang);
+}
+
+function isiHargaRekomendasiMassal(baris) {
+    if (!baris.length) return;
+    var type      = document.getElementById('typeSelect').value;
+    var destStore = (document.getElementById('destStoreSelect') || {}).value || '';
+    var status    = document.getElementById('hargaStatus');
+    var setStatus = function (t) { if (status) status.textContent = t; };
+
+    setStatus('Mengambil harga rekomendasi...');
+    fetch('{{ route("api.ingredient.last-price-bulk") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            type: type,
+            store_id: destStore,
+            pairs: baris.map(function (b) { return { ingredient_id: b.ing, packaging_id: b.pkg }; })
+        })
+    })
+    .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function (d) {
+        var peta = (d && d.prices) || {};
+        var terisi = 0;
+        baris.forEach(function (b) {
+            var info = peta[b.ing + '-' + b.pkg];
+            if (!info || !(info.price_per_dus > 0)) return;
+            var input = document.querySelector('#row-' + b.idx + ' .price-crate-input');
+            if (!input) return;
+            // Jangan timpa angka yang sudah diketik user
+            if (input.value && NumberFmt.parse(input.value) !== 0) return;
+            input.value = NumberFmt.format(info.price_per_dus);
+            onPriceCrateChange(b.idx);
+            terisi++;
+        });
+        var tanpa = baris.length - terisi;
+        setStatus('Harga rekomendasi terisi untuk ' + terisi + ' dari ' + baris.length + ' baris'
+            + (tanpa > 0 ? ' (' + tanpa + ' belum ada riwayat pembelian/opname — isi manual)' : ''));
+        setTimeout(function () { setStatus(''); }, 6000);
+    })
+    .catch(function (e) {
+        // JANGAN diam-diam: dulu kegagalan di sini tidak terlihat sama sekali,
+        // jadi user mengira memang tidak ada harganya.
+        setStatus('');
+        if (window.uiAlert) {
+            uiAlert('Gagal mengambil harga rekomendasi (' + e.message + '). '
+                  + 'Harga bisa diisi manual, atau muat ulang halaman untuk mencoba lagi.',
+                  { type: 'warning', title: 'Harga rekomendasi tidak termuat' });
+        }
+    });
 }
 
 function buildRowHTML(idx, ingOptions) {
