@@ -506,11 +506,20 @@ class MutationController extends Controller
               + ($mutation->type === 'sale_external_out' && $request->filled('external_receiver')
                     ? ['external_receiver' => $request->external_receiver] : []));
 
+            $idTerpakai = [];
             foreach ($request->items as $itemData) {
                 if (!empty($itemData['item_id'])) {
                     // Baris lama — abaikan bila id-nya bukan milik mutasi ini.
                     $item = $mutation->items->firstWhere('id', $itemData['item_id']);
                     if (!$item) continue;
+                    // Bahan/kemasan kini bisa DIGANTI dari form edit (dropdown), sama
+                    // seperti form Buat Mutasi. Hanya ditimpa bila form mengirimnya.
+                    if (!empty($itemData['ingredient_id'])) {
+                        $item->ingredient_id = (int) $itemData['ingredient_id'];
+                        $item->packaging_id  = $itemData['packaging_id'] ?? null;
+                        $item->save();
+                        $item->unsetRelation('packaging');   // relasi lama tidak berlaku lagi
+                    }
                 } else {
                     // Baris BARU yang ditambahkan lewat tombol "Tambah Bahan".
                     // Baris kosong (user menambah lalu tidak mengisi bahan) dilewati
@@ -543,7 +552,13 @@ class MutationController extends Controller
                     ),
                     'remaining_qty'  => $totalInBase,
                 ]);
+                $idTerpakai[] = $item->id;
             }
+
+            // Baris yang DIHAPUS user di form (tidak ikut terkirim) benar-benar dihapus.
+            // Aman: hanya draft yang bisa diedit, jadi tidak ada efek stok yang perlu
+            // dibalik. Tanpa ini, tombol hapus di form cuma menyembunyikan baris.
+            $mutation->items()->whereNotIn('id', $idTerpakai ?: [0])->delete();
 
             // Alokasi ulang diskon (idempotent; juga me-reset ke bruto bila diskon dihapus)
             if ($isPurchaseType) $this->allocateInvoiceDiscount($mutation);

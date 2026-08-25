@@ -165,50 +165,50 @@
 
                             {{-- Hidden inputs --}}
                             <input type="hidden" name="items[{{ $idx }}][item_id]"        value="{{ $item->id }}">
-                            <input type="hidden" name="items[{{ $idx }}][ingredient_id]"  value="{{ $item->ingredient_id }}">
-                            <input type="hidden" name="items[{{ $idx }}][packaging_id]"   value="{{ $item->packaging_id }}">
                             <input type="hidden" name="items[{{ $idx }}][price_per_base]" class="price-per-base-hidden"
                                    value="{{ $grossBase }}">
                             {{-- Harga/dus dikirim apa adanya — inilah sumber kebenaran tampilan --}}
                             <input type="hidden" name="items[{{ $idx }}][price_per_crate]" class="price-per-crate-hidden"
                                    value="{{ $ctb > 0 ? $priceDus : '' }}">
 
-                            <td class="fw-semibold">{{ $item->ingredient->name }}</td>
-                            <td class="text-muted small">
-                                @if($pkg)
-                                    {{ $pkg->packaging_name }}
-                                    <div class="text-muted" style="font-size:.75rem">
-                                        1 Dus = {{ $pkg->crate_to_pack }} Pack × {{ $pkg->pack_to_base }} {{ $item->ingredient->unit_base }}
-                                    </div>
-                                @else
-                                    <span class="text-muted">—</span>
-                                @endif
+                            {{-- Bahan & kemasan bisa diganti, sama seperti form Buat Mutasi --}}
+                            <td>
+                                <select name="items[{{ $idx }}][ingredient_id]"
+                                        class="form-select form-select-sm"
+                                        onchange="onBahanChange({{ $idx }})">
+                                    <option value="">— Pilih Bahan —</option>
+                                    @foreach($ingredientJs as $b)
+                                        <option value="{{ $b['id'] }}" @selected($b['id'] == $item->ingredient_id)>{{ $b['name'] }}</option>
+                                    @endforeach
+                                </select>
+                            </td>
+                            <td>
+                                {{-- Isinya dibangun JS saat halaman dimuat memakai aturan
+                                     yang SAMA dgn baris baru, supaya tidak ada dua versi logika --}}
+                                <select name="items[{{ $idx }}][packaging_id]"
+                                        class="form-select form-select-sm sel-kemasan"
+                                        data-terpilih="{{ $item->packaging_id }}"
+                                        onchange="onKemasanChange({{ $idx }})">
+                                </select>
+                                <div class="text-muted info-kemasan" style="font-size:.72rem"></div>
                             </td>
 
+                            {{-- Selalu dirender (tidak lagi bergantung kemasan awal), karena
+                                 kemasannya kini bisa diganti — sama seperti form Buat Mutasi --}}
                             <td>
-                                @if($ctb > 0)
                                 <input type="number" name="items[{{ $idx }}][qty_crate]"
                                        class="form-control form-control-sm qty-input"
                                        value="{{ old('items.'.$idx.'.qty_crate', $item->qty_crate) }}"
                                        min="0" placeholder="0"
                                        oninput="recalcRow({{ $idx }})">
-                                @else
-                                <span class="text-muted">—</span>
-                                <input type="hidden" name="items[{{ $idx }}][qty_crate]" value="0">
-                                @endif
                             </td>
 
                             <td>
-                                @if($ptb > 0)
                                 <input type="number" name="items[{{ $idx }}][qty_pack]"
                                        class="form-control form-control-sm qty-input"
                                        value="{{ old('items.'.$idx.'.qty_pack', $item->qty_pack) }}"
                                        min="0" placeholder="0"
                                        oninput="recalcRow({{ $idx }})">
-                                @else
-                                <span class="text-muted">—</span>
-                                <input type="hidden" name="items[{{ $idx }}][qty_pack]" value="0">
-                                @endif
                             </td>
 
                             <td>
@@ -220,33 +220,25 @@
                             </td>
 
                             <td>
-                                @if($ctb > 0)
-                                {{-- Show price per dus; hidden price_per_base auto-calculated --}}
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">Rp</span>
                                     <input type="number" class="form-control form-control-sm price-dus-input"
-                                           value="{{ $priceDus }}"
+                                           value="{{ $ctb > 0 ? $priceDus : round($grossBase) }}"
                                            min="0" step="1" placeholder="0"
                                            oninput="onPriceDusChange({{ $idx }})">
                                 </div>
-                                <div class="form-text text-muted" style="font-size:.72rem">per dus</div>
-                                @else
-                                {{-- No packaging: show price per base unit directly --}}
-                                <div class="input-group input-group-sm">
-                                    <span class="input-group-text">Rp</span>
-                                    <input type="number" class="form-control form-control-sm price-dus-input"
-                                           value="{{ round($grossBase) }}"
-                                           min="0" step="0.01" placeholder="0"
-                                           oninput="onPriceDusChange({{ $idx }})">
+                                <div class="form-text text-muted label-satuan-harga" style="font-size:.72rem">
+                                    {{ $ctb > 0 ? 'per dus' : 'per '.$item->ingredient->unit_base }}
                                 </div>
-                                <div class="form-text text-muted" style="font-size:.72rem">per {{ $item->ingredient->unit_base }}</div>
-                                @endif
                             </td>
 
                             <td class="text-end fw-semibold td-subtotal" id="sub-{{ $idx }}">
                                 Rp {{ number_format($subtotal, 0, ',', '.') }}
                             </td>
-                            <td></td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-danger" title="Hapus baris"
+                                        onclick="hapusBaris({{ $idx }})"><i class="bi bi-x-lg"></i></button>
+                            </td>
                         </tr>
                         @endforeach
                     </tbody>
@@ -386,34 +378,43 @@ function tambahBaris() {
     document.getElementById('itemsBody').appendChild(tr);
 }
 
-function onBahanChange(idx) {
+// Isi dropdown kemasan + set konversi dus/pack pada baris.
+// TIDAK menyentuh harga — dipakai juga saat halaman dimuat untuk baris lama,
+// di mana harga yang sudah tersimpan tidak boleh dihitung ulang (pembulatan
+// bolak-balik bisa menggeser angka walau user tidak mengubah apa pun).
+function isiDropdownKemasan(idx, terpilih) {
     var row = document.getElementById('erow-' + idx);
     if (!row) return;
     var id  = row.querySelector('select[name$="[ingredient_id]"]').value;
     var sel = row.querySelector('.sel-kemasan');
     var inf = row.querySelector('.info-kemasan');
     sel.innerHTML = '<option value="">— Kemasan —</option>';
-    inf.textContent = '';
+    if (inf) inf.textContent = '';
     row.dataset.ctb = 0; row.dataset.ptb = 0;
 
     var bahan = dataBahan.filter(function (b) { return String(b.id) === String(id); })[0];
-    if (!bahan) { recalcRow(idx); return; }
+    if (!bahan) return;
 
     var list = kemasanTersedia(bahan);
     list.forEach(function (p) {
         var o = document.createElement('option');
         o.value = p.id;
         o.textContent = p.packaging_name;
-        o.dataset.ctb  = (parseFloat(p.crate_to_pack) || 0) * (parseFloat(p.pack_to_base) || 0);
-        o.dataset.ptb  = parseFloat(p.pack_to_base) || 0;
-        o.dataset.ket  = '1 Dus = ' + p.crate_to_pack + ' Pack × ' + p.pack_to_base + ' ' + bahan.unit;
+        o.dataset.ctb = (parseFloat(p.crate_to_pack) || 0) * (parseFloat(p.pack_to_base) || 0);
+        o.dataset.ptb = parseFloat(p.pack_to_base) || 0;
+        o.dataset.ket = '1 Dus = ' + p.crate_to_pack + ' Pack × ' + p.pack_to_base + ' ' + bahan.unit;
         sel.appendChild(o);
     });
-    if (list.length === 1) { sel.value = list[0].id; }
-    onKemasanChange(idx);
+
+    var adaTerpilih = terpilih && list.some(function (p) { return String(p.id) === String(terpilih); });
+    if (adaTerpilih)          sel.value = terpilih;
+    else if (list.length === 1) sel.value = list[0].id;
+
+    terapkanKemasan(idx);
 }
 
-function onKemasanChange(idx) {
+// Ambil ctb/ptb dari kemasan yang sedang dipilih (tanpa menyentuh harga)
+function terapkanKemasan(idx) {
     var row = document.getElementById('erow-' + idx);
     if (!row) return;
     var sel = row.querySelector('.sel-kemasan');
@@ -422,8 +423,29 @@ function onKemasanChange(idx) {
     row.dataset.ptb = (opt && opt.dataset.ptb) ? opt.dataset.ptb : 0;
     var inf = row.querySelector('.info-kemasan');
     if (inf) inf.textContent = (opt && opt.dataset.ket) ? opt.dataset.ket : '';
-    onPriceDusChange(idx);   // harga/dus dihitung ulang memakai isi dus yang baru
+    var lbl = row.querySelector('.label-satuan-harga');
+    if (lbl) lbl.textContent = parseFloat(row.dataset.ctb) > 0 ? 'per dus' : 'per satuan';
 }
+
+function onBahanChange(idx) {
+    isiDropdownKemasan(idx, null);
+    onPriceDusChange(idx);   // bahan berganti -> harga dihitung ulang
+}
+
+function onKemasanChange(idx) {
+    terapkanKemasan(idx);
+    onPriceDusChange(idx);   // isi dus berubah -> harga/satuan ikut berubah
+}
+
+// Bangun dropdown kemasan semua baris lama saat halaman dimuat, memakai aturan
+// yang SAMA dengan baris baru (tidak ada dua versi logika server vs klien).
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('#itemsBody tr.edit-row').forEach(function (row) {
+        var sel = row.querySelector('.sel-kemasan');
+        if (!sel) return;
+        isiDropdownKemasan(row.dataset.idx, sel.dataset.terpilih || null);
+    });
+});
 
 function hapusBaris(idx) {
     var row = document.getElementById('erow-' + idx);
@@ -506,8 +528,31 @@ if (txEl)  txEl.addEventListener('change',  validateDates);
 if (delEl) delEl.addEventListener('change', validateDates);
 
 // ── Submit handler ───────────────────────────────────────────────────────────
+// Baris yang bahannya sudah dipilih WAJIB punya kemasan. Tanpa kemasan, isi dus
+// tidak diketahui sehingga angka di kolom "Harga / Dus" akan tersimpan sebagai
+// harga per gram/pcs — nilainya jadi jauh meleset tanpa ada tanda apa pun.
+function validasiKemasan() {
+    var bermasalah = [];
+    document.querySelectorAll('#itemsBody tr.edit-row').forEach(function (row) {
+        var selB = row.querySelector('select[name$="[ingredient_id]"]');
+        var selK = row.querySelector('.sel-kemasan');
+        if (!selB || !selK || !selB.value) return;          // baris kosong: diabaikan server
+        if (selK.value) { selK.classList.remove('is-invalid'); return; }
+        if (selK.options.length <= 1) return;               // memang tidak punya kemasan
+        selK.classList.add('is-invalid');
+        bermasalah.push(selB.options[selB.selectedIndex].text);
+    });
+    if (bermasalah.length && window.uiAlert) {
+        uiAlert('Kemasan belum dipilih untuk: ' + bermasalah.join(', ') + '.\n\n'
+              + 'Tanpa kemasan, sistem tidak tahu isi 1 dus sehingga harga yang diketik '
+              + 'akan dihitung per satuan terkecil.',
+              { type: 'warning', title: 'Kemasan belum dipilih' });
+    }
+    return bermasalah.length === 0;
+}
+
 document.getElementById('editForm').addEventListener('submit', function(e) {
-    if (!validateDates()) {
+    if (!validateDates() || !validasiKemasan()) {
         e.preventDefault();
         e.stopImmediatePropagation(); // prevent confirm() on the "confirm" button from re-firing
         return false;
