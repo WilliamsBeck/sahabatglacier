@@ -898,6 +898,55 @@ class MutationController extends Controller
     /** Cache kemasan per-request: versi massal memanggil ini puluhan kali. */
     private array $cacheKemasan = [];
 
+    /**
+     * Harga per DUS dari harga per satuan dasar, dengan kompensasi presisi.
+     *
+     * Masalahnya: harga/dus yang diketik user disimpan sebagai harga per satuan
+     * dasar (harga_dus ÷ isi_dus). Data LAMA menyimpannya hanya 4 desimal
+     * (sebelum kolomnya dinaikkan ke 8 desimal), sehingga mengalikannya balik
+     * kehilangan hingga setengah-langkah × isi_dus rupiah:
+     *
+     *   730.000 ÷ 14.400 = 50,694444…  →  disimpan 50,6944
+     *   50,6944 × 14.400 = 729.999,36  →  dibulatkan jadi 729.999  (harusnya 730.000)
+     *
+     * Karena itu pembulatan biasa tidak cukup. Di sini kita cari angka yang lebih
+     * "bulat" (kelipatan 1.000 / 100 / 10) yang MASIH berada di dalam rentang
+     * ketidakpastian penyimpanan — jadi 729.999,36 dipulihkan jadi 730.000, tapi
+     * harga yang memang tidak bulat (mis. 603.436) TIDAK ikut digeser karena
+     * kelipatan terdekatnya jauh di luar rentang itu.
+     *
+     * Data baru (8 desimal, atau yang punya price_per_crate) rentangnya nyaris nol
+     * sehingga fungsi ini otomatis tidak mengubah apa pun.
+     */
+    private function dusDariHargaSatuan(float $pricePerBase, float $crateToBase): int
+    {
+        if ($crateToBase <= 0 || $pricePerBase <= 0) return 0;
+
+        $tepat = $pricePerBase * $crateToBase;
+
+        // Berapa desimal yang BENAR-BENAR tersimpan? Cari yang paling sedikit dulu:
+        // nilai 4-desimal akan lolos di d=4, nilai presisi penuh baru lolos di d=8.
+        $desimal = 8;
+        foreach ([4, 6] as $d) {
+            $skala = 10 ** $d;
+            if (abs($pricePerBase * $skala - round($pricePerBase * $skala)) < 1e-6) {
+                $desimal = $d;
+                break;
+            }
+        }
+        // Setengah langkah terakhir = sebesar itulah kemungkinan meleset per satuan.
+        $toleransi = 0.5 * (10 ** -$desimal) * $crateToBase;
+
+        foreach ([1000, 100, 10] as $kelipatan) {
+            $bulat = round($tepat / $kelipatan) * $kelipatan;
+            if ($bulat > 0 && abs($bulat - $tepat) <= $toleransi) {
+                return (int) $bulat;
+            }
+        }
+
+        return (int) round($tepat);
+    }
+
     /** Inti perhitungan harga rekomendasi — dipakai bareng versi satuan & massal. */
     private function hitungHargaTerakhir(int $ingredientId, $packagingId, $type, $storeId): array
     {
@@ -937,7 +986,7 @@ class MutationController extends Controller
         $ambilDus = function ($row) use ($crateToBase) {
             if (!$row) return 0;
             if ($row->price_per_crate !== null) return (int) round((float) $row->price_per_crate);
-            return $crateToBase > 0 ? (int) round((float) $row->p * $crateToBase) : 0;
+            return $this->dusDariHargaSatuan((float) $row->p, $crateToBase);
         };
 
         // 1) Pembelian terakhir dengan tipe yang sama
@@ -960,8 +1009,8 @@ class MutationController extends Controller
                 ->orderByDesc('opnames.opname_date')->orderByDesc('opnames.id')
                 ->selectRaw('opname_items.price_per_base as p')
                 ->first();
-            if ($opnameRow && $crateToBase > 0) {
-                $priceDus = (int) round((float) $opnameRow->p * $crateToBase);
+            if ($opnameRow) {
+                $priceDus = $this->dusDariHargaSatuan((float) $opnameRow->p, $crateToBase);
             }
         }
 
