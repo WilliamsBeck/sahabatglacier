@@ -86,12 +86,55 @@ class MutationService
      * supaya transfer/pemakaian berikutnya mengambil harga FIFO yang benar. Hanya dipecah
      * bila sumber punya >1 harga untuk qty yang dikirim.
      */
+    /**
+     * Gabungkan baris mutasi yang bahan & kemasannya sama menjadi satu baris.
+     * Qty dijumlahkan; harga TIDAK dipakai di sini karena akan dihitung ulang dari
+     * lapisan FIFO tepat setelah ini. Hanya untuk transfer/penjualan keluar — di
+     * situ baris memang dibentuk sistem berdasarkan harga, bukan input bebas user.
+     */
+    private static function mergeItemsPerPackaging(Mutation $mutation): void
+    {
+        $grup = $mutation->items()->get()->groupBy(
+            fn($i) => $i->ingredient_id . '-' . ($i->packaging_id ?: '0')
+        );
+
+        $adaYangDigabung = false;
+        foreach ($grup as $items) {
+            if ($items->count() < 2) continue;
+
+            $utama = $items->first();
+            $utama->update([
+                'total_in_base' => $items->sum(fn($i) => (float) $i->total_in_base),
+                'qty_crate'     => $items->sum(fn($i) => (int) $i->qty_crate) ?: null,
+                'qty_pack'      => $items->sum(fn($i) => (int) $i->qty_pack) ?: null,
+                'qty_base'      => $items->sum(fn($i) => (float) $i->qty_base) ?: null,
+            ]);
+            $utama->update(['remaining_qty' => $utama->total_in_base]);
+
+            foreach ($items->slice(1) as $lebih) $lebih->delete();
+            $adaYangDigabung = true;
+        }
+
+        if ($adaYangDigabung) $mutation->load('items');
+    }
+
     private static function splitSaleItemsByFifoLayers(Mutation $mutation): void
     {
         if (!$mutation->isSale() || !$mutation->destination_store_id
             || !$mutation->source_store_id || !$mutation->deductsFromSource()) {
             return;
         }
+
+        // Satukan dulu baris dgn bahan+kemasan SAMA menjadi satu, baru dipecah ulang.
+        //
+        // Tanpa ini pemecahan bersifat "menempel": begitu sebuah baris pernah terpecah
+        // jadi 2 (karena dulu ada 2 harga), konfirmasi ulang — termasuk yang dijalankan
+        // auto-fix — memproses tiap pecahan SENDIRI-SENDIRI. Akibatnya pecahannya tidak
+        // pernah menyatu lagi walau harganya sudah sama, dan tiap siklus auto-fix bisa
+        // menambah baris baru. Dengan penyatuan ini, hasil akhirnya selalu ditentukan
+        // oleh qty total & lapisan harga saat itu (idempoten): qty sama + satu harga
+        // selalu menghasilkan tepat satu baris.
+        self::mergeItemsPerPackaging($mutation);
 
         $changed = false;
         foreach ($mutation->items()->get() as $item) {
