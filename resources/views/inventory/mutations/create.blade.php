@@ -272,6 +272,13 @@ function updateDestStoreOptions() {
     else if (list.length === 1) sel.value = list[0].id;
 }
 var packagingCache  = {};
+
+// true selama tombol "Muat Semua Bahan Zhisheng" sedang memasang puluhan baris.
+// Selama itu, onPackagingChange TIDAK boleh menembak /last-price sendiri-sendiri:
+// harganya sudah diambil sekaligus lewat satu request di akhir pemuatan. Tanpa
+// penjaga ini, 55 baris = 55 request paralel + 1 request massal → koneksi database
+// hosting habis dan SEMUA request gagal ("Operation not permitted" saat cek login).
+var sedangMuatMassal = false;
 var stockPriceCache = {};
 var storeStockCache = {};
 
@@ -989,7 +996,8 @@ function onPackagingChange(idx) {
     }
     // Tipe Pembelian → auto-fill Harga/Dus dari pembelian terakhir GLOBAL (semua toko, per kemasan).
     // Hanya kalau field harga masih kosong/0 → tidak menimpa input manual.
-    if (['purchase_zhisheng','purchase_supplier'].includes(type) && ingInput && ingInput.value) {
+    // Dilewati saat pemuatan massal — di sana harga diambil sekaligus dalam 1 request.
+    if (!sedangMuatMassal && ['purchase_zhisheng','purchase_supplier'].includes(type) && ingInput && ingInput.value) {
         var priceInput = document.querySelector('#row-' + idx + ' .price-crate-input');
         if (priceInput && (!priceInput.value || NumberFmt.parse(priceInput.value) === 0)) {
             // Harga diambil dari riwayat TOKO TUJUAN saja — jangan pinjam harga toko lain
@@ -1214,6 +1222,7 @@ function loadZhishengItems() {
     document.querySelectorAll('.item-row').forEach(function (r) { r.remove(); });
 
     var barisTerpasang = [];
+    sedangMuatMassal = true;   // tahan request per-baris selama pemasangan
     pairs.forEach(function (pair) {
         addRow();
         var idx = rowCount - 1;
@@ -1229,6 +1238,7 @@ function loadZhishengItems() {
         }
         barisTerpasang.push({ idx: idx, ing: pair.ing, pkg: pair.pkg });
     });
+    sedangMuatMassal = false;
     updateRemoveButtons();
 
     // Harga rekomendasi diambil SEKALI untuk semua baris. Sebelumnya tiap baris
