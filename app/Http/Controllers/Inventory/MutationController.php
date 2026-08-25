@@ -398,7 +398,29 @@ class MutationController extends Controller
         $stores    = auth()->user()->accessibleStores();
         $suppliers = Supplier::where('is_active', true)->orderBy('name')->get();
 
-        return view('inventory.mutations.edit', compact('mutation', 'stores', 'suppliers'));
+        // Data bahan + kemasan untuk tombol "Tambah Bahan" saat edit draft.
+        // Dipakai JS untuk mengisi dropdown & menghitung Dus/Pack tanpa AJAX.
+        $ingredientJs = Ingredient::with(['packagings' => fn($q) => $q->where('is_active', true)->orderBy('id')])
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->map(fn($i) => [
+                'id'         => $i->id,
+                'name'       => $i->name,
+                'unit'       => $i->unit_base,
+                'packagings' => $i->packagings->map(fn($p) => [
+                    'id'             => $p->id,
+                    'packaging_name' => $p->packaging_name,
+                    'supplier_id'    => $p->supplier_id,
+                    'crate_to_pack'  => $p->crate_to_pack,
+                    'pack_to_base'   => $p->pack_to_base,
+                ])->values()->all(),
+            ])
+            // Bahan tanpa kemasan aktif tidak bisa dipilih di form ini
+            ->filter(fn($i) => !empty($i['packagings']))
+            ->values()->all();
+
+        return view('inventory.mutations.edit', compact('mutation', 'stores', 'suppliers', 'ingredientJs'));
     }
 
     public function update(Request $request, Mutation $mutation)
@@ -419,7 +441,10 @@ class MutationController extends Controller
             'external_receiver' => 'nullable|string|max:255',
             'notes'             => 'nullable|string',
             'items'             => 'required|array|min:1',
-            'items.*.item_id'   => 'required|exists:mutation_items,id',
+            // item_id kosong = baris BARU yang ditambahkan saat edit draft.
+            'items.*.item_id'       => 'nullable|exists:mutation_items,id',
+            'items.*.ingredient_id' => 'nullable|exists:ingredients,id',
+            'items.*.packaging_id'  => 'nullable|exists:ingredient_packagings,id',
             'items.*.qty_crate' => 'nullable|integer|min:0',
             'items.*.qty_pack'  => 'nullable|integer|min:0',
             'items.*.qty_base'  => 'nullable|numeric|min:0',
@@ -450,9 +475,17 @@ class MutationController extends Controller
         if ($isPurchaseType && $discountAmount > 0) {
             $totalBruto = 0.0;
             foreach ($request->items as $itemData) {
-                $item = $mutation->items->firstWhere('id', $itemData['item_id']);
-                if (!$item) continue;
-                $totalBruto += $this->convertToBaseFromItem($item, $itemData) * (float) $itemData['price_per_base'];
+                // Baris BARU ikut dihitung juga — kalau tidak, total bruto terlalu
+                // kecil dan diskon yang sebenarnya sah bisa ditolak.
+                if (!empty($itemData['item_id'])) {
+                    $item = $mutation->items->firstWhere('id', $itemData['item_id']);
+                    if (!$item) continue;
+                    $pkgId = $item->packaging_id;
+                } else {
+                    if (empty($itemData['ingredient_id'])) continue;
+                    $pkgId = $itemData['packaging_id'] ?? null;
+                }
+                $totalBruto += $this->convertToBaseFromPackaging($pkgId, $itemData) * (float) $itemData['price_per_base'];
             }
             if ($discountAmount >= $totalBruto) {
                 return back()->withInput()->withErrors([
@@ -474,8 +507,24 @@ class MutationController extends Controller
                     ? ['external_receiver' => $request->external_receiver] : []));
 
             foreach ($request->items as $itemData) {
-                $item = $mutation->items->firstWhere('id', $itemData['item_id']);
-                if (!$item) continue;
+                if (!empty($itemData['item_id'])) {
+                    // Baris lama — abaikan bila id-nya bukan milik mutasi ini.
+                    $item = $mutation->items->firstWhere('id', $itemData['item_id']);
+                    if (!$item) continue;
+                } else {
+                    // Baris BARU yang ditambahkan lewat tombol "Tambah Bahan".
+                    // Baris kosong (user menambah lalu tidak mengisi bahan) dilewati
+                    // diam-diam supaya tidak memaksa user menghapusnya dulu.
+                    if (empty($itemData['ingredient_id'])) continue;
+                    $item = $mutation->items()->create([
+                        'ingredient_id'  => (int) $itemData['ingredient_id'],
+                        'packaging_id'   => $itemData['packaging_id'] ?? null,
+                        'total_in_base'  => 0,
+                        'price_per_base' => 0,
+                        'cost_subtotal'  => 0,
+                        'remaining_qty'  => 0,
+                    ]);
+                }
 
                 $totalInBase = $this->convertToBaseFromItem($item, $itemData);
                 $item->update([
@@ -536,8 +585,24 @@ class MutationController extends Controller
 
     private function convertToBaseFromItem($item, array $data): float
     {
-        if ($item->packaging_id) {
-            $packaging = $item->packaging ?? IngredientPackaging::find($item->packaging_id);
+        // Pakai relasi yang sudah ter-load bila ada, supaya tidak query ulang.
+        $packaging = $item->packaging_id ? ($item->packaging ?? null) : null;
+        if ($packaging) {
+            return $packaging->convertToBase(
+                (int)($data['qty_crate'] ?? 0),
+                (int)($data['qty_pack'] ?? 0),
+                (float)($data['qty_base'] ?? 0)
+            );
+        }
+        return $this->convertToBaseFromPackaging($item->packaging_id, $data);
+    }
+
+    /** Sama seperti di atas, tapi dari packaging_id saja — dipakai baris BARU
+     *  yang belum punya record MutationItem. */
+    private function convertToBaseFromPackaging($packagingId, array $data): float
+    {
+        if ($packagingId) {
+            $packaging = IngredientPackaging::find($packagingId);
             if ($packaging) {
                 return $packaging->convertToBase(
                     (int)($data['qty_crate'] ?? 0),

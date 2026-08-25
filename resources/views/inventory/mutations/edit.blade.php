@@ -131,11 +131,12 @@
                             <th style="width:8%">Dus</th>
                             <th style="width:8%">Pack</th>
                             <th style="width:8%">{{ 'Pcs/Gr' }}</th>
-                            <th style="width:20%">Harga / Dus</th>
+                            <th style="width:18%">Harga / Dus</th>
                             <th style="width:10%" class="text-end">Subtotal</th>
+                            <th style="width:2%"></th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="itemsBody">
                         @foreach($mutation->items as $idx => $item)
                         @php
                             $pkg        = $item->packaging;
@@ -245,12 +246,21 @@
                             <td class="text-end fw-semibold td-subtotal" id="sub-{{ $idx }}">
                                 Rp {{ number_format($subtotal, 0, ',', '.') }}
                             </td>
+                            <td></td>
                         </tr>
                         @endforeach
                     </tbody>
                     <tfoot>
+                        <tr>
+                            <td colspan="8" class="py-2">
+                                <button type="button" class="btn btn-sm btn-outline-success" onclick="tambahBaris()">
+                                    <i class="bi bi-plus-circle me-1"></i> Tambah Bahan
+                                </button>
+                                <span class="text-muted small ms-2">Bahan baru ikut tersimpan saat Simpan Draft / Konfirmasi.</span>
+                            </td>
+                        </tr>
                         <tr class="table-light">
-                            <td colspan="6" class="text-end fw-bold">Grand Total</td>
+                            <td colspan="7" class="text-end fw-bold">Grand Total</td>
                             <td class="text-end fw-bold text-success" id="grandTotal">
                                 Rp {{ number_format($mutation->items->sum(fn($i) => $i->total_in_base * (float)($i->gross_price_per_base ?? $i->price_per_base)), 0, ',', '.') }}
                             </td>
@@ -308,6 +318,119 @@
 
 @push('scripts')
 <script>
+// ══════════════════════════════════════════════════════════════════════════
+// TAMBAH BAHAN saat edit draft
+// Baris baru dikirim TANPA item_id; server membuatkan record-nya (lihat
+// MutationController::update). Baris yang ditambah lalu dibiarkan kosong
+// diabaikan server, jadi user tidak wajib menghapusnya.
+// ══════════════════════════════════════════════════════════════════════════
+var dataBahan   = @json($ingredientJs ?? []);
+var supplierMut = @json($mutation->supplier_id);
+var tipeMut     = @json($mutation->type);
+var idxBaru     = {{ $mutation->items->count() }};
+
+// Kemasan yang boleh dipakai: untuk pembelian dari supplier tertentu, hanya
+// kemasan milik supplier itu — konsisten dengan form Buat Mutasi.
+function kemasanTersedia(bahan) {
+    var perluFilter = ['purchase_zhisheng', 'purchase_supplier'].indexOf(tipeMut) > -1 && supplierMut;
+    if (!perluFilter) return bahan.packagings;
+    var cocok = bahan.packagings.filter(function (p) {
+        return String(p.supplier_id) === String(supplierMut);
+    });
+    return cocok.length ? cocok : bahan.packagings;
+}
+
+function tambahBaris() {
+    var idx = idxBaru++;
+    var opsi = dataBahan.map(function (b) {
+        return '<option value="' + b.id + '">' + b.name + '</option>';
+    }).join('');
+
+    var tr = document.createElement('tr');
+    tr.className = 'edit-row baris-baru';
+    tr.id = 'erow-' + idx;
+    tr.dataset.idx = idx;
+    tr.dataset.ctb = 0;
+    tr.dataset.ptb = 0;
+    tr.innerHTML =
+      '<td>'
+      + '<select name="items[' + idx + '][ingredient_id]" class="form-select form-select-sm"'
+      + ' onchange="onBahanChange(' + idx + ')">'
+      + '<option value="">— Pilih Bahan —</option>' + opsi + '</select>'
+      + '</td>'
+      + '<td>'
+      + '<select name="items[' + idx + '][packaging_id]" class="form-select form-select-sm sel-kemasan"'
+      + ' onchange="onKemasanChange(' + idx + ')"><option value="">— Kemasan —</option></select>'
+      + '<div class="text-muted info-kemasan" style="font-size:.72rem"></div>'
+      + '</td>'
+      + '<td><input type="number" name="items[' + idx + '][qty_crate]" class="form-control form-control-sm qty-input"'
+      + ' min="0" placeholder="0" oninput="recalcRow(' + idx + ')"></td>'
+      + '<td><input type="number" name="items[' + idx + '][qty_pack]" class="form-control form-control-sm qty-input"'
+      + ' min="0" placeholder="0" oninput="recalcRow(' + idx + ')"></td>'
+      + '<td><input type="number" name="items[' + idx + '][qty_base]" class="form-control form-control-sm qty-input"'
+      + ' step="0.01" min="0" placeholder="0" oninput="recalcRow(' + idx + ')"></td>'
+      + '<td>'
+      + '<div class="input-group input-group-sm"><span class="input-group-text">Rp</span>'
+      + '<input type="number" class="form-control form-control-sm price-dus-input" min="0" step="1" placeholder="0"'
+      + ' oninput="onPriceDusChange(' + idx + ')"></div>'
+      + '<div class="form-text text-muted" style="font-size:.72rem">per dus</div>'
+      + '<input type="hidden" name="items[' + idx + '][price_per_base]" class="price-per-base-hidden" value="0">'
+      + '<input type="hidden" name="items[' + idx + '][price_per_crate]" class="price-per-crate-hidden" value="">'
+      + '</td>'
+      + '<td class="text-end fw-semibold td-subtotal" id="sub-' + idx + '">Rp 0</td>'
+      + '<td class="text-end">'
+      + '<button type="button" class="btn btn-sm btn-outline-danger" title="Hapus baris"'
+      + ' onclick="hapusBaris(' + idx + ')"><i class="bi bi-x-lg"></i></button>'
+      + '</td>';
+
+    document.getElementById('itemsBody').appendChild(tr);
+}
+
+function onBahanChange(idx) {
+    var row = document.getElementById('erow-' + idx);
+    if (!row) return;
+    var id  = row.querySelector('select[name$="[ingredient_id]"]').value;
+    var sel = row.querySelector('.sel-kemasan');
+    var inf = row.querySelector('.info-kemasan');
+    sel.innerHTML = '<option value="">— Kemasan —</option>';
+    inf.textContent = '';
+    row.dataset.ctb = 0; row.dataset.ptb = 0;
+
+    var bahan = dataBahan.filter(function (b) { return String(b.id) === String(id); })[0];
+    if (!bahan) { recalcRow(idx); return; }
+
+    var list = kemasanTersedia(bahan);
+    list.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = p.packaging_name;
+        o.dataset.ctb  = (parseFloat(p.crate_to_pack) || 0) * (parseFloat(p.pack_to_base) || 0);
+        o.dataset.ptb  = parseFloat(p.pack_to_base) || 0;
+        o.dataset.ket  = '1 Dus = ' + p.crate_to_pack + ' Pack × ' + p.pack_to_base + ' ' + bahan.unit;
+        sel.appendChild(o);
+    });
+    if (list.length === 1) { sel.value = list[0].id; }
+    onKemasanChange(idx);
+}
+
+function onKemasanChange(idx) {
+    var row = document.getElementById('erow-' + idx);
+    if (!row) return;
+    var sel = row.querySelector('.sel-kemasan');
+    var opt = sel.options[sel.selectedIndex];
+    row.dataset.ctb = (opt && opt.dataset.ctb) ? opt.dataset.ctb : 0;
+    row.dataset.ptb = (opt && opt.dataset.ptb) ? opt.dataset.ptb : 0;
+    var inf = row.querySelector('.info-kemasan');
+    if (inf) inf.textContent = (opt && opt.dataset.ket) ? opt.dataset.ket : '';
+    onPriceDusChange(idx);   // harga/dus dihitung ulang memakai isi dus yang baru
+}
+
+function hapusBaris(idx) {
+    var row = document.getElementById('erow-' + idx);
+    if (row) row.remove();
+    updateGrandTotal();
+}
+
 // ── Recalc subtotal for one row ─────────────────────────────────────────────
 function recalcRow(idx) {
     var row  = document.getElementById('erow-' + idx);
