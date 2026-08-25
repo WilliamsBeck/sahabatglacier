@@ -126,14 +126,13 @@
                 <table class="table table-sm align-middle mb-0" id="editTable">
                     <thead class="table-light">
                         <tr>
-                            <th style="width:28%">Bahan</th>
+                            <th style="width:28%">Bahan <span class="text-danger">*</span></th>
                             <th style="width:18%">Kemasan</th>
                             <th style="width:8%">Dus</th>
                             <th style="width:8%">Pack</th>
-                            <th style="width:8%">{{ 'Pcs/Gr' }}</th>
-                            <th style="width:18%">Harga / Dus</th>
-                            <th style="width:10%" class="text-end">Subtotal</th>
-                            <th style="width:2%"></th>
+                            <th style="width:8%">Pcs/Gr</th>
+                            <th style="width:25%">Harga / Dus</th>
+                            <th style="width:5%"></th>
                         </tr>
                     </thead>
                     <tbody id="itemsBody">
@@ -232,9 +231,6 @@
                                 </div>
                             </td>
 
-                            <td class="text-end fw-semibold td-subtotal" id="sub-{{ $idx }}">
-                                Rp {{ number_format($subtotal, 0, ',', '.') }}
-                            </td>
                             <td class="text-end">
                                 <button type="button" class="btn btn-sm btn-outline-danger" title="Hapus baris"
                                         onclick="hapusBaris({{ $idx }})"><i class="bi bi-x-lg"></i></button>
@@ -244,21 +240,24 @@
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="8" class="py-2">
+                            <td colspan="7" class="py-2">
                                 <button type="button" class="btn btn-sm btn-outline-success" onclick="tambahBaris()">
                                     <i class="bi bi-plus-circle me-1"></i> Tambah Bahan
                                 </button>
                                 <span class="text-muted small ms-2">Bahan baru ikut tersimpan saat Simpan Draft / Konfirmasi.</span>
                             </td>
                         </tr>
-                        <tr class="table-light">
-                            <td colspan="7" class="text-end fw-bold">Grand Total</td>
-                            <td class="text-end fw-bold text-success" id="grandTotal">
-                                Rp {{ number_format($mutation->items->sum(fn($i) => $i->total_in_base * (float)($i->gross_price_per_base ?? $i->price_per_base)), 0, ',', '.') }}
-                            </td>
-                        </tr>
                     </tfoot>
                 </table>
+            </div>
+        </div>
+    </div>
+
+    {{-- ═════ Ringkasan Total ═════ (bentuk & isi disamakan dgn form Buat Mutasi) --}}
+    <div class="card mt-3 border-success">
+        <div class="card-body py-3">
+            <div id="totalsContainer">
+                <div class="text-muted small text-center py-2">Isi data item dulu untuk lihat subtotal.</div>
             </div>
         </div>
     </div>
@@ -288,6 +287,7 @@
             var raw = e.target.value.replace(/[^0-9]/g, '');
             e.target.value = raw ? Number(raw).toLocaleString('id-ID') : '';
             document.getElementById('discountHidden').value = raw || 0;
+            if (typeof recalcTotals === 'function') recalcTotals();   // ringkasan ikut
         });
     </script>
     @endif
@@ -369,7 +369,6 @@ function tambahBaris() {
       + '<input type="hidden" name="items[' + idx + '][price_per_base]" class="price-per-base-hidden" value="0">'
       + '<input type="hidden" name="items[' + idx + '][price_per_crate]" class="price-per-crate-hidden" value="">'
       + '</td>'
-      + '<td class="text-end fw-semibold td-subtotal" id="sub-' + idx + '">Rp 0</td>'
       + '<td class="text-end">'
       + '<button type="button" class="btn btn-sm btn-outline-danger" title="Hapus baris"'
       + ' onclick="hapusBaris(' + idx + ')"><i class="bi bi-x-lg"></i></button>'
@@ -445,33 +444,18 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!sel) return;
         isiDropdownKemasan(row.dataset.idx, sel.dataset.terpilih || null);
     });
+    recalcTotals();
 });
 
 function hapusBaris(idx) {
     var row = document.getElementById('erow-' + idx);
     if (row) row.remove();
-    updateGrandTotal();
+    recalcTotals();
 }
 
-// ── Recalc subtotal for one row ─────────────────────────────────────────────
-function recalcRow(idx) {
-    var row  = document.getElementById('erow-' + idx);
-    if (!row) return;
-    var ctb  = parseFloat(row.dataset.ctb) || 0;
-    var ptb  = parseFloat(row.dataset.ptb) || 0;
-    var qtyC = parseFloat(row.querySelector('input[name$="[qty_crate]"]')?.value) || 0;
-    var qtyP = parseFloat(row.querySelector('input[name$="[qty_pack]"]')?.value)  || 0;
-    var qtyB = parseFloat(row.querySelector('input[name$="[qty_base]"]')?.value)  || 0;
-
-    var totalBase = (qtyC * ctb) + (qtyP * ptb) + qtyB;
-    var priceBase = parseFloat(row.querySelector('.price-per-base-hidden')?.value) || 0;
-    var subtotal  = Math.round(totalBase * priceBase);
-
-    var tdSub = document.getElementById('sub-' + idx);
-    if (tdSub) tdSub.textContent = 'Rp ' + subtotal.toLocaleString('id-ID');
-
-    updateGrandTotal();
-}
+// Subtotal per baris kini tampil di panel Ringkasan Total (sama seperti form Buat),
+// bukan lagi kolom di dalam tabel — jadi cukup hitung ulang panelnya.
+function recalcRow(idx) { recalcTotals(); }
 
 // ── Called when price-per-dus input changes ─────────────────────────────────
 function onPriceDusChange(idx) {
@@ -491,15 +475,89 @@ function onPriceDusChange(idx) {
     recalcRow(idx);
 }
 
-// ── Grand total ──────────────────────────────────────────────────────────────
-function updateGrandTotal() {
-    var total = 0;
-    document.querySelectorAll('.td-subtotal').forEach(function(td) {
-        var txt = td.textContent.replace(/[^\d]/g, '');
-        total += parseInt(txt) || 0;
+// ══════════════════════════════════════════════════════════════════════════
+// RINGKASAN TOTAL — bentuk & perilakunya disamakan dengan form Buat Mutasi
+// (lihat recalcTotals di create.blade.php). Bedanya hanya nama atribut baris:
+// di sini .edit-row + data-ctb/data-ptb, di sana .item-row + data-crate-to-base.
+// ══════════════════════════════════════════════════════════════════════════
+function recalcTotals() {
+    var container = document.getElementById('totalsContainer');
+    if (!container) return;
+
+    var fmt   = function (n) { return Number(Math.round(n)).toLocaleString('id-ID'); };
+    var lines = [];
+    var grand = 0;
+
+    document.querySelectorAll('#itemsBody tr.edit-row').forEach(function (row) {
+        var ingSel = row.querySelector('select[name$="[ingredient_id]"]');
+        if (!ingSel || !ingSel.value) return;
+
+        var bahan   = dataBahan.filter(function (b) { return String(b.id) === String(ingSel.value); })[0];
+        var nama    = bahan ? bahan.name : (ingSel.options[ingSel.selectedIndex] || {}).text || '?';
+        var pkgSel  = row.querySelector('.sel-kemasan');
+        var pkgNama = (pkgSel && pkgSel.value && pkgSel.options[pkgSel.selectedIndex])
+            ? pkgSel.options[pkgSel.selectedIndex].textContent : '';
+
+        var ctb  = parseFloat(row.dataset.ctb) || 0;
+        var ptb  = parseFloat(row.dataset.ptb) || 0;
+        var qtyC = parseFloat(row.querySelector('input[name$="[qty_crate]"]')?.value) || 0;
+        var qtyP = parseFloat(row.querySelector('input[name$="[qty_pack]"]')?.value)  || 0;
+        var qtyB = parseFloat(row.querySelector('input[name$="[qty_base]"]')?.value)  || 0;
+        var totalBase = (qtyC * ctb) + (qtyP * ptb) + qtyB;
+
+        var priceBase = parseFloat(row.querySelector('.price-per-base-hidden')?.value) || 0;
+        var subtotal  = totalBase * priceBase;
+        if (subtotal <= 0) return;
+        grand += subtotal;
+
+        var bagian = [];
+        if (qtyC > 0) bagian.push(qtyC + ' Dus');
+        if (qtyP > 0) bagian.push(qtyP + ' Pack');
+        if (qtyB > 0) bagian.push(qtyB + ' ' + (bahan ? bahan.unit : 'sat'));
+
+        lines.push(
+            '<tr>'
+          + '<td class="fw-semibold">' + nama + '</td>'
+          + '<td class="text-muted small">' + (pkgNama || '—') + '</td>'
+          + '<td class="text-end text-muted small text-nowrap">' + (bagian.join(' + ') || '—') + '</td>'
+          + '<td class="text-end fw-semibold text-nowrap">Rp ' + fmt(subtotal) + '</td>'
+          + '</tr>'
+        );
     });
-    var el = document.getElementById('grandTotal');
-    if (el) el.textContent = 'Rp ' + total.toLocaleString('id-ID');
+
+    if (lines.length === 0) {
+        container.innerHTML = '<div class="text-muted small text-center py-2">Isi data item dulu untuk lihat subtotal.</div>';
+        return;
+    }
+
+    var discEl   = document.getElementById('discountHidden');
+    var discount = discEl ? (parseFloat(discEl.value) || 0) : 0;
+    var footRows;
+    if (discount > 0) {
+        footRows =
+            '<tr class="border-top"><td colspan="3" class="text-end text-muted">Subtotal (bruto)</td>'
+          +   '<td class="text-end text-nowrap">Rp ' + fmt(grand) + '</td></tr>'
+          + '<tr><td colspan="3" class="text-end text-muted">Diskon invoice</td>'
+          +   '<td class="text-end text-danger text-nowrap">− Rp ' + fmt(discount) + '</td></tr>'
+          + '<tr><td colspan="3" class="fw-bold fs-6">TOTAL BAYAR</td>'
+          +   '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(Math.max(0, grand - discount)) + '</td></tr>';
+    } else {
+        footRows =
+            '<tr class="border-top"><td colspan="3" class="fw-bold fs-6">GRAND TOTAL</td>'
+          + '<td class="text-end fw-bold fs-5 text-success text-nowrap">Rp ' + fmt(grand) + '</td></tr>';
+    }
+
+    container.innerHTML =
+        '<div class="fw-semibold mb-2"><i class="bi bi-receipt me-1"></i>Ringkasan Total</div>'
+      + '<div class="table-responsive">'
+      + '<table class="table table-sm align-middle mb-0">'
+      + '<thead><tr class="text-muted small">'
+      +   '<th>Bahan</th><th>Kemasan</th>'
+      +   '<th class="text-end">Qty</th><th class="text-end">Subtotal</th>'
+      + '</tr></thead>'
+      + '<tbody>' + lines.join('') + '</tbody>'
+      + '<tfoot>' + footRows + '</tfoot>'
+      + '</table></div>';
 }
 
 // ── Date validation ──────────────────────────────────────────────────────────
