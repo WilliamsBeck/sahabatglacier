@@ -595,6 +595,15 @@ var confirmUrl    = '{{ route("inventory.daily-ledger.confirm-date") }}';
 var csrfToken  = '{{ csrf_token() }}';
 var saveTimers = {};
 
+// Jumlah perubahan yang belum tuntas tersimpan (masih menunggu 500 ms atau masih
+// dikirim ke server). Penyimpanan sengaja ditunda supaya tidak menembak server tiap
+// ketikan — tapi kalau halaman di-refresh/ditutup dalam jeda itu, angkanya hilang
+// tanpa jejak. Karena itu user diperingatkan dulu.
+var pendingSimpan = 0;
+window.addEventListener('beforeunload', function (e) {
+    if (pendingSimpan > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
+});
+
 // Transfer yang terdampak tapi TIDAK bisa disegarkan otomatis (periode terkunci).
 // Ditampilkan lewat uiAlert — bukan toast singkat — supaya tidak terlewat. Dipakai
 // bareng oleh simpan sel, hapus massal, dan toggle konfirmasi tanggal.
@@ -716,16 +725,22 @@ if (ledgerTable) {
         var pkg     = tr.dataset.pkg || null;
         var newVal  = qtyPack > 0 ? String(qtyPack) : '';
         var prevVal = td.dataset.val;
-        var key     = ingId + date;
+        // KEMASAN wajib ikut jadi kunci. Dulu kuncinya hanya bahan+tanggal, sehingga
+        // untuk bahan ber-kemasan lebih dari satu (Single Fine Straw s/d Big Bag),
+        // mengisi baris kemasan kedua dalam 500 ms akan clearTimeout() milik baris
+        // pertama → simpanan baris pertama DIBATALKAN dan angkanya hilang saat refresh.
+        var key     = ingId + '|' + (pkg || '0') + '|' + date;
 
         td.dataset.val = newVal;
         td.classList.toggle('has-val', qtyPack > 0);
 
         var status = document.getElementById('saveStatus');
         clearTimeout(saveTimers[key]);
+        if (!(key in saveTimers)) pendingSimpan++;   // hitung perubahan yg belum tersimpan
         status.textContent = 'Menyimpan...';
 
         saveTimers[key] = setTimeout(function() {
+            delete saveTimers[key];
             fetch(saveUrl, {
                 method: 'POST',
                 headers: {
@@ -759,7 +774,8 @@ if (ledgerTable) {
                 setTimeout(function() { status.textContent = ''; }, nFix > 0 ? 4000 : 1500);
                 laporTransferTerkunci(res.data && res.data.locked);
             })
-            .catch(function() { status.textContent = '⚠ Gagal simpan'; });
+            .catch(function() { status.textContent = '⚠ Gagal simpan'; })
+            .then(function() { if (pendingSimpan > 0) pendingSimpan--; });
         }, 500);
     }
 
