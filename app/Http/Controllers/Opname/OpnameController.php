@@ -1316,9 +1316,62 @@ class OpnameController extends Controller
     }
 
     // Export detail item satu opname
+    /**
+     * Nilai fisik per item + grand total — RUMUS SAMA PERSIS dengan yang dipakai
+     * halaman Detail Opname (resources/views/opname/show.blade.php).
+     *
+     * Poin yang mudah salah kalau dihitung ulang seenaknya:
+     *  - Harga diambil berurutan: stok_awal → price_per_base item; selain itu harga
+     *    efektif FIFO berlapis; kalau tidak ada, rata-rata tertimbang (priceMap).
+     *    Dipakai array_key_exists (bukan ?:) supaya harga Rp 0 yang NYATA tidak
+     *    dianggap kosong lalu ditimpa harga lain.
+     *  - Nilai dihitung PER KOMPONEN dari harga/dus yang sudah dibulatkan, bukan
+     *    qty × harga mentah — supaya cocok dengan angka yang tampil di layar.
+     *  - Grand total = pembulatan dari JUMLAH nilai mentah (round-of-sum), bukan
+     *    penjumlahan nilai yang sudah dibulatkan per baris.
+     *
+     * @return array{nilai: array<int,int>, grand: int}
+     */
+    private function hitungNilaiOpname(Opname $opname, array $priceMap, array $fifoPrice): array
+    {
+        $nilai = [];
+        $mentahTotal = 0.0;
+
+        foreach ($opname->items as $i) {
+            $h = ($opname->opname_mode === 'stok_awal' && $i->price_per_base !== null)
+                ? (float) $i->price_per_base
+                : (array_key_exists($i->id, $fifoPrice)
+                    ? (float) $fifoPrice[$i->id]
+                    : (float) ($priceMap[$i->ingredient_id] ?? 0));
+
+            $ctr = (float) ($i->packaging->crate_to_pack ?? 0);
+            $pkb = (float) ($i->packaging->pack_to_base  ?? 0);
+
+            if ($ctr > 0 && $pkb > 0) {
+                $pd     = round($h * $ctr * $pkb);
+                $mentah = ($i->physical_crate ?? 0) * $pd
+                        + ($i->physical_pack  ?? 0) * ($pd / $ctr)
+                        + ($i->physical_base  ?? 0) * ($pd / ($ctr * $pkb));
+            } else {
+                $mentah = (float) $i->physical_qty * $h;
+            }
+
+            $nilai[$i->id] = (int) round($mentah);
+            $mentahTotal  += $mentah;
+        }
+
+        return ['nilai' => $nilai, 'grand' => (int) round($mentahTotal)];
+    }
+
     public function export(Opname $opname)
     {
         $opname->load(['store', 'items.ingredient', 'items.packaging', 'performedBy']);
+
+        // Sumber harga persis seperti halaman Detail Opname
+        $priceKnown = [];
+        $priceMap   = $this->displayPriceMap($opname, $priceKnown);
+        $fifoPrice  = $this->fifoEffectivePrice($opname);
+        $hitung     = $this->hitungNilaiOpname($opname, $priceMap, $fifoPrice);
 
         $periodLabel = $opname->period_type === 'mid_month' ? 'Tengah Bulan' : 'Akhir Bulan';
         $monthLabel  = \Carbon\Carbon::create($opname->period_year, $opname->period_month)
@@ -1341,7 +1394,7 @@ class OpnameController extends Controller
         // ── Row 2: Judul ──
         $modeLabel = ($opname->opname_mode === 'stok_awal') ? ' [STOK AWAL]' : '';
         $ws->setCellValue('A2', "STOK OPNAME — {$opname->store->name} — {$opname->opname_date->format('d/m/Y')} — {$periodLabel}{$modeLabel}  |  Status: {$opname->status}  |  Oleh: " . ($opname->performedBy?->name ?? '-'));
-        $ws->mergeCells('A2:H2');
+        $ws->mergeCells('A2:I2');
         $ws->getStyle('A2')->getFont()->setBold(true)->setSize(12);
         $ws->getStyle('A2')->getAlignment()
             ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
@@ -1354,8 +1407,12 @@ class OpnameController extends Controller
         $ws->setCellValue('E3', 'FISIK Pack');
         $ws->setCellValue('F3', 'FISIK Gr/Pcs');
         $ws->setCellValue('G3', 'Harga/Dus');
-        $ws->setCellValue('H3', 'Catatan');
-        $ws->getStyle('A3:H3')->applyFromArray([
+        // JANGAN pakai kata "Harga" di judul ini: importOpname mengenali kolom dari
+        // judulnya (str_contains 'harga'), jadi "Total Harga" akan dikira kolom
+        // Harga/Dus dan merusak impor. "Total Nilai" aman.
+        $ws->setCellValue('H3', 'Total Nilai');
+        $ws->setCellValue('I3', 'Catatan');
+        $ws->getStyle('A3:I3')->applyFromArray([
             'font'      => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'fill'      => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'color' => ['rgb' => '1e3a5f']],
             'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
@@ -1367,7 +1424,8 @@ class OpnameController extends Controller
         $ws->getColumnDimension('C')->setWidth(16);
         foreach (['D','E','F'] as $c) $ws->getColumnDimension($c)->setWidth(12);
         $ws->getColumnDimension('G')->setWidth(14);
-        $ws->getColumnDimension('H')->setWidth(28);
+        $ws->getColumnDimension('H')->setWidth(16);
+        $ws->getColumnDimension('I')->setWidth(28);
         $ws->freezePane('D4');
 
         // ── Row 4+: Data ──
@@ -1411,7 +1469,8 @@ class OpnameController extends Controller
             $ws->setCellValueByColumnAndRow(5, $row, $physPack  ?: ($pkg ? 0 : ''));
             $ws->setCellValueByColumnAndRow(6, $row, $physBase);
             $ws->setCellValueByColumnAndRow(7, $row, $pricePerDus);
-            $ws->setCellValueByColumnAndRow(8, $row, $item->notes ?? '');
+            $ws->setCellValueByColumnAndRow(8, $row, $hitung['nilai'][$item->id] ?? 0);
+            $ws->setCellValueByColumnAndRow(9, $row, $item->notes ?? '');
 
             $ws->getStyle("A{$row}")->applyFromArray([
                 'font' => ['size' => 7, 'color' => ['rgb' => 'CCCCCC']],
@@ -1425,14 +1484,39 @@ class OpnameController extends Controller
                 'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'color' => ['rgb' => 'FFFDE7']],
                 'font' => ['bold' => true],
             ]);
+            // Kolom hasil hitungan — dibedakan warnanya supaya jelas bukan isian
+            $ws->getStyle("H{$row}")->applyFromArray([
+                'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'color' => ['rgb' => 'EAF4EA']],
+                'font' => ['bold' => true],
+            ]);
 
             if ($row % 2 === 0) {
-                $ws->getStyle("A{$row}:H{$row}")->getFill()
+                $ws->getStyle("A{$row}:I{$row}")->getFill()
                     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
                     ->getStartColor()->setRGB('F9FAFB');
             }
 
             $row++;
+        }
+
+        // ── Baris GRAND TOTAL ──────────────────────────────────────────────
+        // Kolom A sengaja DIKOSONGKAN: importOpname melewati baris yang kolom A-nya
+        // kosong, jadi baris ini tidak akan terbaca sebagai data saat file diimpor.
+        $barisTotal = $row;
+        $ws->setCellValue("G{$barisTotal}", 'TOTAL NILAI SO');
+        $ws->setCellValue("H{$barisTotal}", $hitung['grand']);
+        $ws->getStyle("B{$barisTotal}:I{$barisTotal}")->applyFromArray([
+            'font'    => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill'    => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'color' => ['rgb' => '1e3a5f']],
+            'borders' => ['top' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
+        ]);
+        $ws->getStyle("G{$barisTotal}")->getAlignment()
+            ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
+
+        // Format rupiah untuk kolom Harga/Dus & Total Nilai (termasuk baris total)
+        if ($barisTotal > 4) {
+            $ws->getStyle("G4:H{$barisTotal}")
+               ->getNumberFormat()->setFormatCode('#,##0');
         }
 
         $writer   = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($ss);
