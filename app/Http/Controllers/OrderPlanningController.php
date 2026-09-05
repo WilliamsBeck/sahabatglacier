@@ -138,12 +138,24 @@ class OrderPlanningController extends Controller
         $selectedOpname = null;
         if ($stockSource === 'opname' && $opnameId) {
             $selectedOpname = Opname::find($opnameId);
-            // physical_qty = base unit dari opname fisik.
-            $stockByPkg = OpnameItem::where('opname_id', $opnameId)
-                ->selectRaw('ingredient_id, packaging_id, SUM(physical_qty) t')
-                ->groupBy('ingredient_id', 'packaging_id')->get()
-                ->mapWithKeys(fn($r) => [$r->ingredient_id . '-' . ($r->packaging_id ?: 0) => (float)$r->t])
-                ->all();
+            // HANYA Dus + Pack utuh — eceran pcs/gr TIDAK dihitung sebagai stok.
+            // Aturan yang sama dipakai saat opname di-approve (OpnameController:
+            // "Simpan HANYA Dus + Pack utuh ke FIFO"), di stok awal Pencatatan
+            // Harian, dan di Saldo Stok. Dulu di sini dipakai physical_qty yang
+            // ikut menghitung eceran, sehingga 3 pack + 466 pcs terbaca 0,31 dus
+            // padahal di modul lain barang itu bernilai 3/25 = 0,12 dus.
+            $stockByPkg = [];
+            foreach (OpnameItem::with('packaging')->where('opname_id', $opnameId)->get() as $it) {
+                $pk  = $it->packaging;
+                $ptb = $pk ? (float)$pk->pack_to_base : 0;
+                $ctb = ($pk && $pk->crate_to_pack && $ptb) ? (float)$pk->crate_to_pack * $ptb : 0;
+                $qty = ($ctb > 0 ? (int)($it->physical_crate ?? 0) * $ctb : 0)
+                     + ($ptb > 0 ? (int)($it->physical_pack  ?? 0) * $ptb : 0);
+                // Bahan tanpa kemasan tidak punya rincian dus/pack → pakai apa adanya.
+                if ($qty <= 0 && !$pk) $qty = (float)$it->physical_qty;
+                $k = $it->ingredient_id . '-' . ($it->packaging_id ?: 0);
+                $stockByPkg[$k] = ($stockByPkg[$k] ?? 0) + $qty;
+            }
         } else {
             // Default: FIFO — sisa batch yang masih ada, dipecah per kemasan.
             // Totalnya identik dengan store_stocks.stock_balance yang dipakai
@@ -258,9 +270,12 @@ class OrderPlanningController extends Controller
 
         // Ukuran dus (base per dus) untuk SEMUA kemasan, bukan hanya kemasan pusat —
         // stok/konsumsi bisa saja tercatat di kemasan lain milik bahan yang sama.
-        $crateToBaseAll = IngredientPackaging::get(['id', 'crate_to_pack', 'pack_to_base'])
-            ->mapWithKeys(fn($p) => [$p->id => (float)$p->crate_to_pack * (float)$p->pack_to_base])
-            ->all();
+        $konv = IngredientPackaging::get(['id', 'crate_to_pack', 'pack_to_base'])
+            ->mapWithKeys(fn($p) => [$p->id => [
+                'ctp' => (float)$p->crate_to_pack,
+                'ptb' => (float)$p->pack_to_base,
+                'ctb' => (float)$p->crate_to_pack * (float)$p->pack_to_base,
+            ]])->all();
 
         // "bahan-kemasan" => base  →  [bahan][kemasan] => base
         $byIng = function (array $map) {
@@ -290,10 +305,29 @@ class OrderPlanningController extends Controller
             // Inilah inti perbaikannya: dulu semua base dijumlahkan dulu lalu dibagi
             // ukuran dus kemasan pertama saja, sehingga bahan dengan >1 ukuran dus
             // (mis. Big Bag @9 pack vs @25 pack) sisanya salah hitung.
-            $keDus = function (array $map) use ($ing, $crateToBaseAll, $crateToBase) {
+            $keDus = function (array $map) use ($ing, $konv, $crateToBase) {
                 $dus = 0.0;
                 foreach ($map[$ing->id] ?? [] as $pid => $base) {
-                    $ctb = ($pid && ($crateToBaseAll[$pid] ?? 0) > 0) ? $crateToBaseAll[$pid] : $crateToBase;
+                    $ctb = ($pid && ($konv[$pid]['ctb'] ?? 0) > 0) ? $konv[$pid]['ctb'] : $crateToBase;
+                    $dus += $base / $ctb;
+                }
+                return $dus;
+            };
+
+            // Khusus STOK: hanya pack utuh yang dihitung. Sisa eceran di dalam pack
+            // yang sudah dibuka bukan stok siap pakai — Saldo Stok pun menampilkan
+            // floor(sisa / pack_to_base). Tanpa ini, angka dus di sini lebih besar
+            // daripada stok yang sama di modul lain.
+            $keDusStok = function (array $map) use ($ing, $konv, $crateToBase) {
+                $dus = 0.0;
+                foreach ($map[$ing->id] ?? [] as $pid => $base) {
+                    $ptb = $konv[$pid]['ptb'] ?? 0;
+                    $ctp = $konv[$pid]['ctp'] ?? 0;
+                    if ($base > 0 && $ptb > 0 && $ctp > 0) {
+                        $dus += floor(round($base / $ptb, 6)) / $ctp;
+                        continue;
+                    }
+                    $ctb = ($pid && ($konv[$pid]['ctb'] ?? 0) > 0) ? $konv[$pid]['ctb'] : $crateToBase;
                     $dus += $base / $ctb;
                 }
                 return $dus;
@@ -308,7 +342,7 @@ class OrderPlanningController extends Controller
 
             // konsumsi sebulan -> dibagi rata ke jumlah hari bulan referensi
             $avgDailyDus  = $totalDusRef / $daysInRef;
-            $stockDus     = $keDus($stockByPkg);
+            $stockDus     = $keDusStok($stockByPkg);
 
             $grossDus     = $avgDailyDus * $daysToCover;
             $grossWithBuf = $grossDus * (1 + $bufferPct / 100);
