@@ -600,9 +600,29 @@ var saveTimers = {};
 // ketikan — tapi kalau halaman di-refresh/ditutup dalam jeda itu, angkanya hilang
 // tanpa jejak. Karena itu user diperingatkan dulu.
 var pendingSimpan = 0;
+var saveKirim     = {};   // key -> fungsi pengirim yang bisa dipaksa jalan lebih awal
+var saveInflight  = [];   // fetch simpan yang sedang berjalan
+
 window.addEventListener('beforeunload', function (e) {
     if (pendingSimpan > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
 });
+
+/**
+ * Paksa semua simpanan yang masih menunggu jeda 500 ms untuk dikirim SEKARANG,
+ * lalu tunggu sampai semuanya selesai.
+ *
+ * Dipakai sebelum Konfirmasi tanggal: kalau user mengetik lalu langsung menekan
+ * konfirmasi, dulu permintaan konfirmasi bisa mendahului simpanan angkanya —
+ * server menghitung stok tanpa angka yang baru diketik. Dengan ini, konfirmasi
+ * selalu berjalan di atas data yang sudah lengkap.
+ */
+function flushSimpanTertunda() {
+    Object.keys(saveKirim).forEach(function (k) {
+        var f = saveKirim[k];
+        if (typeof f === 'function') f();     // fungsi ini sendiri yang membersihkan timer & daftar
+    });
+    return Promise.all(saveInflight.slice());
+}
 
 // Transfer yang terdampak tapi TIDAK bisa disegarkan otomatis (periode terkunci).
 // Ditampilkan lewat uiAlert — bukan toast singkat — supaya tidak terlewat. Dipakai
@@ -739,9 +759,14 @@ if (ledgerTable) {
         if (!(key in saveTimers)) pendingSimpan++;   // hitung perubahan yg belum tersimpan
         status.textContent = 'Menyimpan...';
 
-        saveTimers[key] = setTimeout(function() {
+        // Fungsi pengirimnya disimpan terpisah supaya bisa DIPAKSA jalan lebih awal
+        // (lihat flushSimpanTertunda) — dipakai saat user menekan Konfirmasi tanggal
+        // sebelum jeda 500 ms selesai.
+        var kirim = function () {
+            clearTimeout(saveTimers[key]);
             delete saveTimers[key];
-            fetch(saveUrl, {
+            delete saveKirim[key];
+            var p = fetch(saveUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -775,8 +800,17 @@ if (ledgerTable) {
                 laporTransferTerkunci(res.data && res.data.locked);
             })
             .catch(function() { status.textContent = '⚠ Gagal simpan'; })
-            .then(function() { if (pendingSimpan > 0) pendingSimpan--; });
-        }, 500);
+            .then(function() {
+                if (pendingSimpan > 0) pendingSimpan--;
+                var i = saveInflight.indexOf(p);
+                if (i > -1) saveInflight.splice(i, 1);
+            });
+            saveInflight.push(p);
+            return p;
+        };
+
+        saveKirim[key]  = kirim;
+        saveTimers[key] = setTimeout(kirim, 500);
     }
 
     function saveUsage(input) {
@@ -939,8 +973,15 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
         var el      = this;
         var date    = el.dataset.date;
         var storeId = el.dataset.store;
+        var st      = document.getElementById('saveStatus');
 
-        fetch(confirmUrl, {
+        if (pendingSimpan > 0) st.textContent = 'Menyimpan dulu sebelum konfirmasi...';
+
+        // Tunggu semua angka yang baru diketik benar-benar tersimpan. Tanpa ini,
+        // menekan konfirmasi dalam jeda 500 ms membuat server menghitung stok
+        // tanpa angka terakhir — persis gejala "stok sistem beda dgn pencatatan".
+        flushSimpanTertunda().then(function () {
+        return fetch(confirmUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -987,6 +1028,7 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
         })
         .catch(function() {
             document.getElementById('saveStatus').textContent = '⚠ Gagal terhubung ke server';
+        });
         });
     });
 });
