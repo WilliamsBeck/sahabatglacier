@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
-use App\Models\{Ingredient, IngredientCategory, IngredientPackaging, Opname, OpnameItem, Store, StoreStock};
+use App\Models\{Ingredient, IngredientCategory, IngredientPackaging, Opname, OpnameItem, Store};
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -130,21 +130,34 @@ class OrderPlanningController extends Controller
         $leadTimeDays = $orderDate ? $orderDate->diffInDays($deliveryDate) : null;
 
         // ── Sumber stok saat ini ──────────────────────────────────────────────
+        // Disimpan PER (bahan × kemasan). Satu bahan bisa punya beberapa kemasan
+        // dengan isi dus BERBEDA (mis. Big Bag @9 pack dan Big Bag @25 pack).
+        // Kalau saldonya dijumlahkan dulu jadi satu angka base lalu dibagi ukuran
+        // dus SALAH SATU kemasan, hasil "sisa stok (dus)" jadi meleset — 3 pack
+        // dari kemasan @9 (= 0,33 dus) terbaca 3/25 = 0,12 dus.
         $selectedOpname = null;
         if ($stockSource === 'opname' && $opnameId) {
             $selectedOpname = Opname::find($opnameId);
             // physical_qty = base unit dari opname fisik.
-            // Jumlahkan per ingredient (1 bahan bisa punya >1 baris kemasan).
-            $stockMap = OpnameItem::where('opname_id', $opnameId)
-                ->get(['ingredient_id', 'physical_qty'])
-                ->groupBy('ingredient_id')
-                ->map(fn($g) => (float)$g->sum('physical_qty'));
+            $stockByPkg = OpnameItem::where('opname_id', $opnameId)
+                ->selectRaw('ingredient_id, packaging_id, SUM(physical_qty) t')
+                ->groupBy('ingredient_id', 'packaging_id')->get()
+                ->mapWithKeys(fn($r) => [$r->ingredient_id . '-' . ($r->packaging_id ?: 0) => (float)$r->t])
+                ->all();
         } else {
-            // Default: FIFO (saldo berjalan dari store_stocks)
+            // Default: FIFO — sisa batch yang masih ada, dipecah per kemasan.
+            // Totalnya identik dengan store_stocks.stock_balance yang dipakai
+            // sebelumnya; yang berubah hanya rinciannya jadi per kemasan.
             $stockSource = 'fifo';
-            $stockMap = StoreStock::where('store_id', $storeId)
-                ->pluck('stock_balance', 'ingredient_id')
-                ->map(fn($v) => (float)$v);
+            $stockByPkg  = DB::table('mutation_items as mi')
+                ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
+                ->where('m.destination_store_id', $storeId)
+                ->where('m.status', 'confirmed')
+                ->where('mi.remaining_qty', '>', 0)
+                ->selectRaw('mi.ingredient_id, mi.packaging_id, SUM(mi.remaining_qty) t')
+                ->groupBy('mi.ingredient_id', 'mi.packaging_id')->get()
+                ->mapWithKeys(fn($r) => [$r->ingredient_id . '-' . ($r->packaging_id ?: 0) => (float)$r->t])
+                ->all();
         }
 
         // ── Referensi konsumsi ────────────────────────────────────────────────
@@ -152,7 +165,6 @@ class OrderPlanningController extends Controller
         $refEnd    = Carbon::create($refYear, $refMonth, 1)->endOfMonth()->toDateString();
         $daysInRef = Carbon::create($refYear, $refMonth, 1)->daysInMonth;
 
-        $usageSums   = collect();
         $usageSource = 'hpp'; // sumber TUNGGAL: HPP Aktual (pencatatan harian tidak dipakai)
 
         // ── Konsumsi acuan = HPP AKTUAL ───────────────────────────────────────
@@ -186,35 +198,40 @@ class OrderPlanningController extends Controller
                        . implode(' dan ', $missing) . ' terlebih dahulu.'];
         }
 
-        // SO Awal & SO Akhir per ingredient (base). 1 bahan bisa >1 baris kemasan → SUM.
-        $openingMap = OpnameItem::where('opname_id', $openingOpname->id)
-            ->get(['ingredient_id', 'physical_qty'])
-            ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('physical_qty'));
-        $closingMap = OpnameItem::where('opname_id', $closingOpname->id)
-            ->get(['ingredient_id', 'physical_qty'])
-            ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('physical_qty'));
+        // Semua komponen konsumsi disimpan PER (bahan × kemasan), sama alasannya
+        // dengan stok di atas: 1 bahan bisa punya beberapa ukuran dus, jadi base
+        // unit-nya tidak boleh digabung dulu sebelum dibagi ukuran dus.
+        $perPkg = fn($rows) => collect($rows)
+            ->mapWithKeys(fn($r) => [$r->ingredient_id . '-' . ($r->packaging_id ?: 0) => (float)$r->t])
+            ->all();
 
-        // Pembelian / barang masuk bulan referensi (base) per ingredient
-        $purchaseMap = DB::table('mutation_items as mi')
+        // SO Awal & SO Akhir (base)
+        $openingMap = $perPkg(OpnameItem::where('opname_id', $openingOpname->id)
+            ->selectRaw('ingredient_id, packaging_id, SUM(physical_qty) t')
+            ->groupBy('ingredient_id', 'packaging_id')->get());
+        $closingMap = $perPkg(OpnameItem::where('opname_id', $closingOpname->id)
+            ->selectRaw('ingredient_id, packaging_id, SUM(physical_qty) t')
+            ->groupBy('ingredient_id', 'packaging_id')->get());
+
+        // Pembelian / barang masuk bulan referensi (base)
+        $purchaseMap = $perPkg(DB::table('mutation_items as mi')
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
             ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
             ->whereIn('m.type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external'])
-            ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
-            ->groupBy('mi.ingredient_id')
-            ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
+            ->selectRaw('mi.ingredient_id, mi.packaging_id, SUM(mi.total_in_base) as t')
+            ->groupBy('mi.ingredient_id', 'mi.packaging_id')->get());
 
         // Transfer keluar (base) — toko ini sebagai sumber (sama dgn HPP Aktual)
-        $salesOutMap = DB::table('mutation_items as mi')
+        $salesOutMap = $perPkg(DB::table('mutation_items as mi')
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.source_store_id', $storeId)
             ->where('m.status', 'confirmed')
             ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
             ->whereIn('m.type', ['sale_internal', 'sale_external_out'])
-            ->selectRaw('mi.ingredient_id, SUM(mi.total_in_base) as total')
-            ->groupBy('mi.ingredient_id')
-            ->pluck('total', 'ingredient_id')->map(fn($v) => (float)$v);
+            ->selectRaw('mi.ingredient_id, mi.packaging_id, SUM(mi.total_in_base) as t')
+            ->groupBy('mi.ingredient_id', 'mi.packaging_id')->get());
 
         // Semua bahan AKTIF yang dipasok SUPPLIER PUSAT ikut ditampilkan - bukan
         // hanya yang terpakai di bulan referensi. Bahan tanpa konsumsi tetap muncul
@@ -239,49 +256,75 @@ class OrderPlanningController extends Controller
 
         $tableData = [];
 
+        // Ukuran dus (base per dus) untuk SEMUA kemasan, bukan hanya kemasan pusat —
+        // stok/konsumsi bisa saja tercatat di kemasan lain milik bahan yang sama.
+        $crateToBaseAll = IngredientPackaging::get(['id', 'crate_to_pack', 'pack_to_base'])
+            ->mapWithKeys(fn($p) => [$p->id => (float)$p->crate_to_pack * (float)$p->pack_to_base])
+            ->all();
+
+        // "bahan-kemasan" => base  →  [bahan][kemasan] => base
+        $byIng = function (array $map) {
+            $out = [];
+            foreach ($map as $k => $v) {
+                [$i, $p] = array_pad(explode('-', (string)$k, 2), 2, 0);
+                $out[(int)$i][(int)$p] = ($out[(int)$i][(int)$p] ?? 0) + (float)$v;
+            }
+            return $out;
+        };
+        $openingMap  = $byIng($openingMap);
+        $closingMap  = $byIng($closingMap);
+        $purchaseMap = $byIng($purchaseMap);
+        $salesOutMap = $byIng($salesOutMap);
+        $stockByPkg  = $byIng($stockByPkg);
+
         foreach ($ingredients as $ing) {
             // Kemasan yang dipakai = kemasan dari supplier pusat (relasi sudah difilter),
             // supaya ukuran dus & konversinya sesuai barang yang benar-benar diorder.
             $pkg = $ing->packagings->first();
             if (!$pkg || $pkg->crate_to_pack <= 0 || $pkg->pack_to_base <= 0) continue;
 
+            $crateToBase = (float)$pkg->crate_to_pack * (float)$pkg->pack_to_base;
+
+            // Ubah base → DUS memakai ukuran dus KEMASANNYA SENDIRI. Kemasan yang
+            // tidak dikenal / tidak berkemasan jatuh ke ukuran dus kemasan order.
+            // Inilah inti perbaikannya: dulu semua base dijumlahkan dulu lalu dibagi
+            // ukuran dus kemasan pertama saja, sehingga bahan dengan >1 ukuran dus
+            // (mis. Big Bag @9 pack vs @25 pack) sisanya salah hitung.
+            $keDus = function (array $map) use ($ing, $crateToBaseAll, $crateToBase) {
+                $dus = 0.0;
+                foreach ($map[$ing->id] ?? [] as $pid => $base) {
+                    $ctb = ($pid && ($crateToBaseAll[$pid] ?? 0) > 0) ? $crateToBaseAll[$pid] : $crateToBase;
+                    $dus += $base / $ctb;
+                }
+                return $dus;
+            };
+
             // Konsumsi acuan, identik dengan HPP Aktual:
             //   SO Awal + barang masuk - transfer keluar - SO Akhir
             // Hasil minus (stok justru bertambah) dianggap 0, bukan dibuang.
-            $consumBase = ($openingMap[$ing->id]  ?? 0.0) + ($purchaseMap[$ing->id] ?? 0.0)
-                        - ($salesOutMap[$ing->id] ?? 0.0) - ($closingMap[$ing->id]  ?? 0.0);
-            $totalPack  = max(0.0, $consumBase) / $pkg->pack_to_base;
+            $consumDus = $keDus($openingMap) + $keDus($purchaseMap)
+                       - $keDus($salesOutMap) - $keDus($closingMap);
+            $totalDusRef = max(0.0, $consumDus);
 
-            $usage = (object)[
-                'ingredient_id' => $ing->id,
-                'total_pack'    => $totalPack,
-                'active_days'   => $daysInRef,   // konsumsi sebulan -> dibagi rata
-            ];
-            $usageSums->put($ing->id, $usage);
+            // konsumsi sebulan -> dibagi rata ke jumlah hari bulan referensi
+            $avgDailyDus  = $totalDusRef / $daysInRef;
+            $stockDus     = $keDus($stockByPkg);
 
-            $crateToBase  = $pkg->crate_to_pack * $pkg->pack_to_base;
-            $avgDailyPack = $usage->total_pack / $daysInRef;
-            $stockBase    = $stockMap[$ing->id] ?? 0;
-            $stockPack    = $stockBase / $pkg->pack_to_base;
-            $stockDus     = $stockBase / $crateToBase;
-
-            $grossPack    = $avgDailyPack * $daysToCover;
-            $grossWithBuf = $grossPack * (1 + $bufferPct / 100);
-            $netPack      = max(0, $grossWithBuf - $stockPack);
-            $netDusRaw    = $netPack / $pkg->crate_to_pack;
+            $grossDus     = $avgDailyDus * $daysToCover;
+            $grossWithBuf = $grossDus * (1 + $bufferPct / 100);
+            $netDusRaw    = max(0, $grossWithBuf - $stockDus);
             // Kebutuhan < 0,1 dus dianggap nol (jangan dibulatkan ke atas)
             $netDus       = $netDusRaw < 0.1 ? 0 : (int) ceil($netDusRaw);
 
-            $ctp = $pkg->crate_to_pack;
             $tableData[] = (object)[
                 'ingredient'      => $ing,
                 'packaging'       => $pkg,
-                'ref_total_dus'   => round($usage->total_pack / $ctp, 2),
-                'avg_daily_dus'   => round($avgDailyPack / $ctp, 3),
-                'active_days'     => $usage->active_days,
+                'ref_total_dus'   => round($totalDusRef, 2),
+                'avg_daily_dus'   => round($avgDailyDus, 3),
+                'active_days'     => $daysInRef,
                 'stock_dus'       => round($stockDus, 2),
-                'gross_dus'       => round($grossPack / $ctp, 2),
-                'buffer_dus'      => round(($grossWithBuf - $grossPack) / $ctp, 2),
+                'gross_dus'       => round($grossDus, 2),
+                'buffer_dus'      => round($grossWithBuf - $grossDus, 2),
                 'net_dus'         => $netDus,
             ];
         }
