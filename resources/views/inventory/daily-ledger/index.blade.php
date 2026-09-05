@@ -424,7 +424,8 @@
                             $closing = $toDusPack($closingBase, $pkg);
                         @endphp
 
-                        <tr data-avail="{{ $availBase }}"
+                        <tr data-opening="{{ $trow['opening_base'] }}"
+                            data-avail="{{ $availBase }}"
                             data-ptb="{{ $ptb }}"
                             data-ctb="{{ $ctb }}"
                             data-ing="{{ $ingId }}"

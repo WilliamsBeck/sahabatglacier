@@ -120,66 +120,33 @@ class DailyLedgerController extends Controller
             $usageMap[$u->ingredient_id][$pkgKey][(int)$u->usage_date->format('j')] = (float)$u->qty_pack;
         }
 
-        // ── Carry-over: hitung saldo akhir bulan lalu jika tidak ada opname ──
-        // Untuk setiap bahan dengan history apapun sebelum bulan ini, hitung:
-        //   stok_in (semua mutasi masuk) - stok_out (semua mutasi keluar) - usage_base
-        // Hasilnya = stok awal bulan ini secara teoritis.
+        // ── Carry-over: saldo akhir bulan lalu, bila belum ada opname approved ──
+        //
+        // Dihitung PER KEMASAN memakai StockBalanceService — rumus yang sama persis
+        // dengan stok akhir bulan berjalan & "Stok Sistem" di Stok Opname. Sebelumnya
+        // di sini ada rumus tersendiri (masuk − keluar − pemakaian) yang:
+        //   - TIDAK mengurangi waste
+        //   - TIDAK mengurangi selisih negatif opname
+        //   - ikut menghitung pemakaian yang belum dikonfirmasi
+        //   - digabung per BAHAN lalu ditaruh di baris kemasan pertama saja
+        //   - membuang saldo minus (if bal > 0)
+        // Akibatnya stok akhir Agustus tidak pernah sama dengan stok awal September
+        // selama opname akhir Agustus belum di-approve.
+        $carryOverByPkg = \App\Services\StockBalanceService::saldoPerKemasan(
+            $storeId,
+            Carbon::parse($startDate)->subDay()->toDateString()   // s/d akhir bulan lalu
+        );
+
         $carryOverMap = [];
         if (empty($opnameOpeningMap)) {
-            // Mutations masuk sebelum bulan ini
-            // Pakai COALESCE(delivery_date, transaction_date) sebagai tanggal pengakuan stok
-            $prevIn = \DB::table('mutation_items as mi')
-                ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
-                ->where('m.destination_store_id', $storeId)
-                ->where('m.status', 'confirmed')
-                ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
-                ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
-                ->groupBy('mi.ingredient_id')
-                ->pluck('total', 'ingredient_id');
-
-            // Mutations keluar sebelum bulan ini (sale/transfer)
-            $prevOut = \DB::table('mutation_items as mi')
-                ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
-                ->where('m.source_store_id', $storeId)
-                ->where('m.status', 'confirmed')
-                ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
-                ->whereIn('m.type', ['sale_internal','sale_external_out'])
-                ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
-                ->groupBy('mi.ingredient_id')
-                ->pluck('total', 'ingredient_id');
-
-            // Pemakaian sebelum bulan ini (qty_pack → base via packaging).
-            // PENTING: pakai subquery untuk ambil 1 packaging saja per ingredient,
-            // supaya tidak duplikat kalau bahan punya >1 packaging aktif.
-            $prevUsageRows = \DB::table('daily_usages as du')
-                ->leftJoinSub(
-                    \DB::table('ingredient_packagings')
-                        ->select('ingredient_id', \DB::raw('MIN(pack_to_base) as pack_to_base'))
-                        ->where('is_active', 1)
-                        ->groupBy('ingredient_id'),
-                    'p',
-                    'p.ingredient_id', '=', 'du.ingredient_id'
-                )
-                ->where('du.store_id', $storeId)
-                ->where('du.usage_date', '<', $startDate)
-                ->select(
-                    'du.ingredient_id',
-                    \DB::raw('SUM(du.qty_pack * COALESCE(p.pack_to_base, 1)) as total_base')
-                )
-                ->groupBy('du.ingredient_id')
-                ->pluck('total_base', 'ingredient_id');
-
-            $allCarryIds = collect($prevIn->keys())
-                ->merge($prevOut->keys())
-                ->merge($prevUsageRows->keys())
-                ->unique();
-
-            foreach ($allCarryIds as $iid) {
-                $bal = (float)($prevIn[$iid] ?? 0) - (float)($prevOut[$iid] ?? 0) - (float)($prevUsageRows[$iid] ?? 0);
-                if ($bal > 0.001) {
-                    $carryOverMap[$iid] = $bal;
-                }
+            // Ringkas per BAHAN (dipakai untuk daftar bahan & ringkasan tabel);
+            // rinciannya per kemasan tetap dipakai lewat $carryOverByPkg di bawah.
+            foreach ($carryOverByPkg as $k => $bal) {
+                [$iid] = explode('-', $k);
+                $carryOverMap[(int) $iid] = ($carryOverMap[(int) $iid] ?? 0) + $bal;
             }
+            // Saldo yang benar-benar nol tidak perlu memunculkan bahan di daftar
+            $carryOverMap = array_filter($carryOverMap, fn($v) => abs($v) > 0.001);
         }
 
         // ── Collect all ingredient IDs ─────────────────────────────
@@ -257,11 +224,15 @@ class DailyLedgerController extends Controller
             $k = $it->ingredient_id . '-' . ($it->packaging_id ?: 0);
             $openingItemsByPkg[$k] = ($openingItemsByPkg[$k] ?? 0) + (float) $it->total_in_base;
         }
-        // Opening per baris: opname (per kemasan) → carryover (per bahan, di baris pertama) → opening_stock (per kemasan)
-        $openingFor = function ($ingId, $pid, $isFirst) use ($prevOpname, $opnameOpeningByPkg, $carryOverMap, $openingItemsByPkg) {
+        // Opening per baris — SEMUANYA per kemasan:
+        //   opname bulan lalu (approved) → saldo akhir bulan lalu → opening_stock.
+        // Carry-over dulu per BAHAN dan hanya ditaruh di baris kemasan pertama,
+        // sehingga baris kemasan lain selalu 0 dan tidak pernah cocok dengan stok
+        // akhir bulan sebelumnya yang memang dihitung per kemasan.
+        $openingFor = function ($ingId, $pid, $isFirst) use ($prevOpname, $opnameOpeningByPkg, $carryOverMap, $carryOverByPkg, $openingItemsByPkg) {
             $k = $ingId . '-' . ($pid ?: 0);
             if ($prevOpname)            return (float) ($opnameOpeningByPkg[$k] ?? 0);
-            if (!empty($carryOverMap))  return $isFirst ? (float) ($carryOverMap[$ingId] ?? 0) : 0.0;
+            if (!empty($carryOverMap))  return (float) ($carryOverByPkg[$k] ?? 0);
             return (float) ($openingItemsByPkg[$k] ?? 0);
         };
 
@@ -559,6 +530,22 @@ class DailyLedgerController extends Controller
                     $signed  = ($recv[$K($iid, $pkg->id)] ?? 0) - ($dem[$K($iid, $pkg->id)] ?? 0) - $draftB;
                     // base bertanda: minus hanya bila over; selain itu FIFO remaining dikurangi pemakaian draft
                     $closingBreakdown[$iid][$pkg->id] = ($signed < -0.001) ? $signed : ((float) $fifo - $draftB);
+                }
+            }
+        } else {
+            // BULAN LAMPAU (atau bulan depan) tanpa opname approved.
+            // Stok akhirnya = saldo per kemasan sampai akhir bulan itu — rumus yang
+            // SAMA dengan stok awal bulan berikutnya, sehingga keduanya dijamin cocok.
+            // Dulu tampilan menghitung sendiri (awal + masuk − keluar − waste − pemakaian)
+            // yang MELEWATKAN selisih negatif opname dan ikut menghitung pemakaian
+            // yang belum dikonfirmasi — itu sumber beda "akhir Agustus vs awal September".
+            $saldoAkhirBulan = \App\Services\StockBalanceService::saldoPerKemasan($storeId, $endDate);
+            foreach ($ingIds as $iid) {
+                $ing = $ingredients[$iid] ?? null;
+                if (!$ing) continue;
+                foreach ($ing->packagings as $pkg) {
+                    $closingBreakdown[$iid][$pkg->id] =
+                        (float) ($saldoAkhirBulan[$iid . '-' . $pkg->id] ?? 0);
                 }
             }
         }

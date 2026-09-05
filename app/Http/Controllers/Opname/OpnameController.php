@@ -201,65 +201,13 @@ class OpnameController extends Controller
      * untuk saldo BERTANDA (bisa minus) yang konsisten di Sistem Opname, Saldo Stok,
      * dan Pencatatan Harian. Dikembalikan [$recv, $dem], key = "ingId-pkgId(atau 0)".
      */
+    /**
+     * Delegasi ke StockBalanceService — rumusnya dipakai bareng dengan Saldo Stok
+     * dan stok awal/akhir di Pencatatan Harian, supaya tidak bisa mencar.
+     */
     private function receivedDemandMaps(int $storeId, string $asOfDate): array
     {
-        $K = fn($i, $p) => $i . '-' . ($p ?: 0);
-        $recv = []; $dem = [];
-
-        foreach (MutationItem::whereHas('mutation', fn($q) =>
-                    $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$asOfDate])
-                )
-                ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
-                ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
-            $recv[$K($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
-        }
-        foreach (MutationItem::whereHas('mutation', fn($q) =>
-                    $q->where('source_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereIn('type', ['sale_internal', 'sale_external_out'])
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$asOfDate])
-                )
-                ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
-                ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
-            $k = $K($r->ingredient_id, $r->packaging_id); $dem[$k] = ($dem[$k] ?? 0) + (float) $r->t;
-        }
-        $pkgConvAll = IngredientPackaging::all()->keyBy('id');
-        foreach (DailyUsage::where('store_id', $storeId)->where('qty_pack', '>', 0)
-                ->where('usage_date', '<=', $asOfDate)
-                ->whereExists(fn($q) => $q->from('daily_confirmations')
-                    ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
-                    ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
-                ->selectRaw('ingredient_id, packaging_id, SUM(qty_pack) p')
-                ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
-            $ptbU = ($r->packaging_id && $pkgConvAll->has($r->packaging_id))
-                ? (float) $pkgConvAll[$r->packaging_id]->pack_to_base : 1;
-            $k = $K($r->ingredient_id, $r->packaging_id); $dem[$k] = ($dem[$k] ?? 0) + (float) $r->p * $ptbU;
-        }
-        foreach (\App\Models\WasteLogItem::query()
-                ->join('waste_logs', 'waste_logs.id', '=', 'waste_log_items.waste_log_id')
-                ->where('waste_logs.store_id', $storeId)->where('waste_log_items.source_type', 'raw')
-                ->where('waste_logs.waste_date', '<=', $asOfDate)
-                ->selectRaw('waste_log_items.ingredient_id ing, waste_log_items.packaging_id pkg,
-                             SUM(waste_log_items.qty_crate) c, SUM(waste_log_items.qty_pack) p, SUM(waste_log_items.qty_base) b')
-                ->groupBy('waste_log_items.ingredient_id', 'waste_log_items.packaging_id')->get() as $r) {
-            $base = ($r->pkg && $pkgConvAll->has($r->pkg))
-                ? ((float) $r->c * (float) $pkgConvAll[$r->pkg]->crate_to_pack * (float) $pkgConvAll[$r->pkg]->pack_to_base
-                   + (float) $r->p * (float) $pkgConvAll[$r->pkg]->pack_to_base)
-                : (float) $r->b;
-            $k = $K($r->ing, $r->pkg); $dem[$k] = ($dem[$k] ?? 0) + $base;
-        }
-        // opname sebelumnya (approved, tanggal <= tanggal ini): variance NEGATIF ikut mengurangi
-        foreach (\App\Models\OpnameItem::query()
-                ->join('opnames', 'opnames.id', '=', 'opname_items.opname_id')
-                ->where('opnames.store_id', $storeId)->where('opnames.status', 'approved')
-                ->where('opnames.opname_date', '<=', $asOfDate)
-                ->where('opname_items.variance', '<', 0)
-                ->selectRaw('opname_items.ingredient_id ing, opname_items.packaging_id pkg, SUM(opname_items.variance) v')
-                ->groupBy('opname_items.ingredient_id', 'opname_items.packaging_id')->get() as $r) {
-            $k = $K($r->ing, $r->pkg); $dem[$k] = ($dem[$k] ?? 0) + abs((float) $r->v);
-        }
-
-        return [$recv, $dem];
+        return \App\Services\StockBalanceService::receivedDemandMaps($storeId, $asOfDate);
     }
 
     public function systemQty(Request $request)
