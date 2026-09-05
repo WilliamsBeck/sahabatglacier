@@ -528,9 +528,16 @@ class DailyLedgerController extends Controller
             // Pemakaian harian DRAFT (belum dikonfirmasi): TIDAK memotong FIFO/Saldo Stok,
             // tapi ikut mengurangi "stok akhir" yang tampil di halaman pencatatan harian —
             // supaya angka import/ketik langsung terlihat memotong tanpa nunggu konfirmasi.
+            //
+            // HANYA draft di BULAN YANG SEDANG DITAMPILKAN. Tanpa batas tanggal, draft
+            // lama yang tidak pernah dikonfirmasi (mis. sisa Juli) ikut memotong stok
+            // akhir bulan September — padahal angkanya tidak muncul di halaman itu,
+            // sehingga tidak bisa ditelusuri user dan membuat "Stok Sistem" di Stok
+            // Opname (yang hanya menghitung pemakaian terkonfirmasi) jadi tidak cocok.
             $draftDem = [];
             foreach (DailyUsage::where('store_id', $storeId)->where('qty_pack', '>', 0)
                     ->whereIn('ingredient_id', $ingIds)
+                    ->whereBetween('usage_date', [$startDate, $endDate])
                     ->whereNotExists(fn($q) => $q->from('daily_confirmations')
                         ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
                         ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
