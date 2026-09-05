@@ -189,7 +189,6 @@
                                         data-terpilih="{{ $item->packaging_id }}"
                                         onchange="onKemasanChange({{ $idx }})">
                                 </select>
-                                <div class="text-muted info-kemasan" style="font-size:.72rem"></div>
                             </td>
 
                             {{-- Selalu dirender (tidak lagi bergantung kemasan awal), karena
@@ -219,15 +218,14 @@
                             </td>
 
                             <td>
+                                {{-- Sama seperti form Buat: input teks ber-format ribuan (num-fmt),
+                                     bukan input angka mentah, dan tanpa label satuan di bawahnya --}}
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">Rp</span>
-                                    <input type="number" class="form-control form-control-sm price-dus-input"
-                                           value="{{ $ctb > 0 ? $priceDus : round($grossBase) }}"
-                                           min="0" step="1" placeholder="0"
+                                    <input type="text" class="form-control form-control-sm price-dus-input num-fmt"
+                                           value="{{ number_format($ctb > 0 ? $priceDus : round($grossBase), 0, ',', '.') }}"
+                                           placeholder="0"
                                            oninput="onPriceDusChange({{ $idx }})">
-                                </div>
-                                <div class="form-text text-muted label-satuan-harga" style="font-size:.72rem">
-                                    {{ $ctb > 0 ? 'per dus' : 'per '.$item->ingredient->unit_base }}
                                 </div>
                             </td>
 
@@ -353,7 +351,6 @@ function tambahBaris() {
       + '<td>'
       + '<select name="items[' + idx + '][packaging_id]" class="form-select form-select-sm sel-kemasan"'
       + ' onchange="onKemasanChange(' + idx + ')"><option value="">— Kemasan —</option></select>'
-      + '<div class="text-muted info-kemasan" style="font-size:.72rem"></div>'
       + '</td>'
       + '<td><input type="number" name="items[' + idx + '][qty_crate]" class="form-control form-control-sm qty-input"'
       + ' min="0" placeholder="0" oninput="recalcRow(' + idx + ')"></td>'
@@ -363,9 +360,8 @@ function tambahBaris() {
       + ' step="0.01" min="0" placeholder="0" oninput="recalcRow(' + idx + ')"></td>'
       + '<td>'
       + '<div class="input-group input-group-sm"><span class="input-group-text">Rp</span>'
-      + '<input type="number" class="form-control form-control-sm price-dus-input" min="0" step="1" placeholder="0"'
+      + '<input type="text" class="form-control form-control-sm price-dus-input num-fmt" placeholder="0"'
       + ' oninput="onPriceDusChange(' + idx + ')"></div>'
-      + '<div class="form-text text-muted" style="font-size:.72rem">per dus</div>'
       + '<input type="hidden" name="items[' + idx + '][price_per_base]" class="price-per-base-hidden" value="0">'
       + '<input type="hidden" name="items[' + idx + '][price_per_crate]" class="price-per-crate-hidden" value="">'
       + '</td>'
@@ -386,9 +382,7 @@ function isiDropdownKemasan(idx, terpilih) {
     if (!row) return;
     var id  = row.querySelector('select[name$="[ingredient_id]"]').value;
     var sel = row.querySelector('.sel-kemasan');
-    var inf = row.querySelector('.info-kemasan');
     sel.innerHTML = '<option value="">— Kemasan —</option>';
-    if (inf) inf.textContent = '';
     row.dataset.ctb = 0; row.dataset.ptb = 0;
 
     var bahan = dataBahan.filter(function (b) { return String(b.id) === String(id); })[0];
@@ -396,12 +390,13 @@ function isiDropdownKemasan(idx, terpilih) {
 
     var list = kemasanTersedia(bahan);
     list.forEach(function (p) {
+        var ctp = Math.round(parseFloat(p.crate_to_pack) || 0);
+        var ptb = Math.round(parseFloat(p.pack_to_base) || 0);
         var o = document.createElement('option');
         o.value = p.id;
-        o.textContent = p.packaging_name;
-        o.dataset.ctb = (parseFloat(p.crate_to_pack) || 0) * (parseFloat(p.pack_to_base) || 0);
+        o.textContent = '@' + ctp + ' pack';   // label ringkas, sama dgn form Buat
+        o.dataset.ctb = ctp * ptb;
         o.dataset.ptb = parseFloat(p.pack_to_base) || 0;
-        o.dataset.ket = '1 Dus = ' + p.crate_to_pack + ' Pack × ' + p.pack_to_base + ' ' + bahan.unit;
         sel.appendChild(o);
     });
 
@@ -420,10 +415,6 @@ function terapkanKemasan(idx) {
     var opt = sel.options[sel.selectedIndex];
     row.dataset.ctb = (opt && opt.dataset.ctb) ? opt.dataset.ctb : 0;
     row.dataset.ptb = (opt && opt.dataset.ptb) ? opt.dataset.ptb : 0;
-    var inf = row.querySelector('.info-kemasan');
-    if (inf) inf.textContent = (opt && opt.dataset.ket) ? opt.dataset.ket : '';
-    var lbl = row.querySelector('.label-satuan-harga');
-    if (lbl) lbl.textContent = parseFloat(row.dataset.ctb) > 0 ? 'per dus' : 'per satuan';
 }
 
 function onBahanChange(idx) {
@@ -461,9 +452,12 @@ function recalcRow(idx) { recalcTotals(); }
 function onPriceDusChange(idx) {
     var row    = document.getElementById('erow-' + idx);
     if (!row) return;
-    var ctb    = parseFloat(row.dataset.ctb) || 0;
-    var priceDus = parseFloat(row.querySelector('.price-dus-input')?.value) || 0;
-    var priceBase = ctb > 0 ? priceDus / ctb : priceDus;  // if no packaging, treat as price_per_base
+    var ctb = parseFloat(row.dataset.ctb) || 0;
+    // Nilainya kini berformat ribuan ("1.016.000"), jadi WAJIB lewat NumberFmt.parse.
+    // parseFloat("1.016.000") akan terbaca 1.016 — harganya jadi kacau total.
+    var el = row.querySelector('.price-dus-input');
+    var priceDus = el ? (window.NumberFmt ? NumberFmt.parse(el.value) : parseFloat(el.value) || 0) : 0;
+    var priceBase = ctb > 0 ? priceDus / ctb : priceDus;  // tanpa kemasan: dianggap harga per satuan dasar
 
     var hidden = row.querySelector('.price-per-base-hidden');
     if (hidden) hidden.value = priceBase.toFixed(8);
