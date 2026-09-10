@@ -646,16 +646,15 @@ class MutationController extends Controller
         // akan merusak stok & valuasi yang sudah dibekukan → blokir (konsisten dgn
         // store()/confirm()/update()). Draft tidak menyentuh stok, tetap boleh dihapus.
         if ($mutation->status === 'confirmed') {
-            $lockDate = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
-            $lc = \Carbon\Carbon::parse($lockDate);
-            foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
-                if (\App\Models\Opname::isDateLocked((int)$sid, $lockDate)) {
+            foreach (\App\Services\StockRecognition::tanggalKunci($mutation) as $sid => $lockDate) {
+                $lc = \Carbon\Carbon::parse($lockDate);
+                if (\App\Models\Opname::isDateLocked($sid, $lockDate)) {
                     return redirect()->route('inventory.mutations.show', $mutation)
-                        ->with('error', \App\Models\Opname::lockMessageFor((int)$sid));
+                        ->with('error', \App\Models\Opname::lockMessageFor($sid));
                 }
-                if (\App\Models\HppSnapshot::isDateLocked((int)$sid, $lockDate)) {
+                if (\App\Models\HppSnapshot::isDateLocked($sid, $lockDate)) {
                     return redirect()->route('inventory.mutations.show', $mutation)
-                        ->with('error', \App\Models\HppSnapshot::lockMessageFor((int)$sid, $lc->month, $lc->year));
+                        ->with('error', \App\Models\HppSnapshot::lockMessageFor($sid, $lc->month, $lc->year));
                 }
             }
         }
@@ -843,15 +842,15 @@ class MutationController extends Controller
                 'Tanggal penerimaan belum diisi. Edit draft ini dan isi tanggal penerimaan terlebih dahulu.');
         }
 
-        // Lock periode oleh opname / snapshot HPP
-        $txDateStr = ($mutation->delivery_date ?? $mutation->transaction_date)->format('Y-m-d');
-        $c = \Carbon\Carbon::parse($txDateStr);
-        foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
-            if (\App\Models\Opname::isDateLocked((int)$sid, $txDateStr)) {
-                return back()->with('error', \App\Models\Opname::lockMessageFor((int)$sid));
+        // Lock periode oleh opname / snapshot HPP — tanggalnya BEDA per toko:
+        // pengirim dicek di tanggal kirim, penerima di tanggal terima.
+        foreach (\App\Services\StockRecognition::tanggalKunci($mutation) as $sid => $tgl) {
+            $c = \Carbon\Carbon::parse($tgl);
+            if (\App\Models\Opname::isDateLocked($sid, $tgl)) {
+                return back()->with('error', \App\Models\Opname::lockMessageFor($sid));
             }
-            if (\App\Models\HppSnapshot::isDateLocked((int)$sid, $txDateStr)) {
-                return back()->with('error', \App\Models\HppSnapshot::lockMessageFor((int)$sid, $c->month, $c->year));
+            if (\App\Models\HppSnapshot::isDateLocked($sid, $tgl)) {
+                return back()->with('error', \App\Models\HppSnapshot::lockMessageFor($sid, $c->month, $c->year));
             }
         }
 

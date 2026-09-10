@@ -100,12 +100,13 @@ class DailyLedgerController extends Controller
             )->get();
 
         // ── Penjualan/transfer: keluar dari toko ini ───────────────
+        // Diakui saat DIKIRIM (transaction_date), bukan saat tiba di tujuan.
         $saleItems = MutationItem::with('mutation:id,transaction_date,delivery_date,type')
             ->whereHas('mutation', fn($q) => $q
                 ->where('source_store_id', $storeId)
                 ->where('status', 'confirmed')
-                ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$startDate, $endDate])
-                ->whereIn('type', ['sale_internal', 'sale_external_out'])
+                ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlKeluar()), [$startDate, $endDate])
+                ->whereIn('type', \App\Services\StockRecognition::KELUAR)
             )->get();
 
         // ── Daily usages (manual input) ────────────────────────────
@@ -361,9 +362,9 @@ class DailyLedgerController extends Controller
         foreach ($saleItems as $item) {
             $ingId  = $item->ingredient_id;
             if (!isset($tableData[$ingId])) continue;
-            // Tanggal pengakuan stok keluar = delivery_date (fallback transaction_date),
-            // konsisten dengan sisi pembelian & dengan FIFO/StockLedger.
-            $day    = (int)(($item->mutation->delivery_date ?? $item->mutation->transaction_date)->format('j'));
+            // Tanggal pengakuan stok keluar = tanggal KIRIM. Barang yang sudah keluar
+            // gudang tidak boleh tetap terhitung sebagai stok sampai tiba di tujuan.
+            $day    = (int) $item->mutation->transaction_date->format('j');
             $pkgKey = (string)($item->packaging_id ?? $defaultPkgByIng[$ingId] ?? 'null');
             $tableData[$ingId]['days'][$day]['int_out'][$pkgKey] =
                 ($tableData[$ingId]['days'][$day]['int_out'][$pkgKey] ?? 0) + (float)$item->total_in_base;
@@ -1193,10 +1194,10 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.source_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->whereBetween(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$startDate, $endDate])
-            ->whereIn('m.type', ['sale_internal','sale_external_out'])
-            ->select('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date) as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date)'))
+            ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlKeluar('m')), [$startDate, $endDate])
+            ->whereIn('m.type', \App\Services\StockRecognition::KELUAR)
+            ->select('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlKeluar('m') . ' as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
+            ->groupBy('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlKeluar('m')))
             ->get();
 
         $inMap  = []; // [ingId][day] = base in
@@ -1317,8 +1318,8 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.source_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
-            ->whereIn('m.type', ['sale_internal','sale_external_out'])
+            ->where(\DB::raw(\App\Services\StockRecognition::sqlKeluar('m')), '<', $startDate)
+            ->whereIn('m.type', \App\Services\StockRecognition::KELUAR)
             ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id');

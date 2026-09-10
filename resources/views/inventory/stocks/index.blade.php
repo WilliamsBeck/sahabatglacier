@@ -41,6 +41,87 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
 </div>
 @endif
 
+{{-- ═══════════ BARANG DALAM PERJALANAN ═══════════
+     Sudah dikirim (stok pengirim berkurang) tapi belum diterima (stok penerima
+     belum bertambah). Tanpa panel ini barangnya seolah hilang dari sistem. --}}
+@if($dalamPerjalanan->isNotEmpty())
+@php
+    $kirimDari = $dalamPerjalanan->where('source_store_id', (int) $selectedId);
+    $menujuKe  = $dalamPerjalanan->where('destination_store_id', (int) $selectedId);
+    $tglId = fn($d) => $d->format('d') . ' ' . ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'][(int) $d->format('n')] . ' ' . $d->format('Y');
+@endphp
+<div class="card mb-3 border-warning">
+    <div class="card-header bg-warning-subtle py-2 d-flex align-items-center gap-2">
+        <i class="bi bi-truck"></i>
+        <strong class="small">Barang Dalam Perjalanan</strong>
+        <span class="badge bg-warning text-dark">{{ $dalamPerjalanan->count() }} kiriman</span>
+        <span class="text-muted ms-auto" style="font-size:.72rem">
+            Sudah dikirim, belum diterima — belum terhitung di saldo mana pun
+        </span>
+    </div>
+    <div class="card-body p-0"><div class="table-responsive">
+        <table class="table table-sm mb-0" style="font-size:.78rem">
+            <thead>
+                <tr>
+                    <th style="width:12%">Arah</th>
+                    <th style="width:14%">Ref</th>
+                    <th style="width:16%">Toko</th>
+                    <th style="width:12%">Kirim</th>
+                    <th style="width:12%">Perkiraan Tiba</th>
+                    <th>Bahan</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach($dalamPerjalanan as $m)
+                @php $keluar = (int) $m->source_store_id === (int) $selectedId; @endphp
+                <tr>
+                    <td>
+                        @if($keluar)
+                            <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-box-arrow-up me-1"></i>Keluar</span>
+                        @else
+                            <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-box-arrow-in-down me-1"></i>Masuk</span>
+                        @endif
+                    </td>
+                    <td class="text-muted">{{ $m->reference_no }}</td>
+                    <td>{{ $keluar ? ($m->destinationStore->name ?? '-') : ($m->sourceStore->name ?? '-') }}</td>
+                    <td>{{ $tglId($m->transaction_date) }}</td>
+                    <td>{{ $tglId($m->delivery_date) }}</td>
+                    <td>
+                        @foreach($m->items as $it)
+                            @php
+                                $pk  = $it->packaging;
+                                $ctb = $pk ? (float) $pk->crate_to_pack * (float) $pk->pack_to_base : 0;
+                                $ptb = $pk ? (float) $pk->pack_to_base : 0;
+                                $b   = (float) $it->total_in_base;
+                                $dus = $ctb > 0 ? floor($b / $ctb) : 0;
+                                $pak = $ptb > 0 ? floor(($b - $dus * $ctb) / $ptb) : 0;
+                                $sisa= $b - $dus * $ctb - $pak * $ptb;
+                            @endphp
+                            <div>
+                                {{ $it->ingredient->name ?? '-' }}
+                                <span class="text-muted">—
+                                    @if($dus > 0){{ number_format($dus, 0, ',', '.') }} dus @endif
+                                    @if($pak > 0){{ number_format($pak, 0, ',', '.') }} pack @endif
+                                    @if($sisa > 0.001){{ number_format($sisa, 0, ',', '.') }} {{ $it->ingredient->unit_base ?? '' }}@endif
+                                    @if($dus == 0 && $pak == 0 && $sisa <= 0.001)0 @endif
+                                </span>
+                            </div>
+                        @endforeach
+                    </td>
+                </tr>
+            @endforeach
+            </tbody>
+        </table>
+    </div></div>
+    <div class="card-footer py-1 text-muted" style="font-size:.72rem">
+        Stok toko pengirim sudah berkurang sejak tanggal kirim; stok toko penerima bertambah saat tanggal tiba.
+        @if($kirimDari->isNotEmpty() && $menujuKe->isNotEmpty())
+            {{ $kirimDari->count() }} kiriman keluar · {{ $menujuKe->count() }} kiriman masuk.
+        @endif
+    </div>
+</div>
+@endif
+
 {{-- ═══════════ MODAL KONFIGURASI ORDER ═══════════ --}}
 <div class="modal fade" id="modalStoreConfig" tabindex="-1">
     <div class="modal-dialog">

@@ -877,13 +877,21 @@ class OpnameController extends Controller
     {
         $afterDate = \Carbon\Carbon::parse($opname->opname_date)->toDateString();
 
-        $hasMutation = \App\Models\Mutation::where(function ($q) use ($opname) {
-                $q->where('destination_store_id', $opname->store_id)
-                  ->orWhere('source_store_id', $opname->store_id);
-            })
-            ->where('status', 'confirmed')
+        // Tanggal pengakuannya beda per sisi: barang masuk diakui saat DITERIMA,
+        // barang keluar diakui saat DIKIRIM. Jadi dicek terpisah, tidak bisa satu
+        // ekspresi untuk kedua sisi (lihat App\Services\StockRecognition).
+        $R = \App\Services\StockRecognition::class;
+        $hasMutation = \App\Models\Mutation::where('status', 'confirmed')
             ->whereNotIn('type', ['opening_stock'])
-            ->where(\DB::raw('COALESCE(delivery_date, transaction_date)'), '>', $afterDate)
+            ->where(fn($q) => $q
+                ->where(fn($w) => $w
+                    ->where('destination_store_id', $opname->store_id)
+                    ->where(\DB::raw($R::sqlMasuk()), '>', $afterDate))
+                ->orWhere(fn($w) => $w
+                    ->where('source_store_id', $opname->store_id)
+                    ->whereIn('type', $R::KELUAR)
+                    ->where(\DB::raw($R::sqlKeluar()), '>', $afterDate))
+            )
             ->exists();
 
         $hasDaily = \App\Models\DailyUsage::where('store_id', $opname->store_id)

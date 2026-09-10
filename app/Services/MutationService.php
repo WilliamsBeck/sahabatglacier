@@ -25,8 +25,15 @@ class MutationService
             self::splitSaleItemsByFifoLayers($mutation);
 
             foreach ($mutation->items as $item) {
-                // Stok bergerak per tgl terima (delivery_date); fallback ke tgl kirim jika belum diisi
-                $date         = ($mutation->delivery_date ?? $mutation->transaction_date)->format('Y-m-d');
+                // Tanggal pengakuan DIPISAH per sisi (lihat App\Services\StockRecognition):
+                //   masuk  → tanggal TERIMA (delivery_date)
+                //   keluar → tanggal KIRIM  (transaction_date)
+                // Selisih keduanya = barang dalam perjalanan. Dulu dua-duanya pakai
+                // tanggal terima, sehingga stok toko pengirim baru berkurang saat
+                // barang tiba — padahal barangnya sudah keluar gudang.
+                $tglTerima    = ($mutation->delivery_date ?? $mutation->transaction_date)->format('Y-m-d');
+                $tglKirim     = $mutation->transaction_date->format('Y-m-d');
+                $date         = $tglTerima;   // dipakai sisi MASUK
                 $ingredientId = $item->ingredient_id;
                 $qty          = (float) $item->total_in_base;
 
@@ -53,7 +60,7 @@ class MutationService
                     if ($mutation->deductsFromSource() && $mutation->source_store_id) {
                         StockLedgerService::record(
                             $mutation->source_store_id, $ingredientId,
-                            $date, 'sale_deduction', -$qty,
+                            $tglKirim, 'sale_deduction', -$qty,
                             'Mutation', $mutation->id,
                             "Ref: {$mutation->reference_no}"
                         );
@@ -323,7 +330,9 @@ class MutationService
     {
         if (!$mutation->deductsFromSource() || !$mutation->source_store_id) return [];
 
-        $upTo   = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
+        // Ini sisi SUMBER (deductsFromSource), jadi tanggal pemotongannya =
+        // tanggal KIRIM, bukan tanggal barang tiba di tujuan.
+        $upTo   = $mutation->transaction_date->toDateString();
         $ingIds = $mutation->items->pluck('ingredient_id')->unique()->all();
         if (empty($ingIds)) return [];
 
@@ -351,14 +360,14 @@ class MutationService
         if (MonthLockService::isLocked('mutation', $mutation->id, $txDate->month, $txDate->year)) {
             return MonthLockService::lockMessage($txDate->month, $txDate->year);
         }
-        $lockDate = ($mutation->delivery_date ?? $mutation->transaction_date)->toDateString();
-        $lc = \Carbon\Carbon::parse($lockDate);
-        foreach (array_filter([$mutation->destination_store_id, $mutation->source_store_id]) as $sid) {
-            if (\App\Models\Opname::isDateLocked((int) $sid, $lockDate)) {
-                return \App\Models\Opname::lockMessageFor((int) $sid);
+        // Tanggal kunci beda per toko: pengirim di tanggal kirim, penerima di tanggal terima.
+        foreach (StockRecognition::tanggalKunci($mutation) as $sid => $lockDate) {
+            $lc = \Carbon\Carbon::parse($lockDate);
+            if (\App\Models\Opname::isDateLocked($sid, $lockDate)) {
+                return \App\Models\Opname::lockMessageFor($sid);
             }
-            if (\App\Models\HppSnapshot::isDateLocked((int) $sid, $lockDate)) {
-                return \App\Models\HppSnapshot::lockMessageFor((int) $sid, $lc->month, $lc->year);
+            if (\App\Models\HppSnapshot::isDateLocked($sid, $lockDate)) {
+                return \App\Models\HppSnapshot::lockMessageFor($sid, $lc->month, $lc->year);
             }
         }
         return null;

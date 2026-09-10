@@ -32,21 +32,23 @@ class StockBalanceService
         $K = fn($i, $p) => self::key($i, $p);
         $recv = []; $dem = [];
 
-        // Masuk: semua mutasi confirmed yang tujuannya toko ini
+        // Masuk: semua mutasi confirmed yang tujuannya toko ini — diakui saat DITERIMA
         foreach (MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$asOfDate])
+                      ->whereRaw(StockRecognition::sqlMasuk() . ' <= ?', [$asOfDate])
                 )
                 ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
                 ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
             $recv[$K($r->ingredient_id, $r->packaging_id)] = (float) $r->t;
         }
 
-        // Keluar: transfer internal & penjualan eksternal keluar
+        // Keluar: transfer internal & penjualan eksternal keluar — diakui saat DIKIRIM.
+        // Barang yang sudah dikirim tapi belum tiba TIDAK lagi dihitung sebagai stok
+        // toko pengirim (lihat StockRecognition).
         foreach (MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('source_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereIn('type', ['sale_internal', 'sale_external_out'])
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$asOfDate])
+                      ->whereIn('type', StockRecognition::KELUAR)
+                      ->whereRaw(StockRecognition::sqlKeluar() . ' <= ?', [$asOfDate])
                 )
                 ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
                 ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {

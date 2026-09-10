@@ -388,9 +388,18 @@ class StockController extends Controller
         $nocat = $rows->filter(fn($r) => $r->ingredient->type === 'raw' && !$r->ingredient->category);
         if ($nocat->isNotEmpty()) $grouped['lainnya'] = $nocat->values();
 
+        // Barang dalam perjalanan: sudah dikirim, belum diterima. Stok toko pengirim
+        // sudah berkurang, stok toko penerima belum bertambah — jadi barangnya tidak
+        // muncul di tabel saldo mana pun. Ditampilkan terpisah supaya tidak terlihat
+        // "hilang" (lihat App\Services\StockRecognition).
+        $dalamPerjalanan = $selectedId
+            ? \App\Services\StockRecognition::dalamPerjalanan((int) $selectedId)
+            : collect();
+
         return view('inventory.stocks.index', compact(
             'grouped', 'categoryLabels', 'stores', 'selectedId',
-            'selectedStore', 'parLevelDays', 'leadTimeDays', 'orderCycleDays', 'dosWindowDays', 'safetyStockDays'
+            'selectedStore', 'parLevelDays', 'leadTimeDays', 'orderCycleDays', 'dosWindowDays', 'safetyStockDays',
+            'dalamPerjalanan'
         ));
     }
 

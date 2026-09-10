@@ -191,10 +191,12 @@ class HppController extends Controller
                   ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external']))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'cost_subtotal'])
             ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('cost_subtotal'));
+        // Barang keluar diakui saat DIKIRIM — harus sama dengan pengakuan di Saldo
+        // Stok/Opname, kalau tidak konsumsi HPP Aktual jadi tidak cocok dgn stoknya.
         $salesOutValMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('source_store_id', $storeId)->where('status', 'confirmed')
-                  ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
-                  ->whereIn('type', ['sale_internal', 'sale_external_out']))
+                  ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlKeluar()), [$monthStart, $dateTo])
+                  ->whereIn('type', \App\Services\StockRecognition::KELUAR))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'cost_subtotal'])
             ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('cost_subtotal'));
         $purchaseMap = MutationItem::whereHas('mutation', fn($q) =>
@@ -205,8 +207,8 @@ class HppController extends Controller
             ->groupBy('ingredient_id')->map(fn($g) => $g->sum('total_in_base'));
         $salesOutMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('source_store_id', $storeId)->where('status', 'confirmed')
-                  ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
-                  ->whereIn('type', ['sale_internal', 'sale_external_out']))
+                  ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlKeluar()), [$monthStart, $dateTo])
+                  ->whereIn('type', \App\Services\StockRecognition::KELUAR))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'total_in_base'])
             ->groupBy('ingredient_id')->map(fn($g) => $g->sum('total_in_base'));
 
