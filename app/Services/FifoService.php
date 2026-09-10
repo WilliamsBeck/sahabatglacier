@@ -200,6 +200,22 @@ class FifoService
         ->where('ingredient_id', $ingredientId)
         ->update(['remaining_qty' => DB::raw('total_in_base')]);
 
+        // 1b. Transfer yang masih di PERJALANAN: paksa remaining_qty = 0.
+        //     Baris mutasi dibuat dengan remaining_qty = total_in_base (lihat
+        //     MutationController::store), jadi kalau hanya DILEWATI pada langkah 1,
+        //     nilai itu tertinggal dan terbaca sebagai stok fisik toko tujuan oleh
+        //     SEMUA query "remaining_qty > 0" — Saldo Stok, harga rata-rata, dan
+        //     pilihan barang saat toko tujuan mau transfer keluar. Dinolkan di sini
+        //     supaya tidak perlu menambal filter di tiap tempat.
+        MutationItem::whereHas('mutation', fn($q) =>
+            $q->where('destination_store_id', $storeId)
+              ->where('status', 'confirmed')
+              ->whereRaw(\App\Services\StockRecognition::sqlMasihDiPerjalanan())
+        )
+        ->where('ingredient_id', $ingredientId)
+        ->where('remaining_qty', '<>', 0)
+        ->update(['remaining_qty' => 0]);
+
         // 2. Ambil semua outgoing dari toko ini (barang keluar), urut dari terlama:
         //    transfer internal (sale_internal) & penjualan eksternal (sale_external_out).
         //    (sale_external = barang MASUK, tidak memotong sumber.)

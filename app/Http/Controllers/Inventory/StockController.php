@@ -43,9 +43,13 @@ class StockController extends Controller
             ->keyBy('ingredient_id');
 
         // ── Load semua batch aktif (remaining_qty > 0) ─────────────────────────
+        // Barang yang masih di perjalanan dikecualikan — Saldo Stok adalah stok FISIK
+        // yang ada di toko. Normalnya remaining_qty-nya sudah 0 (FifoService langkah 1b),
+        // filter ini pengaman kedua supaya baris lama yang sempat salah tidak tampil.
         $batchesMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('destination_store_id', $selectedId)
                   ->where('status', 'confirmed')
+                  ->whereRaw(\App\Services\StockRecognition::sqlSudahDiterima())
                   ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal', 'sale_external'])
             )
             ->where('remaining_qty', '>', 0)

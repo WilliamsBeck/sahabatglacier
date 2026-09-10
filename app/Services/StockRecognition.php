@@ -167,6 +167,12 @@ class StockRecognition
         return "({$alias}.type <> 'sale_internal' OR {$alias}.delivery_date IS NOT NULL)";
     }
 
+    /** Kebalikan sqlSudahDiterima(): barang masih di perjalanan. */
+    public static function sqlMasihDiPerjalanan(string $alias = 'mutations'): string
+    {
+        return "({$alias}.type = 'sale_internal' AND {$alias}.delivery_date IS NULL)";
+    }
+
     /** Ekspresi SQL tanggal pengakuan barang KELUAR: tanggal kirim. */
     public static function sqlKeluar(string $alias = 'mutations'): string
     {

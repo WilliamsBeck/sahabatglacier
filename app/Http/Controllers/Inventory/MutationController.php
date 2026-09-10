@@ -222,7 +222,12 @@ class MutationController extends Controller
             'external_receiver'      => 'nullable|string|max:255|required_if:type,sale_external_out',
             'invoice_no'             => 'nullable|string|max:255|unique:mutations,invoice_no',
             'transaction_date'       => 'required|date',
-            'delivery_date'          => 'nullable|date|after_or_equal:transaction_date',
+            // Transfer internal: tanggal terima TIDAK boleh di masa depan. Barang
+            // yang belum tiba harus dibiarkan kosong lalu ditandai lewat "Terima
+            // Barang". Tanpa larangan ini, tanggal masa depan membuat delivery_date
+            // terisi sehingga barangnya langsung dianggap sudah ada di gudang tujuan.
+            'delivery_date'          => 'nullable|date|after_or_equal:transaction_date'
+                                        . ($request->type === 'sale_internal' ? '|before_or_equal:today' : ''),
             'notes'                  => 'nullable|string',
             'items'                  => 'required|array|min:1',
             'items.*.ingredient_id'  => 'required|exists:ingredients,id',
@@ -241,6 +246,8 @@ class MutationController extends Controller
             'invoice_no.unique'             => 'No. SJ sudah dipakai di mutasi lain. Gunakan nomor yang berbeda.',
             'delivery_date.required'        => 'Tanggal penerimaan wajib diisi untuk pembelian.',
             'delivery_date.after_or_equal'  => 'Tanggal penerimaan tidak boleh lebih awal dari tanggal pengiriman.',
+            'delivery_date.before_or_equal' => 'Tanggal penerimaan tidak boleh di masa depan. Kosongkan saja '
+                . 'kalau barang belum tiba — nanti tekan "Terima Barang" saat barangnya sampai.',
         ]);
 
         // Validasi: toko pengirim dan penerima tidak boleh sama
@@ -435,7 +442,8 @@ class MutationController extends Controller
         $request->validate([
             'transaction_date'  => 'required|date',
             'delivery_date'     => ($needsDelivery ? 'required' : 'nullable')
-                                   . '|date|after_or_equal:transaction_date',
+                                   . '|date|after_or_equal:transaction_date'
+                                   . ($mutation->type === 'sale_internal' ? '|before_or_equal:today' : ''),
             'invoice_no'        => 'nullable|string|max:255|unique:mutations,invoice_no,' . $mutation->id,
             'external_sender'   => 'nullable|string|max:255',
             'external_receiver' => 'nullable|string|max:255',
@@ -454,6 +462,8 @@ class MutationController extends Controller
         ], [
             'delivery_date.required'       => 'Tanggal penerimaan wajib diisi sebelum konfirmasi.',
             'delivery_date.after_or_equal' => 'Tanggal penerimaan tidak boleh lebih awal dari tanggal pengiriman.',
+            'delivery_date.before_or_equal' => 'Tanggal penerimaan tidak boleh di masa depan. Kosongkan saja '
+                . 'kalau barang belum tiba — nanti tekan "Terima Barang" saat barangnya sampai.',
             'invoice_no.unique'            => 'No. SJ sudah dipakai di mutasi lain. Gunakan nomor yang berbeda.',
         ]);
 
@@ -1164,11 +1174,14 @@ class MutationController extends Controller
         $storeId    = $request->store_id;
         $packagingId = $request->packaging_id; // OPTIONAL: filter batch by packaging tertentu
 
-        // Ambil semua batch yang masih ada sisa (remaining_qty > 0) di toko ini
+        // Ambil semua batch yang masih ada sisa (remaining_qty > 0) di toko ini.
+        // Barang yang masih di perjalanan dikecualikan — belum ada di gudang, jadi
+        // tidak boleh bisa dipilih untuk ditransfer/dijual keluar lagi.
         $query = MutationItem::with('mutation')
             ->whereHas('mutation', fn($q) =>
                 $q->where('destination_store_id', $storeId)
                   ->where('status', 'confirmed')
+                  ->whereRaw(\App\Services\StockRecognition::sqlSudahDiterima())
                   ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'opening_stock', 'sale_internal', 'sale_external'])
             )
             ->where('ingredient_id', $ingredient->id)

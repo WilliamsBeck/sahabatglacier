@@ -88,6 +88,13 @@ class MutationService
                     }
                 }
             }
+
+            // Barang masih di perjalanan → baris batch-nya TIDAK boleh punya sisa,
+            // kalau tidak ia terbaca sebagai stok fisik toko tujuan (Saldo Stok,
+            // dan saat toko tujuan mau transfer keluar barangnya ikut terpilih).
+            if (self::masihDiPerjalanan($mutation) && $mutation->destination_store_id) {
+                $mutation->items()->update(['remaining_qty' => 0]);
+            }
         });
     }
 

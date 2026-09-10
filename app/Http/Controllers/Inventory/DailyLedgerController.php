@@ -444,8 +444,11 @@ class DailyLedgerController extends Controller
             // bila kemasan dipakai melebihi stoknya. closingBreakdown menyimpan nilai BASE.
             $K = fn($i, $p) => $i . '-' . ($p ?: 0);
             $recv = []; $dem = [];
+            // Barang yang masih di PERJALANAN dikecualikan: stok akhir di sini adalah
+            // stok FISIK yang ada di toko, dan barangnya belum sampai.
             foreach (MutationItem::whereHas('mutation', fn($q) =>
-                        $q->where('destination_store_id', $storeId)->where('status', 'confirmed'))
+                        $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
+                          ->whereRaw(\App\Services\StockRecognition::sqlSudahDiterima()))
                     ->whereIn('ingredient_id', $ingIds)
                     ->selectRaw('ingredient_id, packaging_id, SUM(total_in_base) t')
                     ->groupBy('ingredient_id', 'packaging_id')->get() as $r) {
@@ -551,11 +554,17 @@ class DailyLedgerController extends Controller
             }
         }
 
+        // Barang milik toko ini yang pada akhir periode ini masih di perjalanan.
+        // Ditampilkan di kolom sendiri — TIDAK ikut stok awal maupun stok akhir,
+        // karena dua kolom itu adalah stok FISIK yang benar-benar ada di toko.
+        $transitByPkg = \App\Services\StockRecognition::transitTujuanPerKemasan($storeId, $endDate);
+
         return view('inventory.daily-ledger.index', compact(
             'stores', 'store', 'tableData', 'tableRows', 'ingredients',
             'month', 'year', 'daysInMonth', 'activeDays', 'storeId',
             'prevOpname', 'confirmedDates', 'closingBreakdown', 'isCurrentMonth',
-            'isLocked', 'lastEditDay', 'isPastMonth', 'approvedExtension', 'editRequest'
+            'isLocked', 'lastEditDay', 'isPastMonth', 'approvedExtension', 'editRequest',
+            'transitByPkg'
         ));
     }
 

@@ -328,6 +328,13 @@
                             title="Dus dihitung dengan konversi standar (kemasan pertama bahan). Untuk rincian per kemasan fisik, lihat halaman Saldo Stok.">
                             STOK AKHIR <i class="bi bi-info-circle" style="font-size:.7rem;opacity:.7"></i>
                         </th>
+                        {{-- Barang sudah dikirim toko lain & sudah MILIK toko ini, tapi belum
+                             tiba. Sengaja kolom sendiri: STOK AWAL & STOK AKHIR hanya memuat
+                             stok fisik yang benar-benar ada di toko. --}}
+                        <th rowspan="2" class="align-middle" style="background:#b9770e;color:#fff;min-width:64px"
+                            title="Sudah dikirim toko lain & sudah milik toko ini, tapi belum tiba. Tidak ikut dihitung di Stok Awal/Akhir.">
+                            DALAM<br>PERJALANAN <i class="bi bi-truck" style="font-size:.7rem;opacity:.8"></i>
+                        </th>
                         @foreach($sectionLabels as $key => $label)
                             @if(count($activeDays[$key]) > 0)
                                 <th colspan="{{ count($activeDays[$key]) }}" class="dl-sec-head"
@@ -480,6 +487,23 @@
                                 <td style="background:#f8f9fa"></td>
                                 <td style="background:#f8f9fa"></td>
                             @endif
+
+                            {{-- Dalam Perjalanan (informasi saja, tidak masuk stok akhir) --}}
+                            @php
+                                $transitBase = (float) ($transitByPkg[$ingId . '-' . ($pkgId ?: 0)] ?? 0);
+                                $transitFmt  = $transitBase > 0.001 ? $toDusPack($transitBase, $pkg) : null;
+                            @endphp
+                            <td class="text-center" style="background:#fdf3e3;font-size:.68rem">
+                                @if($transitFmt)
+                                    <span class="fw-semibold" style="color:#8a5c05">
+                                        @if($transitFmt['dus']){{ $transitFmt['dus'] }}d @endif
+                                        @if($transitFmt['pack']){{ $transitFmt['pack'] }}p @endif
+                                        @if(!$transitFmt['dus'] && !$transitFmt['pack']){{ number_format($transitFmt['base'], 0, ',', '.') }} @endif
+                                    </span>
+                                @else
+                                    <span class="text-muted opacity-50">-</span>
+                                @endif
+                            </td>
 
                             {{-- Pembelian/Penjualan sparse — per baris packaging --}}
                             @foreach($sectionLabels as $key => $label)
