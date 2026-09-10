@@ -126,6 +126,24 @@
                                 <td class="text-end border-top border-start fs-6" id="grand-total">Rp 0</td>
                                 <td class="border-top batch-col" style="display:none"></td>
                             </tr>
+                            {{-- Barang milik toko ini yang belum tiba: nilainya TIDAK dijumlahkan
+                                 ke TOTAL NILAI SO agar total tetap sama dengan jumlah barisnya.
+                                 Ditampilkan sebagai baris sendiri + total persediaan sebenarnya. --}}
+                            <tr class="fw-semibold" id="row-transit" style="display:none">
+                                <td colspan="10" class="text-end text-warning-emphasis">
+                                    <i class="bi bi-truck me-1"></i>NILAI DALAM PERJALANAN
+                                    <span class="fw-normal text-muted" style="font-size:.72rem">(milik toko ini, belum tiba)</span>
+                                </td>
+                                <td class="text-end border-start text-warning-emphasis" id="transit-total">Rp 0</td>
+                                <td class="batch-col" style="display:none"></td>
+                            </tr>
+                            <tr class="table-secondary fw-bold" id="row-persediaan" style="display:none">
+                                <td colspan="10" class="text-end">TOTAL NILAI PERSEDIAAN
+                                    <span class="fw-normal" style="font-size:.72rem">(fisik + dalam perjalanan)</span>
+                                </td>
+                                <td class="text-end border-start fs-6" id="persediaan-total">Rp 0</td>
+                                <td class="batch-col" style="display:none"></td>
+                            </tr>
                         </tfoot>
                     </table>
                 </div>
@@ -360,6 +378,21 @@ function updateGrandTotal() {
     });
     var gt = document.getElementById('grand-total');
     if (gt) gt.textContent = 'Rp ' + Math.round(total).toLocaleString('id-ID');
+
+    // Nilai barang dalam perjalanan — dijumlahkan dari data sistem, bukan dari input user
+    var transit = 0;
+    document.querySelectorAll('tr[data-rowkey]').forEach(function (row) {
+        transit += parseFloat(row.dataset.transitval) || 0;
+    });
+    var rowT = document.getElementById('row-transit');
+    var rowP = document.getElementById('row-persediaan');
+    var tT   = document.getElementById('transit-total');
+    var tP   = document.getElementById('persediaan-total');
+    var ada  = transit > 0.5;
+    if (rowT) rowT.style.display = ada ? '' : 'none';
+    if (rowP) rowP.style.display = ada ? '' : 'none';
+    if (tT) tT.textContent = 'Rp ' + Math.round(transit).toLocaleString('id-ID');
+    if (tP) tP.textContent = 'Rp ' + Math.round(total + transit).toLocaleString('id-ID');
 }
 
 // Mode "Stok Awal" → harga bisa diisi + kolom batch tampil; "Bulanan" → harga readonly
@@ -517,6 +550,7 @@ function loadIngredients() {
                 tr.dataset.crate  = crate;
                 tr.dataset.pack   = pack;
                 tr.dataset.price  = ing.price_per_base;
+                tr.dataset.transitval = ing.in_transit_val || 0;
 
                 tr.innerHTML =
                     '<td>' +

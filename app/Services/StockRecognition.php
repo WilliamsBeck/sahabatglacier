@@ -115,6 +115,49 @@ class StockRecognition
     }
 
     /**
+     * Barang dalam perjalanan per (bahan × kemasan) LENGKAP dengan nilai rupiahnya.
+     * Nilainya memakai harga di baris transfer itu sendiri — harga yang sama yang
+     * dipakai HPP lewat transitTujuanPerBahan(), jadi angka di Opname dan di Analisa
+     * HPP tidak akan saling bertentangan.
+     *
+     * @return array<string,array{base: float, nilai: float}>
+     */
+    public static function transitTujuanRinci(int $storeId, ?string $asOf = null): array
+    {
+        $asOf = $asOf ?: now()->toDateString();
+
+        $rows = DB::table('mutation_items as mi')
+            ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
+            ->where('m.status', 'confirmed')
+            ->where('m.type', 'sale_internal')
+            ->where('m.destination_store_id', $storeId)
+            ->where('m.transaction_date', '<=', $asOf)
+            ->where(fn($q) => $q->whereNull('m.delivery_date')->orWhere('m.delivery_date', '>', $asOf))
+            ->selectRaw('mi.ingredient_id, mi.packaging_id,
+                         SUM(mi.total_in_base) base,
+                         SUM(mi.total_in_base * mi.price_per_base) nilai')
+            ->groupBy('mi.ingredient_id', 'mi.packaging_id')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $out[$r->ingredient_id . '-' . ($r->packaging_id ?: 0)] = [
+                'base'  => (float) $r->base,
+                'nilai' => (float) $r->nilai,
+            ];
+        }
+        return $out;
+    }
+
+    /** Total nilai rupiah barang dalam perjalanan milik toko ini. */
+    public static function nilaiTransit(int $storeId, ?string $asOf = null): float
+    {
+        $t = 0.0;
+        foreach (self::transitTujuanRinci($storeId, $asOf) as $v) $t += $v['nilai'];
+        return $t;
+    }
+
+    /**
      * Predikat SQL "barang ini sudah benar-benar diterima toko tujuan".
      * Dipakai di tempat yang TIDAK membandingkan tanggal — mis. kumpulan batch FIFO
      * milik toko tujuan, yang tidak boleh memuat barang yang masih di perjalanan.

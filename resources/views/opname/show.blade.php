@@ -427,6 +427,15 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         return $i->physical_qty * $h;
                     }));
                 @endphp
+                @php
+                    // Barang milik toko ini yang pada tanggal opname masih di perjalanan.
+                    // Kepemilikan sudah pindah saat dikirim, jadi nilainya bagian dari
+                    // persediaan toko ini — tapi TIDAK dijumlahkan ke TOTAL NILAI SO
+                    // supaya total tetap sama dengan jumlah baris fisik di atas.
+                    $nilaiTransit = \App\Services\StockRecognition::nilaiTransit(
+                        $opname->store_id, $opname->opname_date->toDateString()
+                    );
+                @endphp
                 <tfoot>
                     <tr class="table-light fw-bold">
                         <td colspan="7" class="text-end border-top">TOTAL NILAI SO</td>
@@ -438,6 +447,33 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         <td class="border-top"></td>
                         @endif
                     </tr>
+                    @if($nilaiTransit > 0.5)
+                    <tr class="fw-semibold">
+                        <td colspan="7" class="text-end text-warning-emphasis">
+                            <i class="bi bi-truck me-1"></i>NILAI DALAM PERJALANAN
+                            <span class="fw-normal text-muted" style="font-size:.72rem">(milik toko ini, belum tiba pada tgl opname)</span>
+                        </td>
+                        <td></td>
+                        <td class="text-end border-start text-warning-emphasis">
+                            Rp {{ number_format($nilaiTransit, 0, ',', '.') }}
+                        </td>
+                        @if($opname->opname_mode === 'stok_awal' && $opname->status !== 'approved')
+                        <td></td>
+                        @endif
+                    </tr>
+                    <tr class="table-secondary fw-bold">
+                        <td colspan="7" class="text-end">TOTAL NILAI PERSEDIAAN
+                            <span class="fw-normal" style="font-size:.72rem">(fisik + dalam perjalanan)</span>
+                        </td>
+                        <td></td>
+                        <td class="text-end border-start fs-6">
+                            Rp {{ number_format($grandTotal + $nilaiTransit, 0, ',', '.') }}
+                        </td>
+                        @if($opname->opname_mode === 'stok_awal' && $opname->status !== 'approved')
+                        <td></td>
+                        @endif
+                    </tr>
+                    @endif
                 </tfoot>
             </table>
         </div>

@@ -306,7 +306,7 @@ class OpnameController extends Controller
         // Kepemilikannya sudah pindah, jadi wajib terlihat — tapi SENGAJA dipisah dari
         // system_qty. Kalau digabung, penghitung fisik tidak akan menemukan barangnya
         // dan opname memunculkan selisih MINUS palsu setiap kali ada kiriman berjalan.
-        $transitPkg = \App\Services\StockRecognition::transitTujuanPerKemasan($storeId, $opnameDate);
+        $transitPkg = \App\Services\StockRecognition::transitTujuanRinci($storeId, $opnameDate);
         $signedOf = function ($ingId, $pkgId) use ($recv, $dem, $K) {
             return ($recv[$K($ingId, $pkgId)] ?? 0) - ($dem[$K($ingId, $pkgId)] ?? 0);
         };
@@ -355,7 +355,8 @@ class OpnameController extends Controller
                 'pkg_label'      => $labelParts ? implode(' · ', $labelParts) : null,
                 'supplier'       => $pkg->supplier?->name,   // dipakai kolom Supplier di template
                 'system_qty'     => $sysQty,
-                'in_transit'     => round((float)($transitPkg[$K($ing->id, $pkg->id)] ?? 0), 4),
+                'in_transit'     => round((float)($transitPkg[$K($ing->id, $pkg->id)]['base']  ?? 0), 4),
+                'in_transit_val' => round((float)($transitPkg[$K($ing->id, $pkg->id)]['nilai'] ?? 0), 2),
                 'crate_to_pack'  => $ctrPack,
                 'pack_to_base'   => $packBase,
                 'price_per_base' => $priceBase,
@@ -384,7 +385,8 @@ class OpnameController extends Controller
                 'pkg_label'      => null,
                 'supplier'       => null,
                 'system_qty'     => $sysQty,
-                'in_transit'     => round((float)($transitPkg[$K($ing->id, null)] ?? 0), 4),
+                'in_transit'     => round((float)($transitPkg[$K($ing->id, null)]['base']  ?? 0), 4),
+                'in_transit_val' => round((float)($transitPkg[$K($ing->id, null)]['nilai'] ?? 0), 2),
                 'crate_to_pack'  => 0,
                 'pack_to_base'   => 0,
                 'price_per_base' => $priceBase,
@@ -1477,9 +1479,35 @@ class OpnameController extends Controller
         $ws->getStyle("G{$barisTotal}")->getAlignment()
             ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
 
+        // ── Barang DALAM PERJALANAN ────────────────────────────────────────
+        // Milik toko ini (kepemilikan pindah saat dikirim) tapi belum tiba pada
+        // tanggal opname. Ditulis sebagai baris terpisah, TIDAK dijumlahkan ke
+        // TOTAL NILAI SO supaya total tetap sama dengan jumlah baris fisiknya.
+        // Kolom A tetap kosong → tidak terbaca sebagai data saat file diimpor.
+        $barisAkhir   = $barisTotal;
+        $nilaiTransit = \App\Services\StockRecognition::nilaiTransit(
+            $opname->store_id, $opname->opname_date->toDateString()
+        );
+        if ($nilaiTransit > 0.5) {
+            $rt = $barisTotal + 1;
+            $ws->setCellValue("G{$rt}", 'NILAI DALAM PERJALANAN');
+            $ws->setCellValue("H{$rt}", round($nilaiTransit));
+            $rp = $rt + 1;
+            $ws->setCellValue("G{$rp}", 'TOTAL NILAI PERSEDIAAN (fisik + perjalanan)');
+            $ws->setCellValue("H{$rp}", round($hitung['grand'] + $nilaiTransit));
+            $ws->getStyle("B{$rt}:I{$rp}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                           'color' => ['rgb' => 'FFF4E5']],
+            ]);
+            $ws->getStyle("G{$rt}:G{$rp}")->getAlignment()
+                ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
+            $barisAkhir = $rp;
+        }
+
         // Format rupiah untuk kolom Harga/Dus & Total Nilai (termasuk baris total)
-        if ($barisTotal > 4) {
-            $ws->getStyle("G4:H{$barisTotal}")
+        if ($barisAkhir > 4) {
+            $ws->getStyle("G4:H{$barisAkhir}")
                ->getNumberFormat()->setFormatCode('#,##0');
         }
 
