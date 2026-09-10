@@ -488,18 +488,16 @@
                                 <td style="background:#f8f9fa"></td>
                             @endif
 
-                            {{-- Dalam Perjalanan (informasi saja, tidak masuk stok akhir) --}}
+                            {{-- Dalam Perjalanan (informasi saja, tidak masuk stok akhir).
+                                 Satuannya DUS, sama seperti kolom pembelian/penjualan —
+                                 jadi pakai $toDus, bukan rincian dus+pack. --}}
                             @php
                                 $transitBase = (float) ($transitByPkg[$ingId . '-' . ($pkgId ?: 0)] ?? 0);
-                                $transitFmt  = $transitBase > 0.001 ? $toDusPack($transitBase, $pkg) : null;
+                                $transitDus  = $toDus($transitBase, $pkg);
                             @endphp
                             <td class="text-center" style="background:#fdf3e3;font-size:.68rem">
-                                @if($transitFmt)
-                                    <span class="fw-semibold" style="color:#8a5c05">
-                                        @if($transitFmt['dus']){{ $transitFmt['dus'] }}d @endif
-                                        @if($transitFmt['pack']){{ $transitFmt['pack'] }}p @endif
-                                        @if(!$transitFmt['dus'] && !$transitFmt['pack']){{ number_format($transitFmt['base'], 0, ',', '.') }} @endif
-                                    </span>
+                                @if($transitDus !== '')
+                                    <span class="fw-semibold" style="color:#8a5c05">{{ $transitDus }}</span>
                                 @else
                                     <span class="text-muted opacity-50">-</span>
                                 @endif
