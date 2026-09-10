@@ -25,11 +25,6 @@
     </form>
 </div></div>
 
-@php
-    // Group resep per versi (menu + effective_from), masing2 punya 1 tombol Duplikat
-    $grouped = $recipes->groupBy('recipe_group_id');
-@endphp
-
 <div class="card"><div class="card-body p-0"><div class="table-responsive">
     <table class="table table-index mb-0">
         <thead>
@@ -43,8 +38,13 @@
             </tr>
         </thead>
         <tbody>
-            @forelse($grouped as $key => $group)
-            @php $first = $group->first(); @endphp
+            {{-- $recipes = daftar VERSI resep; tiap $group = kumpulan baris bahan
+                 dari satu resep yang sama (bisa gabungan beberapa toko). --}}
+            @forelse($recipes as $group)
+            @php
+                $first     = $group->first();
+                $jmlVersi  = $group->pluck('recipe_group_id')->unique()->count();
+            @endphp
             <tr>
                 <td class="col-name fw-semibold align-top">{{ $first->menu->name }}</td>
                 <td class="align-top">
@@ -61,6 +61,14 @@
                             @endforeach
                         </div>
                     @endif
+                    @if($jmlVersi > 1)
+                        {{-- Resep sama persis tapi disimpan terpisah per toko. Ditampilkan
+                             jadi satu baris; penanda ini supaya tetap jelas kalau di
+                             database datanya masih {{ $jmlVersi }} versi terpisah. --}}
+                        <div class="text-soft mt-1" style="font-size:.7rem">
+                            <i class="bi bi-info-circle me-1"></i>{{ $jmlVersi }} versi tersimpan, isinya sama
+                        </div>
+                    @endif
                 </td>
                 <td class="align-top">
                     <span class="badge bg-secondary">{{ $first->effective_from->format('d') . ' ' . ['','Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agt','Sep','Okt','Nov','Des'][(int)$first->effective_from->format('n')] . ' ' . $first->effective_from->format('Y') }}</span>
@@ -73,7 +81,9 @@
                     </div>
                     @endforeach
                 </td>
-                <td class="align-top small text-soft">{{ $first->createdBy->name ?? '-' }}</td>
+                <td class="align-top small text-soft">
+                    {{ $group->pluck('createdBy.name')->filter()->unique()->implode(', ') ?: '-' }}
+                </td>
                 @unless(auth()->user()->role === 'admin_area')
                 <td class="align-top">
                     <x-action-menu>
