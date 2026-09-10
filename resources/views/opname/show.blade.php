@@ -243,7 +243,10 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         // array_key_exists (bukan ?:) — harga Rp 0 yang NYATA (batch tersisa
                         // beneran berharga 0, mis. barang gratis) tidak boleh dianggap "kosong"
                         // lalu ditimpa fallback berikutnya. ?: memperlakukan 0 sama dgn null/kosong.
-                        $harga = ($opname->opname_mode === 'stok_awal' && $item->price_per_base !== null)
+                        // price_per_base terisi = harga DIKETIK user (store() hanya menyimpannya
+                        // bila ada input). Itu menang di mode apa pun — kalau tidak, harga yang
+                        // dikoreksi operator tersimpan tapi tidak pernah terlihat/terhitung.
+                        $harga = ($item->price_per_base !== null)
                             ? (float) $item->price_per_base
                             : (array_key_exists($item->id, $fifoPrice)
                                 ? (float) $fifoPrice[$item->id]
@@ -345,12 +348,13 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                              HANYA bisa diisi kalau KOSONG (belum ada harga FIFO); kalau sudah ada
                              harga, tampil teks saja (koreksi harga dilakukan di transaksi pembelian). --}}
                         @php
-                            // bulanan: kotak isian HANYA saat harga BENAR-BENAR tidak diketahui
-                            // (bukan sekadar hargaDus <= 0 — itu juga true utk barang gratis yang
-                            // harga Rp 0-nya sudah pasti benar, seharusnya tampil teks, bukan kotak
-                            // isian kosong yang seolah minta diisi ulang).
-                            $showPriceInput = $opname->status !== 'approved'
-                                && ($opname->opname_mode === 'stok_awal' || !$hargaAdaSumber);
+                            // Selama opname BELUM approved, Harga/Dus selalu bisa dikoreksi —
+                            // termasuk mode Bulanan dan termasuk setelah approve dibatalkan.
+                            // Angka yang muncul cuma SARAN dari batch FIFO; kalau harga
+                            // barangnya memang lain, operator harus bisa memperbaikinya.
+                            // Setelah approved, harga dibekukan (tidak boleh diubah) karena
+                            // sudah dipakai membentuk batch FIFO & nilai HPP periode itu.
+                            $showPriceInput = $opname->status !== 'approved';
                         @endphp
                         <td class="text-end border-start small text-muted">
                             @if($showPriceInput)
@@ -411,7 +415,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         // !== null & array_key_exists (bukan > 0 / ?:) — harga Rp 0 yang nyata
                         // (barang gratis) harus tetap dihitung sbg 0, bukan jatuh ke harga lain
                         // yang membuat Nilai Fisik Total jadi lebih besar dari yang sebenarnya.
-                        $h = ($opname->opname_mode === 'stok_awal' && $i->price_per_base !== null)
+                        $h = ($i->price_per_base !== null)
                             ? (float) $i->price_per_base
                             : (array_key_exists($i->id, $fifoPrice)
                                 ? (float) $fifoPrice[$i->id]

@@ -398,9 +398,14 @@ function updateGrandTotal() {
 // Mode "Stok Awal" → harga bisa diisi + kolom batch tampil; "Bulanan" → harga readonly
 function applyOpnameMode() {
     var stokAwal = document.getElementById('opname_mode').value === 'stok_awal';
+    // Harga/Dus SELALU bisa diedit, termasuk mode Bulanan. Angka yang terisi hanya
+    // SARAN dari harga batch FIFO; kalau harga barangnya memang berbeda, operator
+    // harus bisa mengoreksinya. Yang diketik menang di semua tempat: nilai opname,
+    // SO Akhir di HPP, dan harga batch yang dibuat saat opname di-approve — sisi
+    // backend-nya memang sudah memakai price_per_base kapan pun terisi.
     document.querySelectorAll('.price-input').forEach(function (i) {
-        i.readOnly = !stokAwal;
-        i.classList.toggle('bg-light', !stokAwal);
+        i.readOnly = false;
+        i.classList.remove('bg-light');
     });
     document.querySelectorAll('.batch-col').forEach(function (el) {
         el.style.display = stokAwal ? '' : 'none';
