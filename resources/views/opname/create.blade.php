@@ -101,6 +101,10 @@
                                 <th colspan="3" class="text-center border-start">STOK FISIK</th>
                                 <th rowspan="2" class="text-end border-start" style="min-width:80px">Total Dus</th>
                                 <th colspan="2" class="text-center border-start">STOK SISTEM</th>
+                                <th rowspan="2" class="text-end border-start" style="min-width:95px">
+                                    DALAM<br>PERJALANAN
+                                    <div class="fw-normal" style="font-size:.6rem;opacity:.75">milik toko ini, belum tiba</div>
+                                </th>
                                 <th rowspan="2" class="text-end border-start" style="min-width:90px">Selisih</th>
                                 <th rowspan="2" class="text-end border-start" style="width:140px">Harga / Dus</th>
                                 <th rowspan="2" class="text-end border-start" style="width:140px">Subtotal</th>
@@ -117,7 +121,8 @@
                         <tbody id="ingredient-tbody"></tbody>
                         <tfoot>
                             <tr class="table-light fw-bold">
-                                <td colspan="9" class="text-end border-top">TOTAL NILAI SO</td>
+                                {{-- 10 = 9 kolom lama + kolom DALAM PERJALANAN --}}
+                                <td colspan="10" class="text-end border-top">TOTAL NILAI SO</td>
                                 <td class="text-end border-top border-start fs-6" id="grand-total">Rp 0</td>
                                 <td class="border-top batch-col" style="display:none"></td>
                             </tr>
@@ -488,6 +493,19 @@ function loadIngredients() {
 
                 var sysSplit = splitDusPack(sysQty, crate, pack);
 
+                // Barang milik toko ini yang masih di jalan (dari transfer toko lain).
+                var transit    = ing.in_transit || 0;
+                var trSplit    = splitDusPack(transit, crate, pack);
+                var transitSel = transit > 0
+                    ? '<span class="badge bg-warning-subtle text-warning-emphasis" title="Sudah dikirim toko lain, belum tiba">'
+                      + '<i class="bi bi-truck me-1"></i>'
+                      + (trSplit.dus ? trSplit.dus + ' dus' : '')
+                      + (trSplit.dus && trSplit.pack ? ' ' : '')
+                      + (trSplit.pack ? trSplit.pack + ' pack' : '')
+                      + (!trSplit.dus && !trSplit.pack ? Number(transit).toLocaleString('id-ID') : '')
+                      + '</span>'
+                    : '<span class="text-muted opacity-50 small">-</span>';
+
                 // Sub-label: hanya tampilkan "@X pack" bila multi-kemasan
                 var subLabel = ing.pkg_label
                     ? '<div class="text-muted" style="font-size:.75rem">' + ing.pkg_label + '</div>'
@@ -528,6 +546,8 @@ function loadIngredients() {
                     // Stok Sistem: Dus | Pack
                     '<td class="text-end border-start">' + (sysSplit.dus  ? sysSplit.dus  : '<span class="text-muted opacity-50 small">-</span>') + '</td>' +
                     '<td class="text-end">'               + (sysSplit.pack ? sysSplit.pack : '<span class="text-muted opacity-50 small">-</span>') + '</td>' +
+                    // Dalam Perjalanan — HANYA tampilan, tidak masuk Selisih.
+                    '<td class="text-end border-start">' + transitSel + '</td>' +
                     // Selisih
                     '<td class="text-end border-start fw-bold text-muted" id="var-' + safeKey + '">0</td>' +
                     // Harga/Dus — readonly saat "Bulanan" (tampil otomatis), bisa diisi saat "Stok Awal"

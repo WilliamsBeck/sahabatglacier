@@ -188,10 +188,14 @@ class FifoService
      */
     public static function recalculate(int $storeId, int $ingredientId, ?callable $onTransfer = null): void
     {
-        // 1. Reset semua incoming batch ke remaining_qty = total_in_base
+        // 1. Reset semua incoming batch ke remaining_qty = total_in_base.
+        //    Transfer yang masih di PERJALANAN (tanggal terima belum diisi) BUKAN
+        //    batch toko tujuan — barangnya belum sampai, jadi tidak boleh ikut jadi
+        //    stok yang bisa dipakai/dipotong di sini.
         MutationItem::whereHas('mutation', fn($q) =>
             $q->where('destination_store_id', $storeId)
               ->where('status', 'confirmed')
+              ->whereRaw(\App\Services\StockRecognition::sqlSudahDiterima())
         )
         ->where('ingredient_id', $ingredientId)
         ->update(['remaining_qty' => DB::raw('total_in_base')]);
@@ -339,6 +343,8 @@ class FifoService
             ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
             ->where('mutations.destination_store_id', $storeId)
             ->where('mutations.status', 'confirmed')
+            // Barang yang masih di perjalanan belum boleh dipakai sebagai stok.
+            ->whereRaw(\App\Services\StockRecognition::sqlSudahDiterima())
             ->where('mutation_items.ingredient_id', $ingredientId)
             ->where('mutation_items.remaining_qty', '>', 0);
 

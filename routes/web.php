@@ -80,6 +80,8 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('mutations', MutationController::class);
         Route::post('mutations/{mutation}/confirm', [MutationController::class, 'confirm'])->name('mutations.confirm');
         Route::post('mutations/{mutation}/unconfirm', [MutationController::class, 'unconfirm'])->name('mutations.unconfirm');
+        // Terima Barang: kiriman yang masih di perjalanan ditandai sudah tiba
+        Route::post('mutations/{mutation}/terima', [MutationController::class, 'terima'])->name('mutations.terima');
         Route::post('mutations/{mutation}/cancel', [MutationController::class, 'cancel'])->name('mutations.cancel');
         Route::get('mutations-export', [MutationController::class, 'export'])->name('mutations.export');
         Route::get('stocks', [StockController::class, 'index'])->name('stocks.index');

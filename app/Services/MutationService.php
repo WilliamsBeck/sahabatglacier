@@ -68,7 +68,11 @@ class MutationService
                     }
                     // Tambahkan stok ke toko penerima jika ada (sale_internal & sale_external masuk).
                     // sale_external_out tidak punya penerima → tidak menambah stok ke mana pun.
-                    if ($mutation->destination_store_id) {
+                    //
+                    // KECUALI transfer internal yang tanggal terimanya belum diisi: barangnya
+                    // masih di jalan, jadi belum boleh menambah stok tujuan. Penambahannya
+                    // dilakukan nanti oleh terima() saat toko tujuan menerima barangnya.
+                    if ($mutation->destination_store_id && !self::masihDiPerjalanan($mutation)) {
                         StockLedgerService::record(
                             $mutation->destination_store_id, $ingredientId,
                             $date, 'purchase_in', +$qty,
@@ -83,6 +87,44 @@ class MutationService
                         FifoService::recalculate($mutation->destination_store_id, $ingredientId);
                     }
                 }
+            }
+        });
+    }
+
+    /**
+     * Transfer internal yang sudah dikirim tapi tanggal terimanya belum diisi —
+     * barang masih di perjalanan. Stok sumber sudah berkurang, stok tujuan belum
+     * bertambah, dan barangnya belum boleh dipakai di toko tujuan.
+     */
+    public static function masihDiPerjalanan(Mutation $mutation): bool
+    {
+        return $mutation->type === 'sale_internal' && !$mutation->delivery_date;
+    }
+
+    /**
+     * Aksi TERIMA BARANG: toko tujuan menerima kiriman yang tadinya di perjalanan.
+     * Mengisi tanggal terima aktual, lalu baru menambahkan stoknya ke toko tujuan.
+     *
+     * Sengaja dipisah dari confirm(): saat pengiriman, tanggal tiba sering belum
+     * diketahui. Memaksa mengisinya di muka membuat operator mengarang tanggal, dan
+     * itu merusak angka stok di dua toko sekaligus.
+     */
+    public static function terima(Mutation $mutation, string $tanggalTerima): void
+    {
+        DB::transaction(function () use ($mutation, $tanggalTerima) {
+            $mutation->update(['delivery_date' => $tanggalTerima]);
+            $mutation->refresh()->load('items');
+
+            if (!$mutation->destination_store_id) return;
+
+            foreach ($mutation->items as $item) {
+                StockLedgerService::record(
+                    $mutation->destination_store_id, $item->ingredient_id,
+                    $tanggalTerima, 'purchase_in', +(float) $item->total_in_base,
+                    'Mutation', $mutation->id,
+                    "Ref: {$mutation->reference_no} (terima barang)"
+                );
+                FifoService::recalculate($mutation->destination_store_id, $item->ingredient_id);
             }
         });
     }

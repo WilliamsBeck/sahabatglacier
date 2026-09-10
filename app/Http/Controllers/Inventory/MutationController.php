@@ -836,8 +836,13 @@ class MutationController extends Controller
         // ikut berubah oleh recalculate pembelian ini).
         $affected = $this->pendingConfirmedTransfersAfter($mutation);
 
-        // Tanggal penerimaan wajib ada sebelum konfirmasi (kecuali opening_stock)
-        if ($mutation->type !== 'opening_stock' && !$mutation->delivery_date) {
+        // Tanggal penerimaan wajib ada sebelum konfirmasi — KECUALI:
+        //   - opening_stock (memang tidak punya)
+        //   - transfer internal: saat mengirim, tanggal tiba sering belum diketahui.
+        //     Dikonfirmasi tanpa tanggal terima = "sudah dikirim, masih di jalan".
+        //     Stok sumber langsung berkurang; stok tujuan menyusul lewat Terima Barang.
+        $bolehTanpaTanggalTerima = in_array($mutation->type, ['opening_stock', 'sale_internal'], true);
+        if (!$bolehTanpaTanggalTerima && !$mutation->delivery_date) {
             return back()->with('error',
                 'Tanggal penerimaan belum diisi. Edit draft ini dan isi tanggal penerimaan terlebih dahulu.');
         }
@@ -862,11 +867,53 @@ class MutationController extends Controller
         // HANYA transfer yang periodenya belum terkunci yang ikut diperbaiki; sisanya
         // (kalau ada) dibiarkan & dilaporkan supaya tidak ada yang senyap.
         $result = MutationService::applyBackdateAutoFix($affected);
+        $pesan  = MutationService::masihDiPerjalanan($mutation->fresh())
+            ? 'Mutasi dikonfirmasi sebagai TERKIRIM. Stok toko pengirim sudah berkurang; '
+              . 'stok toko tujuan bertambah setelah ditekan "Terima Barang".'
+            : 'Mutasi berhasil dikonfirmasi. Stok telah diupdate.';
+
         return $this->withBackdateFixMessage(
-            redirect()->route('inventory.mutations.index'),
-            'Mutasi berhasil dikonfirmasi. Stok telah diupdate.',
-            $result
+            redirect()->route('inventory.mutations.index'), $pesan, $result
         );
+    }
+
+    /**
+     * Terima Barang: toko tujuan menandai kiriman yang masih di perjalanan sudah tiba.
+     * Baru di sinilah stok toko tujuan bertambah, memakai tanggal tiba yang sebenarnya.
+     */
+    public function terima(Mutation $mutation, Request $request)
+    {
+        abort_if($mutation->status !== 'confirmed', 422,
+            'Hanya mutasi terkonfirmasi yang bisa diterima.');
+        abort_if(!MutationService::masihDiPerjalanan($mutation), 422,
+            'Mutasi ini bukan barang dalam perjalanan — tanggal terimanya sudah terisi.');
+        abort_unless(in_array($mutation->destination_store_id,
+            auth()->user()->accessibleStoreIds()), 403);
+
+        $data = $request->validate([
+            'delivery_date' => 'required|date|after_or_equal:' . $mutation->transaction_date->toDateString(),
+        ], [
+            'delivery_date.required'         => 'Tanggal barang diterima wajib diisi.',
+            'delivery_date.after_or_equal'   => 'Tanggal terima tidak boleh lebih awal dari tanggal kirim ('
+                                                . $mutation->transaction_date->format('d/m/Y') . ').',
+        ]);
+        $tgl = \Carbon\Carbon::parse($data['delivery_date'])->toDateString();
+
+        // Barang masuk ke toko tujuan pada tanggal ini — periodenya tidak boleh
+        // sudah dibekukan opname/HPP di toko tujuan.
+        $sid = (int) $mutation->destination_store_id;
+        $c   = \Carbon\Carbon::parse($tgl);
+        if (\App\Models\Opname::isDateLocked($sid, $tgl)) {
+            return back()->with('error', \App\Models\Opname::lockMessageFor($sid));
+        }
+        if (\App\Models\HppSnapshot::isDateLocked($sid, $tgl)) {
+            return back()->with('error', \App\Models\HppSnapshot::lockMessageFor($sid, $c->month, $c->year));
+        }
+
+        MutationService::terima($mutation, $tgl);
+
+        return back()->with('success',
+            'Barang diterima ' . $c->format('d/m/Y') . '. Stok toko tujuan sudah bertambah.');
     }
 
     /**

@@ -222,7 +222,7 @@ class OrderPlanningController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->whereBetween(DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$refStart, $refEnd])
+            ->whereBetween(DB::raw(\App\Services\StockRecognition::sqlMasuk('m')), [$refStart, $refEnd])
             ->whereIn('m.type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external'])
             ->selectRaw('mi.ingredient_id, mi.packaging_id, SUM(mi.total_in_base) as t')
             ->groupBy('mi.ingredient_id', 'mi.packaging_id')->get());

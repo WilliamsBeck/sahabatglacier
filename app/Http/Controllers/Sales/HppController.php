@@ -164,6 +164,15 @@ class HppController extends Controller
         // supaya map nilai/qty pembelian/opname lengkap & total HPP Aktual tidak bocor.
         if ($soAkhir) $rawIngIds = array_merge($rawIngIds, $soAkhir->items->pluck('ingredient_id')->all());
         if ($soAwal)  $rawIngIds = array_merge($rawIngIds, $soAwal->items->pluck('ingredient_id')->all());
+        // Barang DALAM PERJALANAN milik toko ini (kepemilikan sudah pindah saat
+        // dikirim). Dihitung SEBELUM $rawIngIds dibekukan supaya bahan yang hanya
+        // ada di perjalanan ikut masuk daftar — kalau tidak, stok akhirnya bertambah
+        // tapi barang masuknya tersaring keluar, dan konsumsinya jadi minus.
+        $transitAkhir = \App\Services\StockRecognition::transitTujuanPerBahan($storeId, $dateEnd);
+        $transitAwal  = \App\Services\StockRecognition::transitTujuanPerBahan(
+            $storeId, $monthStart->copy()->subDay()->toDateString()
+        );
+        $rawIngIds  = array_merge($rawIngIds, array_keys($transitAkhir), array_keys($transitAwal));
         $rawIngIds  = array_values(array_unique($rawIngIds));
         $batchPrice = $this->buildBatchPrice($storeId, $rawIngIds, $dateEnd);
 
@@ -187,7 +196,7 @@ class HppController extends Controller
 
         $purchaseValMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                  ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
+                  ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlMasukKepemilikan()), [$monthStart, $dateTo])
                   ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external']))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'cost_subtotal'])
             ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('cost_subtotal'));
@@ -201,7 +210,7 @@ class HppController extends Controller
             ->groupBy('ingredient_id')->map(fn($g) => (float)$g->sum('cost_subtotal'));
         $purchaseMap = MutationItem::whereHas('mutation', fn($q) =>
                 $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                  ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$monthStart, $dateTo])
+                  ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlMasukKepemilikan()), [$monthStart, $dateTo])
                   ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external']))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'total_in_base'])
             ->groupBy('ingredient_id')->map(fn($g) => $g->sum('total_in_base'));
@@ -211,6 +220,25 @@ class HppController extends Controller
                   ->whereIn('type', \App\Services\StockRecognition::KELUAR))
             ->whereIn('ingredient_id', $rawIngIds)->get(['ingredient_id', 'total_in_base'])
             ->groupBy('ingredient_id')->map(fn($g) => $g->sum('total_in_base'));
+
+        // ── Barang DALAM PERJALANAN milik toko ini ────────────────────────────
+        // Kepemilikan pindah saat dikirim, jadi barangnya sudah diakui MASUK di
+        // atas (sqlMasukKepemilikan). Supaya konsumsi tidak melonjak, barang yang
+        // sampai akhir periode belum tiba harus IKUT menambah SO Akhir — dan sisa
+        // perjalanan dari periode lalu ikut menambah SO Awal. Keduanya saling
+        // menghapus, sehingga HPP tidak berubah hanya karena barang masih di jalan.
+        //
+        //   Bulan kirim   : masuk +X, SO Akhir +X  → konsumsi tetap
+        //   Bulan terima  : SO Awal +X, masuk 0 (sudah dihitung bulan lalu),
+        //                   SO Akhir sudah memuat X sebagai stok fisik → konsumsi tetap
+        foreach ($transitAkhir as $iid => $t) {
+            $closingMap[$iid]    = (float)($closingMap[$iid]    ?? 0) + $t['base'];
+            $closingValMap[$iid] = (float)($closingValMap[$iid] ?? 0) + $t['nilai'];
+        }
+        foreach ($transitAwal as $iid => $t) {
+            $openingMap[$iid]    = (float)($openingMap[$iid]    ?? 0) + $t['base'];
+            $openingValMap[$iid] = (float)($openingValMap[$iid] ?? 0) + $t['nilai'];
+        }
 
         // Harga per-unit AKTUAL periode ini = HPP aktual ÷ qty terpakai.
         // Dipakai sebagai harga untuk HPP IDEAL juga → Selisih HPP murni mencerminkan

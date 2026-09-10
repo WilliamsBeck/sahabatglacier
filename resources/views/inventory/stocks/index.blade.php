@@ -66,9 +66,10 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                     <th style="width:12%">Arah</th>
                     <th style="width:14%">Ref</th>
                     <th style="width:16%">Toko</th>
-                    <th style="width:12%">Kirim</th>
-                    <th style="width:12%">Perkiraan Tiba</th>
+                    <th style="width:11%">Kirim</th>
+                    <th style="width:13%">Tiba</th>
                     <th>Bahan</th>
+                    <th style="width:11%"></th>
                 </tr>
             </thead>
             <tbody>
@@ -85,7 +86,13 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                     <td class="text-muted">{{ $m->reference_no }}</td>
                     <td>{{ $keluar ? ($m->destinationStore->name ?? '-') : ($m->sourceStore->name ?? '-') }}</td>
                     <td>{{ $tglId($m->transaction_date) }}</td>
-                    <td>{{ $tglId($m->delivery_date) }}</td>
+                    <td>
+                        @if($m->delivery_date)
+                            {{ $tglId($m->delivery_date) }}
+                        @else
+                            <span class="text-muted fst-italic">belum diketahui</span>
+                        @endif
+                    </td>
                     <td>
                         @foreach($m->items as $it)
                             @php
@@ -108,18 +115,78 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                             </div>
                         @endforeach
                     </td>
+                    <td>
+                        {{-- Hanya toko TUJUAN yang boleh menandai barang diterima, dan
+                             hanya bila tanggal terimanya masih kosong (masih di jalan). --}}
+                        @if(!$keluar && !$m->delivery_date && auth()->user()->role !== 'viewer')
+                            <button type="button" class="btn btn-sm btn-success py-0 px-2"
+                                    style="font-size:.72rem"
+                                    data-bs-toggle="modal" data-bs-target="#modalTerima"
+                                    data-mutasi="{{ $m->id }}"
+                                    data-ref="{{ $m->reference_no }}"
+                                    data-kirim="{{ $m->transaction_date->toDateString() }}"
+                                    data-dari="{{ $m->sourceStore->name ?? '-' }}">
+                                <i class="bi bi-check2-square me-1"></i>Terima
+                            </button>
+                        @endif
+                    </td>
                 </tr>
             @endforeach
             </tbody>
         </table>
     </div></div>
     <div class="card-footer py-1 text-muted" style="font-size:.72rem">
-        Stok toko pengirim sudah berkurang sejak tanggal kirim; stok toko penerima bertambah saat tanggal tiba.
+        Stok toko pengirim sudah berkurang sejak tanggal kirim; stok toko penerima bertambah saat ditekan <strong>Terima</strong>.
         @if($kirimDari->isNotEmpty() && $menujuKe->isNotEmpty())
             {{ $kirimDari->count() }} kiriman keluar · {{ $menujuKe->count() }} kiriman masuk.
         @endif
     </div>
 </div>
+
+{{-- Modal Terima Barang --}}
+<div class="modal fade" id="modalTerima" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-check2-square me-2"></i>Terima Barang</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="formTerima">
+                @csrf
+                <div class="modal-body">
+                    <p class="small mb-3">
+                        Kiriman <strong id="terimaRef"></strong> dari <strong id="terimaDari"></strong>,
+                        dikirim <strong id="terimaKirim"></strong>.
+                    </p>
+                    <label class="form-label fw-semibold small">Tanggal barang benar-benar diterima <span class="text-danger">*</span></label>
+                    <input type="date" name="delivery_date" id="terimaTanggal" class="form-control" required>
+                    <div class="form-text" style="font-size:.72rem">
+                        Stok toko ini bertambah pada tanggal tersebut. Tidak boleh lebih awal dari tanggal kirim.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check2 me-1"></i>Terima Barang</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+document.getElementById('modalTerima')?.addEventListener('show.bs.modal', function (e) {
+    var b = e.relatedTarget; if (!b) return;
+    var kirim = b.dataset.kirim;
+    document.getElementById('terimaRef').textContent   = b.dataset.ref;
+    document.getElementById('terimaDari').textContent  = b.dataset.dari;
+    document.getElementById('terimaKirim').textContent = kirim;
+    document.getElementById('formTerima').action =
+        '{{ url('inventory/mutations') }}/' + b.dataset.mutasi + '/terima';
+    var inp = document.getElementById('terimaTanggal');
+    inp.min = kirim;                                    // tidak boleh sebelum tanggal kirim
+    var hariIni = '{{ now()->toDateString() }}';
+    inp.value = hariIni < kirim ? kirim : hariIni;       // default: hari ini
+});
+</script>
 @endif
 
 {{-- ═══════════ MODAL KONFIGURASI ORDER ═══════════ --}}

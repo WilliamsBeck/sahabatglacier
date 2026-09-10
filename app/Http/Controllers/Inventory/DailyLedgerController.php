@@ -88,7 +88,7 @@ class DailyLedgerController extends Controller
             ->whereHas('mutation', fn($q) => $q
                 ->where('destination_store_id', $storeId)
                 ->where('status', 'confirmed')
-                ->whereBetween(\DB::raw('COALESCE(delivery_date, transaction_date)'), [$startDate, $endDate])
+                ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlMasuk()), [$startDate, $endDate])
                 ->whereIn('type', ['purchase_zhisheng', 'purchase_supplier', 'sale_internal', 'sale_external'])
             )->get();
 
@@ -1185,9 +1185,9 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->whereBetween(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), [$startDate, $endDate])
-            ->select('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date) as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', \DB::raw('COALESCE(m.delivery_date, m.transaction_date)'))
+            ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlMasuk('m')), [$startDate, $endDate])
+            ->select('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlMasuk('m') . ' as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
+            ->groupBy('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlMasuk('m')))
             ->get();
 
         $monthOut = \DB::table('mutation_items as mi')
@@ -1309,7 +1309,7 @@ class DailyLedgerController extends Controller
             ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
             ->where('m.destination_store_id', $storeId)
             ->where('m.status', 'confirmed')
-            ->where(\DB::raw('COALESCE(m.delivery_date, m.transaction_date)'), '<', $startDate)
+            ->where(\DB::raw(\App\Services\StockRecognition::sqlMasuk('m')), '<', $startDate)
             ->select('mi.ingredient_id', \DB::raw('SUM(mi.total_in_base) as total'))
             ->groupBy('mi.ingredient_id')
             ->pluck('total', 'ingredient_id');

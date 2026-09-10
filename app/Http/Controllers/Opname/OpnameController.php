@@ -98,7 +98,7 @@ class OpnameController extends Controller
 
             $remainingByPkg = MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $request->store_id)->where('status', 'confirmed')
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$date])
+                      ->whereRaw(\App\Services\StockRecognition::sqlMasuk() . ' <= ?', [$date])
                 )
                 ->whereIn('packaging_id', $pkgIds)
                 ->selectRaw('packaging_id, SUM(remaining_qty) as total_remaining')
@@ -110,7 +110,7 @@ class OpnameController extends Controller
             if ($ingNoPkg->isNotEmpty()) {
                 $remainingByIng = MutationItem::whereHas('mutation', fn($q) =>
                         $q->where('destination_store_id', $request->store_id)->where('status', 'confirmed')
-                          ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$date])
+                          ->whereRaw(\App\Services\StockRecognition::sqlMasuk() . ' <= ?', [$date])
                     )
                     ->whereIn('ingredient_id', $ingNoPkg->pluck('id')->all())
                     ->whereNull('packaging_id')
@@ -240,7 +240,7 @@ class OpnameController extends Controller
         $remainingByPkg = $pkgIds
             ? MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$opnameDate])
+                      ->whereRaw(\App\Services\StockRecognition::sqlMasuk() . ' <= ?', [$opnameDate])
                 )
                 ->whereIn('packaging_id', $pkgIds)
                 ->selectRaw('packaging_id, SUM(remaining_qty) as total_remaining')
@@ -268,7 +268,7 @@ class OpnameController extends Controller
         $remainingByIng = $ingNoPkg->isNotEmpty()
             ? MutationItem::whereHas('mutation', fn($q) =>
                     $q->where('destination_store_id', $storeId)->where('status', 'confirmed')
-                      ->whereRaw('COALESCE(mutations.delivery_date, mutations.transaction_date) <= ?', [$opnameDate])
+                      ->whereRaw(\App\Services\StockRecognition::sqlMasuk() . ' <= ?', [$opnameDate])
                 )
                 ->whereIn('ingredient_id', $ingNoPkg->pluck('id')->all())
                 ->whereNull('packaging_id')
@@ -301,6 +301,12 @@ class OpnameController extends Controller
         // sudah dibatasi.
         [$recv, $dem] = $this->receivedDemandMaps($storeId, $opnameDate);
         $K = fn($i, $p) => $i . '-' . ($p ?: 0);
+
+        // Barang DALAM PERJALANAN milik toko ini: sudah dikirim toko lain, belum tiba.
+        // Kepemilikannya sudah pindah, jadi wajib terlihat — tapi SENGAJA dipisah dari
+        // system_qty. Kalau digabung, penghitung fisik tidak akan menemukan barangnya
+        // dan opname memunculkan selisih MINUS palsu setiap kali ada kiriman berjalan.
+        $transitPkg = \App\Services\StockRecognition::transitTujuanPerKemasan($storeId, $opnameDate);
         $signedOf = function ($ingId, $pkgId) use ($recv, $dem, $K) {
             return ($recv[$K($ingId, $pkgId)] ?? 0) - ($dem[$K($ingId, $pkgId)] ?? 0);
         };
@@ -349,6 +355,7 @@ class OpnameController extends Controller
                 'pkg_label'      => $labelParts ? implode(' · ', $labelParts) : null,
                 'supplier'       => $pkg->supplier?->name,   // dipakai kolom Supplier di template
                 'system_qty'     => $sysQty,
+                'in_transit'     => round((float)($transitPkg[$K($ing->id, $pkg->id)] ?? 0), 4),
                 'crate_to_pack'  => $ctrPack,
                 'pack_to_base'   => $packBase,
                 'price_per_base' => $priceBase,
@@ -377,6 +384,7 @@ class OpnameController extends Controller
                 'pkg_label'      => null,
                 'supplier'       => null,
                 'system_qty'     => $sysQty,
+                'in_transit'     => round((float)($transitPkg[$K($ing->id, null)] ?? 0), 4),
                 'crate_to_pack'  => 0,
                 'pack_to_base'   => 0,
                 'price_per_base' => $priceBase,
@@ -441,7 +449,7 @@ class OpnameController extends Controller
             ->whereIn('mutation_items.ingredient_id', $ingIds)
             ->where('mutation_items.price_per_base', '>', 0)
             ->where('mutation_items.total_in_base', '>', 0)   // jaga-jaga: abaikan batch qty 0
-            ->orderByDesc(\DB::raw('COALESCE(mutations.delivery_date, mutations.transaction_date)'))
+            ->orderByDesc(\DB::raw(\App\Services\StockRecognition::sqlMasuk()))
             ->orderByDesc('mutation_items.id')
             ->get(['mutation_items.ingredient_id', 'mutation_items.price_per_base'])
             ->groupBy('ingredient_id')->map(fn($g) => (float) $g->first()->price_per_base);
@@ -534,7 +542,7 @@ class OpnameController extends Controller
                     fn($q) => $q->where('mutation_items.packaging_id', $item->packaging_id),
                     fn($q) => $q->whereNull('mutation_items.packaging_id'))
                 ->where('mutation_items.remaining_qty', '>', 0)
-                ->orderByDesc(\DB::raw('COALESCE(mutations.delivery_date, mutations.transaction_date)'))
+                ->orderByDesc(\DB::raw(\App\Services\StockRecognition::sqlMasuk()))
                 ->orderByDesc('mutation_items.id')
                 ->get(['mutation_items.remaining_qty', 'mutation_items.price_per_base']);
 
