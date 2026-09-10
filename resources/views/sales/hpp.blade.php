@@ -165,7 +165,6 @@
                     @if($summary->selisih_pct !== null)
                         <div class="mt-1" style="color:rgba(255,255,255,.85);font-size:.8rem;">
                             {{ $summary->selisih_pct >= 0 ? '+' : '' }}{{ number_format($summary->selisih_pct, 1, ',', '.') }}% dari HPP Ideal
-                            · {{ $summary->selisih_hpp >= 0 ? 'lebih hemat' : 'lebih boros' }}
                         </div>
                     @endif
                 </div>
