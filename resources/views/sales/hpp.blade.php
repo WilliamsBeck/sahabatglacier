@@ -162,12 +162,18 @@
                 <div class="card-body">
                     <div class="mb-1" style="color:rgba(255,255,255,.7);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Selisih HPP (Ideal − Aktual)</div>
                     <div class="fs-5 fw-bold" style="color:#fff;">{{ $summary->selisih_hpp >= 0 ? '+' : '' }}{{ $rp($summary->selisih_hpp) }}</div>
+                    @if($summary->selisih_pct !== null)
+                        <div class="mt-1" style="color:rgba(255,255,255,.85);font-size:.8rem;">
+                            {{ $summary->selisih_pct >= 0 ? '+' : '' }}{{ number_format($summary->selisih_pct, 1, ',', '.') }}% dari HPP Ideal
+                            · {{ $summary->selisih_hpp >= 0 ? 'lebih hemat' : 'lebih boros' }}
+                        </div>
+                    @endif
                 </div>
             </div>
         @else
         <div class="card border-0 h-100" style="background:#6b7280;">
             <div class="card-body">
-                <div class="mb-1" style="color:rgba(255,255,255,.7);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Selisih HPP (Aktual − Ideal)</div>
+                <div class="mb-1" style="color:rgba(255,255,255,.7);font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;">Selisih HPP (Ideal − Aktual)</div>
                 <div style="color:#fff;font-weight:600;">—</div>
                 <div style="color:rgba(255,255,255,.8);font-size:.8rem;">Tersedia setelah HPP Aktual ada</div>
             </div>
@@ -344,7 +350,7 @@
                                 <th class="text-end" style="width:11.5%">HPP Ideal</th>
                                 <th class="text-end" style="width:11.5%">HPP Aktual</th>
                                 <th class="text-end" style="width:11.5%">Selisih HPP</th>
-                                <th class="text-end" style="width:9%">% Selisih</th>
+                                <th class="text-end" style="width:9%">% Selisih<br><small class="fw-normal opacity-75">dari Ideal</small></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -468,9 +474,12 @@
                                     @endif
                                 </td>
                                 <td class="text-end">
-                                    @php $totAktual = $ingredientRows->where('has_actual', true)->sum('hpp_aktual'); @endphp
-                                    @if(abs($totAktual) > 0.0001)
-                                        @php $totPct = $totSelisih / abs($totAktual) * 100; @endphp
+                                    {{-- Pembagi = HPP IDEAL (patokan dari resep), bukan Aktual.
+                                         Hanya baris yang punya data aktual yang ikut, supaya
+                                         pembilang & pembagi berasal dari himpunan baris yg sama. --}}
+                                    @php $totIdeal = $ingredientRows->where('has_actual', true)->sum('hpp_ideal'); @endphp
+                                    @if(abs($totIdeal) > 0.0001)
+                                        @php $totPct = $totSelisih / abs($totIdeal) * 100; @endphp
                                         <span class="{{ $totPct < 0 ? 'text-danger' : ($totPct > 0 ? 'text-success' : '') }}">
                                             {{ $totPct >= 0 ? '+' : '' }}{{ number_format($totPct, 1, ',', '.') }}%
                                         </span>

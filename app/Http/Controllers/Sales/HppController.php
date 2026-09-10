@@ -366,9 +366,13 @@ class HppController extends Controller
                 'selisih_base' => $hasActual ? $idealBase - $actualBase : null,
                 'selisih_dus'  => ($dusSize && $hasActual) ? ($idealBase - $actualBase) / $dusSize : null,
                 'selisih_hpp'  => $hasActual ? $hppIdeal - $hppAktual : null,
-                // % selisih terhadap HPP Aktual (semua baris dapat angka). Negatif = boros.
-                'selisih_pct'  => ($hasActual && abs($hppAktual) > 0.0001)
-                    ? (($hppIdeal - $hppAktual) / abs($hppAktual) * 100) : null,
+                // % selisih terhadap HPP IDEAL — ideal adalah patokan/standar dari resep,
+                // jadi persentasenya terbaca sebagai "sehemat/seboros apa dibanding resep".
+                // Dulu dibagi HPP Aktual: pembaginya ikut bergerak oleh boros/susut itu
+                // sendiri, sehingga angka persennya tidak punya patokan tetap.
+                // Negatif = boros (aktual melebihi resep).
+                'selisih_pct'  => ($hasActual && abs($hppIdeal) > 0.0001)
+                    ? (($hppIdeal - $hppAktual) / abs($hppIdeal) * 100) : null,
             ];
         })->sortBy([
             // Urutan SAMA dengan Stok Opname: kategori (sort_order) lalu ingredient_id.
@@ -394,6 +398,9 @@ class HppController extends Controller
             'margin_ideal'  => $omset > 0 ? (1 - $totalHppIdeal / $omset) * 100 : null,
             'margin_aktual' => ($hasAktualAny && $omset > 0) ? (1 - $totalHppAktual / $omset) * 100 : null,
             'selisih_hpp'   => $hasAktualAny ? $totalHppIdeal - $totalHppAktual : null,
+            // Persen selisih terhadap HPP IDEAL — patokan/standar dari resep.
+            'selisih_pct'   => ($hasAktualAny && abs($totalHppIdeal) > 0.0001)
+                ? (($totalHppIdeal - $totalHppAktual) / abs($totalHppIdeal) * 100) : null,
             'has_opname'    => $soAkhir !== null,
         ];
 
