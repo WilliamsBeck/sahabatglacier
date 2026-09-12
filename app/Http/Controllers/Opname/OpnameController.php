@@ -1066,6 +1066,25 @@ class OpnameController extends Controller
         DB::transaction(function () use ($opname) {
             $opname->update(['status' => 'approved', 'approved_by' => auth()->id()]);
 
+            // ── Langkah 0: batch TANPA HARGA diisi dari harga opname ─────────────
+            // Kasus: batch di FIFO harganya 0 (data pembelian lama tidak ada harganya).
+            // Operator lalu mengetik harga di opname. Tanpa langkah ini harga itu hanya
+            // tersimpan di dokumen opname, sedangkan batch-nya tetap 0 — akibatnya
+            // Saldo Stok tidak menampilkan harga dan transfer keluar dari toko itu
+            // dinilai Rp 0. Opname dan stok jadi memegang dua harga berbeda untuk
+            // barang yang sama.
+            //
+            // HANYA batch berharga 0/NULL yang diisi. Batch yang sudah punya harga
+            // pembelian TIDAK disentuh — harga beli tetap sumber biaya yang sah, dan
+            // di mode bulanan harga opname memang sudah ditimpa oleh harga FIFO itu
+            // (lihat fifoEffectivePrice di atas), jadi keduanya pasti sama.
+            foreach ($opname->items as $item) {
+                FifoService::isiHargaBatchKosong(
+                    $opname->store_id, $item->ingredient_id, $item->packaging_id,
+                    (float) ($item->price_per_base ?? 0)
+                );
+            }
+
             // ── Langkah 1: catat adjustment & recalculate untuk item yg punya selisih ──
             foreach ($opname->items as $item) {
                 if ($item->variance == 0) continue;

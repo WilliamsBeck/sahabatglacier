@@ -176,6 +176,51 @@ class FifoService
     }
 
     /**
+     * Isi harga batch yang masih KOSONG (price_per_base 0/NULL) dengan harga dari
+     * opname. Dipakai saat opname di-approve, dan oleh command perbaikan data untuk
+     * opname yang sudah terlanjur approved.
+     *
+     * Kenapa perlu: batch pembelian lama kadang tersimpan tanpa harga. Operator
+     * mengoreksinya lewat kolom Harga/Dus di opname — tapi tanpa langkah ini harga
+     * itu hanya tinggal di dokumen opname, sedangkan batch tetap 0: Saldo Stok
+     * tidak menampilkan harga, dan transfer keluar dari toko itu dinilai Rp 0.
+     *
+     * HANYA batch berharga 0/NULL yang diisi. Batch yang sudah punya harga beli
+     * TIDAK disentuh — harga beli tetap sumber biaya yang sah.
+     *
+     * @return int  jumlah batch yang diisi
+     */
+    public static function isiHargaBatchKosong(int $storeId, int $ingredientId, ?int $packagingId, float $ppb): int
+    {
+        if ($ppb <= 0) return 0;
+
+        $batches = MutationItem::whereHas('mutation', fn($q) =>
+                $q->where('destination_store_id', $storeId)->where('status', 'confirmed'))
+            ->where('ingredient_id', $ingredientId)
+            ->when($packagingId,
+                fn($q) => $q->where('packaging_id', $packagingId),
+                fn($q) => $q->whereNull('packaging_id'))
+            ->where('remaining_qty', '>', 0)
+            ->where(fn($q) => $q->whereNull('price_per_base')->orWhere('price_per_base', '<=', 0))
+            ->get();
+
+        if ($batches->isEmpty()) return 0;
+
+        $pkg = $packagingId ? IngredientPackaging::find($packagingId) : null;
+        $ctb = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
+
+        foreach ($batches as $b) {
+            $b->update([
+                'price_per_base'       => $ppb,
+                'gross_price_per_base' => $ppb,
+                'price_per_crate'      => $ctb > 0 ? round($ppb * $ctb, 2) : null,
+                'cost_subtotal'        => round((float) $b->total_in_base * $ppb, 2),
+            ]);
+        }
+        return $batches->count();
+    }
+
+    /**
      * Hitung ulang remaining_qty semua batch di toko ini dari nol.
      * Dipanggil setelah menghapus mutation yang sudah confirmed,
      * supaya remaining_qty tidak under-count akibat deduction yang sudah dihapus.
