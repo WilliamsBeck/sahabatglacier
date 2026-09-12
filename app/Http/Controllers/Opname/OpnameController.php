@@ -1323,7 +1323,12 @@ class OpnameController extends Controller
         $mentahTotal = 0.0;
 
         foreach ($opname->items as $i) {
-            $h = ($opname->opname_mode === 'stok_awal' && $i->price_per_base !== null)
+            // HARUS sama persis dengan pemilihan harga di show.blade.php: price_per_base
+            // terisi = harga DIKETIK user → menang di mode apa pun. Dulu di sini masih
+            // ada syarat mode stok_awal, sehingga kolom Harga/Dus di Excel menampilkan
+            // harga ketikan tapi subtotalnya dihitung dari harga FIFO — dua angka beda
+            // di satu baris, dan total Excel ≠ total halaman.
+            $h = ($i->price_per_base !== null)
                 ? (float) $i->price_per_base
                 : (array_key_exists($i->id, $fifoPrice)
                     ? (float) $fifoPrice[$i->id]
