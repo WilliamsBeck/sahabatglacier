@@ -328,13 +328,17 @@
                             title="Dus dihitung dengan konversi standar (kemasan pertama bahan). Untuk rincian per kemasan fisik, lihat halaman Saldo Stok.">
                             STOK AKHIR <i class="bi bi-info-circle" style="font-size:.7rem;opacity:.7"></i>
                         </th>
-                        {{-- Barang sudah dikirim toko lain & sudah MILIK toko ini, tapi belum
-                             tiba. Sengaja kolom sendiri: STOK AWAL & STOK AKHIR hanya memuat
-                             stok fisik yang benar-benar ada di toko. --}}
+                        {{-- PI In-transit: penjualan internal dari toko lain yang sudah MILIK
+                             toko ini tapi belum tiba. Sengaja kolom sendiri: STOK AWAL & STOK
+                             AKHIR hanya memuat stok fisik yang benar-benar ada di toko.
+                             Kolom hanya tampil bila memang ada barang di jalan periode ini. --}}
+                        @php $adaTransit = !empty(array_filter($transitByPkg, fn($v) => $v > 0.001)); @endphp
+                        @if($adaTransit)
                         <th rowspan="2" class="align-middle" style="background:#b9770e;color:#fff;min-width:64px"
-                            title="Sudah dikirim toko lain & sudah milik toko ini, tapi belum tiba. Tidak ikut dihitung di Stok Awal/Akhir.">
-                            DALAM<br>PERJALANAN <i class="bi bi-truck" style="font-size:.7rem;opacity:.8"></i>
+                            title="Penjualan internal dari toko lain yang sudah milik toko ini, tapi belum tiba. Tidak ikut dihitung di Stok Awal/Akhir.">
+                            PI<br>IN-TRANSIT <i class="bi bi-truck" style="font-size:.7rem;opacity:.8"></i>
                         </th>
+                        @endif
                         @foreach($sectionLabels as $key => $label)
                             @if(count($activeDays[$key]) > 0)
                                 <th colspan="{{ count($activeDays[$key]) }}" class="dl-sec-head"
@@ -488,9 +492,10 @@
                                 <td style="background:#f8f9fa"></td>
                             @endif
 
-                            {{-- Dalam Perjalanan (informasi saja, tidak masuk stok akhir).
+                            {{-- PI In-transit (informasi saja, tidak masuk stok akhir).
                                  Satuannya DUS, sama seperti kolom pembelian/penjualan —
                                  jadi pakai $toDus, bukan rincian dus+pack. --}}
+                            @if($adaTransit)
                             @php
                                 $transitBase = (float) ($transitByPkg[$ingId . '-' . ($pkgId ?: 0)] ?? 0);
                                 $transitDus  = $toDus($transitBase, $pkg);
@@ -502,6 +507,7 @@
                                     <span class="text-muted opacity-50">-</span>
                                 @endif
                             </td>
+                            @endif
 
                             {{-- Pembelian/Penjualan sparse — per baris packaging --}}
                             @foreach($sectionLabels as $key => $label)
