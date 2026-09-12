@@ -554,15 +554,15 @@
    panjang tapi berkolom sedikit (mis. "WASTE (DUS)" dgn 1 tanggal) jadi melebar,
    sementara seksi berkolom banyak jadi sempit. */
 .daily-ledger-table .dl-sec-col {
-    width: 44px;
-    min-width: 44px;
-    max-width: 44px;
+    width: 88px;
+    min-width: 88px;
+    max-width: 88px;
     text-align: center;
 }
 /* Judul seksi TIDAK boleh mendorong lebar kolom di bawahnya.
    Aturan umum tabel ini memakai white-space:nowrap — itu memaksa judul panjang
    (mis. "PEMBELIAN ZHISHENG (DUS)") jadi satu baris, sehingga kolom di bawahnya
-   ikut melebar. Di sini dibolehkan membungkus (wrap) supaya lebar kolom tetap 44px. */
+   ikut melebar. Di sini dibolehkan membungkus (wrap) supaya lebar kolom tetap 88px. */
 .daily-ledger-table .dl-sec-head {
     white-space: normal !important;
     word-break: break-word;
