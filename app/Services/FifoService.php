@@ -6,6 +6,47 @@ use Illuminate\Support\Facades\DB;
 
 class FifoService
 {
+    /** Kunci FIFO yang sedang dipegang PROSES ini — supaya pemanggilan bersarang
+     *  (recalculate → deduct) tidak menunggu dirinya sendiri. */
+    private static array $kunciDipegang = [];
+
+    /**
+     * Jalankan $fn dengan KUNCI eksklusif per (toko × bahan) + satu transaksi DB.
+     *
+     * KENAPA WAJIB: recalculate() = "nolkan semua batch, lalu potong ulang satu per
+     * satu". Kalau dua proses melakukannya BERSAMAAN untuk bahan yang sama (mis. user
+     * mengetik 6 sel pemakaian cepat → 6 request AJAX → 6 recalculate paralel),
+     * langkah reset & potong saling tumpang tindih dan hasil akhirnya acak — kadang
+     * kurang potong (10 − 6 tampil 5), kadang kelebihan. Terbukti di uji: 4 proses
+     * paralel mengubah sisa 166.200 menjadi 30.600.
+     *
+     * Kunci memakai GET_LOCK MySQL/MariaDB (per koneksi, lintas request/proses), dan
+     * transaksi membuat reset+potong terlihat atomik bagi pembaca — tidak ada yang
+     * sempat membaca kondisi "sudah di-reset, belum dipotong".
+     */
+    private static function withLock(int $storeId, int $ingredientId, callable $fn)
+    {
+        $nama = "glacier_fifo_{$storeId}_{$ingredientId}";
+
+        // Sudah dipegang proses ini (panggilan bersarang) → langsung jalan.
+        if (!empty(self::$kunciDipegang[$nama])) {
+            return $fn();
+        }
+
+        $got = DB::selectOne('SELECT GET_LOCK(?, 30) AS l', [$nama]);
+        if (!$got || (int) $got->l !== 1) {
+            throw new \RuntimeException(
+                "Stok bahan #{$ingredientId} di toko #{$storeId} sedang dihitung proses lain terlalu lama. Coba lagi sebentar.");
+        }
+        self::$kunciDipegang[$nama] = true;
+        try {
+            return DB::transaction($fn);
+        } finally {
+            unset(self::$kunciDipegang[$nama]);
+            DB::selectOne('SELECT RELEASE_LOCK(?) AS r', [$nama]);
+        }
+    }
+
     /**
      * Hitung total biaya berdasarkan FIFO untuk qty tertentu.
      * Dipakai untuk menghitung harga saat produksi dan waste.
@@ -52,6 +93,12 @@ class FifoService
      */
     public static function deduct(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): void
     {
+        self::withLock($storeId, $ingredientId,
+            fn() => self::deductTanpaKunci($storeId, $ingredientId, $qty, $packagingId));
+    }
+
+    private static function deductTanpaKunci(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): void
+    {
         $items = self::getFifoItems($storeId, $ingredientId, $packagingId);
 
         foreach ($items as $item) {
@@ -93,6 +140,12 @@ class FifoService
      * toko untuk dipakai produksi harian. Bahan tanpa kemasan → jatuh ke mode per-gram.
      */
     public static function deductWholePacks(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): void
+    {
+        self::withLock($storeId, $ingredientId,
+            fn() => self::deductWholePacksTanpaKunci($storeId, $ingredientId, $qty, $packagingId));
+    }
+
+    private static function deductWholePacksTanpaKunci(int $storeId, int $ingredientId, float $qty, ?int $packagingId = null): void
     {
         $ptb = self::packToBaseFor($packagingId);
         if ($ptb <= 0) { self::deduct($storeId, $ingredientId, $qty, $packagingId); return; }
@@ -232,6 +285,14 @@ class FifoService
      *        tanpa menduplikasi logika urutan potong. Default null = perilaku normal.
      */
     public static function recalculate(int $storeId, int $ingredientId, ?callable $onTransfer = null): void
+    {
+        // Diserialisasi per (toko × bahan) + satu transaksi. Lihat withLock() untuk alasannya.
+        self::withLock($storeId, $ingredientId,
+            fn() => self::recalculateTanpaKunci($storeId, $ingredientId, $onTransfer));
+    }
+
+    /** Isi asli recalculate(). JANGAN dipanggil langsung — selalu lewat recalculate(). */
+    private static function recalculateTanpaKunci(int $storeId, int $ingredientId, ?callable $onTransfer = null): void
     {
         // 1. Reset semua incoming batch ke remaining_qty = total_in_base.
         //    Transfer yang masih di PERJALANAN (tanggal terima belum diisi) BUKAN
