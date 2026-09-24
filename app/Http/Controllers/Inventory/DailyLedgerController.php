@@ -1196,7 +1196,11 @@ class DailyLedgerController extends Controller
             ->where('m.status', 'confirmed')
             ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlMasuk('m')), [$startDate, $endDate])
             ->select('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlMasuk('m') . ' as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlMasuk('m')))
+            // GROUP BY memakai ALIAS recog_date, bukan mengulang ekspresinya. Server live
+            // memakai ONLY_FULL_GROUP_BY: ekspresi CASE WHEN m.type ... yang diulang tidak
+            // dikenali sama dengan yang di SELECT, lalu m.type dianggap tidak dikelompokkan
+            // (error 1055, import Pencatatan Harian jadi 500).
+            ->groupBy('mi.ingredient_id', 'recog_date')
             ->get();
 
         $monthOut = \DB::table('mutation_items as mi')
@@ -1206,7 +1210,7 @@ class DailyLedgerController extends Controller
             ->whereBetween(\DB::raw(\App\Services\StockRecognition::sqlKeluar('m')), [$startDate, $endDate])
             ->whereIn('m.type', \App\Services\StockRecognition::KELUAR)
             ->select('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlKeluar('m') . ' as recog_date'), \DB::raw('SUM(mi.total_in_base) as total'))
-            ->groupBy('mi.ingredient_id', \DB::raw(\App\Services\StockRecognition::sqlKeluar('m')))
+            ->groupBy('mi.ingredient_id', 'recog_date')
             ->get();
 
         $inMap  = []; // [ingId][day] = base in
