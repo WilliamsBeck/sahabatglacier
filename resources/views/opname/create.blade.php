@@ -562,6 +562,11 @@ function loadIngredients() {
                         '<input type="hidden" name="items[' + rowKey + '][ingredient_id]" value="' + ing.ingredient_id + '">' +
                         '<input type="hidden" name="items[' + rowKey + '][packaging_id]"  value="' + (ing.packaging_id || '') + '">' +
                         '<span class="fw-semibold">' + ing.name + '</span>' +
+                        // Bahan nonaktif hanya muncul selama stoknya masih ada — beri tanda
+                        // supaya jelas ini sisa yang perlu dihabiskan / di-nol-kan.
+                        (ing.is_active === false
+                            ? ' <span class="badge bg-secondary" style="font-size:.6rem" title="Bahan sudah dinonaktifkan. Tampil karena stoknya di toko ini masih ada — hilang otomatis setelah stoknya 0.">Nonaktif</span>'
+                            : '') +
                         subLabel +
                     '</td>' +
                     // Stok Fisik: Dus | Pack | Pcs/Gr

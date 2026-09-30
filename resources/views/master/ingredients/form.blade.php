@@ -80,6 +80,43 @@
                                     Bahan Aktif</label>
                             </div>
 
+                            {{-- Peringatan saat bahan yang MASIH punya stok dinonaktifkan. Hanya
+                                 dirender bila memang ada sisa stok; tampil begitu kotak di-uncheck. --}}
+                            @if(isset($stokTersisa) && $stokTersisa->isNotEmpty() && ($ingredient->is_active ?? false))
+                                <div id="peringatanNonaktif" class="alert alert-warning small py-2 mt-2 mb-0" hidden>
+                                    <div class="fw-semibold mb-1">
+                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                        Stok bahan ini masih ada di {{ $stokTersisa->count() }} toko:
+                                    </div>
+                                    <ul class="mb-1 ps-3">
+                                        @foreach($stokTersisa as $r)
+                                            <li>{{ $r->toko }} — {{ rtrim(rtrim(number_format($r->dus, 2, ',', '.'), '0'), ',') }} dus</li>
+                                        @endforeach
+                                    </ul>
+                                    <div>
+                                        Sebaiknya habiskan atau nol-kan dulu lewat Stok Opname. Kalau tetap
+                                        dinonaktifkan, bahan ini <strong>tetap muncul</strong> di Stok Opname &amp;
+                                        Pencatatan Harian toko-toko tersebut sampai stoknya habis.
+                                    </div>
+                                </div>
+                                <script>
+                                (function () {
+                                    var cb  = document.getElementById('actIng');
+                                    var box = document.getElementById('peringatanNonaktif');
+                                    var frm = document.getElementById('ingredientForm');
+                                    if (!cb || !box) return;
+                                    var sinkron = function () { box.hidden = cb.checked; };
+                                    cb.addEventListener('change', sinkron);
+                                    sinkron();
+                                    if (frm) frm.addEventListener('submit', function (e) {
+                                        if (!cb.checked && !confirm('Stok bahan ini masih ada di {{ $stokTersisa->count() }} toko. Tetap nonaktifkan?')) {
+                                            e.preventDefault();
+                                        }
+                                    });
+                                })();
+                                </script>
+                            @endif
+
                             {{-- Bahan di luar resep (mis. Single/Double/Big Bag) selalu punya
                                  HPP Ideal 0, jadi selisihnya semu. Saklar ini menyamakan
                                  Ideal dengan Aktual supaya selisihnya nol. --}}

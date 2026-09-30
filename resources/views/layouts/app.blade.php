@@ -120,6 +120,15 @@
                     <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
                 </div>
             @endif
+            {{-- Peringatan: TIDAK hilang otomatis (tanpa js-auto-dismiss) — isinya perlu
+                 ditindaklanjuti, mis. daftar toko yang masih punya stok bahan nonaktif. --}}
+            @if(session('warning'))
+                <div class="alert alert-warning alert-dismissible fade show d-flex align-items-start gap-2">
+                    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+                    <span>{{ session('warning') }}</span>
+                    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+                </div>
+            @endif
             {{-- Sebagian transfer tidak ikut auto-fix (backdated purchase) krn periodenya
                  sudah terkunci — bulan/opname/HPP. Global (bukan per-halaman) karena
                  flash-nya bisa mendarat di index ATAU show tergantung tombol Konfirmasi

@@ -169,6 +169,34 @@ class DailyLedgerController extends Controller
             ->merge($activeIngIds)                         // semua bahan aktif
             ->unique()->values();
 
+        // ── Bahan NONAKTIF: tampil hanya bila di toko ini masih ada stok/kegiatan ──
+        // $ingIds di atas juga memuat bahan dari riwayat transaksi, jadi bahan yang
+        // sudah dinonaktifkan akan muncul selamanya. Tapi menyembunyikannya begitu saja
+        // berbahaya: sisa stoknya tidak terlihat & tidak pernah terpakai/di-nol-kan.
+        // Aturannya: tampil bila stok awal ≠ 0, stok akhir ≠ 0, atau ada pergerakan di
+        // bulan ini. Begitu stoknya habis, bulan berikutnya otomatis tidak muncul lagi.
+        $nonaktif = Ingredient::whereIn('id', $ingIds)->where('is_active', false)->pluck('id');
+        if ($nonaktif->isNotEmpty()) {
+            $masihAda = collect()
+                ->merge(collect($opnameOpeningMap)->filter(fn($v) => abs((float) $v) > 0.001)->keys())
+                ->merge(array_keys($carryOverMap))
+                ->merge($openingItems->pluck('ingredient_id'))
+                ->merge($purchaseItems->pluck('ingredient_id'))
+                ->merge($saleItems->pluck('ingredient_id'))
+                ->merge($wasteItems->pluck('ingredient_id'))
+                ->merge(collect($usageMap)->keys());
+            foreach (\App\Services\StockBalanceService::saldoPerKemasan($storeId, $endDate) as $k => $v) {
+                if (abs($v) > 0.001) $masihAda->push((int) explode('-', $k)[0]);
+            }
+            $masihAda = $masihAda->merge(MutationItem::whereHas('mutation', fn($q) =>
+                        $q->where('destination_store_id', $storeId)->where('status', 'confirmed'))
+                    ->whereIn('ingredient_id', $nonaktif)->where('remaining_qty', '>', 0)
+                    ->pluck('ingredient_id'))
+                ->map(fn($v) => (int) $v)->unique()->flip();
+
+            $ingIds = $ingIds->reject(fn($id) => $nonaktif->contains($id) && !isset($masihAda[(int) $id]))->values();
+        }
+
         if ($ingIds->isEmpty()) {
             return view('inventory.daily-ledger.index', [
                 'stores' => $stores, 'store' => $store,

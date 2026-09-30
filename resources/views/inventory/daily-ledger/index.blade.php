@@ -451,6 +451,11 @@
                                     <i class="bi bi-grip-vertical"></i>
                                 </span>
                                 <span class="fw-semibold">{{ $ing->name }}</span>
+                                @unless($ing->is_active)
+                                    {{-- Bahan nonaktif hanya tampil selama masih ada stok/kegiatan di toko ini --}}
+                                    <span class="badge bg-secondary" style="font-size:.55rem"
+                                          title="Bahan sudah dinonaktifkan. Tampil karena di toko ini masih ada stok atau transaksi bulan ini — hilang otomatis setelah stoknya habis.">Nonaktif</span>
+                                @endunless
                                 @if($pkg && $multiPkg && $pkg->crate_to_pack)
                                     <span class="text-muted" style="font-size:0.62rem">{{ '@'.$pkg->crate_to_pack }} pack</span>
                                 @endif

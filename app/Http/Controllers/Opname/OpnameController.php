@@ -89,7 +89,8 @@ class OpnameController extends Controller
             $allPackagings = IngredientPackaging::where('is_active', true)
                 ->whereHas('ingredient', fn($q) => $q->where('type', '!=', 'semi_finished'))
                 ->orderBy('ingredient_id')->orderBy('id')->get();
-            $allIngredients = Ingredient::where('is_active', true)->where('type', '!=', 'semi_finished')
+            // Termasuk bahan nonaktif — disaring saat menyimpan (lihat $tampilDiForm).
+            $allIngredients = Ingredient::where('type', '!=', 'semi_finished')
                 ->leftJoin('ingredient_categories as ic', 'ingredients.category', '=', 'ic.name')
                 ->orderByRaw('ic.sort_order IS NULL')->orderBy('ic.sort_order')->orderBy('ingredients.id')
                 ->select('ingredients.*')->get();
@@ -166,13 +167,22 @@ class OpnameController extends Controller
                 ]);
             };
 
+            // Bahan NONAKTIF disimpan hanya bila barisnya memang tampil di form
+            // (= stoknya masih ada, lihat systemQty). Baris yang tampil selalu ikut
+            // terkirim karena kolom isiannya ada, walau dibiarkan kosong.
+            $aktifMap     = $allIngredients->pluck('is_active', 'id');
+            $tampilDiForm = fn($ingId, $rowKey) => (bool) ($aktifMap[$ingId] ?? true)
+                                                   || array_key_exists($rowKey, $submittedItems);
+
             // Satu baris per kemasan
             foreach ($allPackagings as $pkg) {
+                if (!$tampilDiForm($pkg->ingredient_id, 'pkg_' . $pkg->id)) continue;
                 $sysQty = round((float)($remainingByPkg[$pkg->id] ?? 0), 4);
                 $saveItem($pkg->ingredient_id, $pkg, $sysQty, 'pkg_' . $pkg->id);
             }
             // Bahan tanpa kemasan
             foreach ($ingNoPkg as $ing) {
+                if (!$tampilDiForm($ing->id, 'ing_' . $ing->id)) continue;
                 $sysQty = round((float)($remainingByIng[$ing->id] ?? 0), 4);
                 $saveItem($ing->id, null, $sysQty, 'ing_' . $ing->id);
             }
@@ -226,7 +236,9 @@ class OpnameController extends Controller
             ->orderBy('ingredient_id')->orderBy('id')
             ->get();
 
-        $allIngredients = Ingredient::where('is_active', true)->where('type', '!=', 'semi_finished')
+        // Bahan NONAKTIF ikut dimuat di sini, lalu disaring per baris di akhir fungsi:
+        // tampil HANYA bila di toko ini stoknya masih ada. Lihat penyaring di bawah.
+        $allIngredients = Ingredient::where('type', '!=', 'semi_finished')
             ->leftJoin('ingredient_categories as ic', 'ingredients.category', '=', 'ic.name')
             ->orderByRaw('ic.sort_order IS NULL')->orderBy('ic.sort_order')->orderBy('ingredients.id')
             ->select('ingredients.*', 'ic.sort_order as cat_sort_order')->get();
@@ -401,7 +413,24 @@ class OpnameController extends Controller
             ?: $a['row_key'] <=> $b['row_key']
         );
 
-        return response()->json($result);
+        // ── Bahan NONAKTIF: tampil hanya selama stoknya di toko ini masih ada ──
+        // Disembunyikan begitu saja berbahaya: stok yang tersisa tidak pernah bisa
+        // dihitung/di-nol-kan lagi di opname, dan nilainya nyangkut di sistem tanpa
+        // terlihat. Jadi bahan nonaktif tetap muncul (berlabel "Nonaktif") sampai
+        // stoknya — termasuk yang minus dan yang masih di perjalanan — habis.
+        $aktifMap = $allIngredients->pluck('is_active', 'id');
+        $saring   = [];
+        foreach ($result as $row) {
+            $aktif = (bool) ($aktifMap[$row['ingredient_id']] ?? true);
+            $row['is_active'] = $aktif;
+            if (!$aktif && abs((float) $row['system_qty']) <= 0.001
+                        && (float) ($row['in_transit'] ?? 0) <= 0.001) {
+                continue;
+            }
+            $saring[] = $row;
+        }
+
+        return response()->json($saring);
     }
 
     public function show(Opname $opname)

@@ -107,7 +107,33 @@ class IngredientController extends Controller
         $suppliers = Supplier::where('is_active', true)->orderBy('name')->get();
         $rawIngredients = Ingredient::where('ingredients.is_active', true)->where('type', 'raw')->orderedByCategory()->get();
         $categories = IngredientCategory::ordered()->get();
-        return view('master.ingredients.form', compact('ingredient', 'suppliers', 'rawIngredients', 'categories'));
+        // Dipakai peringatan saat bahan dinonaktifkan (lihat form.blade.php).
+        $stokTersisa = $this->stokTersisaPerToko($ingredient);
+        return view('master.ingredients.form', compact('ingredient', 'suppliers', 'rawIngredients', 'categories', 'stokTersisa'));
+    }
+
+    /**
+     * Sisa stok bahan ini per toko (dalam dus) — untuk memperingatkan sebelum bahan
+     * dinonaktifkan. Bahan nonaktif tetap muncul di Opname & Pencatatan Harian toko
+     * yang stoknya masih ada, tapi lebih baik stoknya dihabiskan / di-nol-kan dulu.
+     *
+     * @return \Illuminate\Support\Collection<int, object{toko: string, dus: float, base: float}>
+     */
+    private function stokTersisaPerToko(Ingredient $ingredient)
+    {
+        return DB::table('mutation_items as mi')
+            ->join('mutations as m', 'm.id', '=', 'mi.mutation_id')
+            ->join('stores as s', 's.id', '=', 'm.destination_store_id')
+            ->leftJoin('ingredient_packagings as p', 'p.id', '=', 'mi.packaging_id')
+            ->where('m.status', 'confirmed')
+            ->where('mi.ingredient_id', $ingredient->id)
+            ->where('mi.remaining_qty', '>', 0)
+            ->groupBy('s.id', 's.name')
+            ->orderBy('s.name')
+            ->selectRaw('s.name AS toko, SUM(mi.remaining_qty) AS base,
+                         SUM(CASE WHEN p.crate_to_pack > 0 AND p.pack_to_base > 0
+                                  THEN mi.remaining_qty / (p.crate_to_pack * p.pack_to_base) ELSE 0 END) AS dus')
+            ->get();
     }
 
     public function update(Request $request, Ingredient $ingredient)
@@ -121,6 +147,13 @@ class IngredientController extends Controller
         $data['is_active'] = $request->has('is_active');
         $data['ideal_follows_actual'] = $request->has('ideal_follows_actual');
         $data['category'] = $request->type === 'raw' ? $request->category : null;
+
+        // Baru dinonaktifkan tapi stoknya masih ada di sebagian toko → catat untuk
+        // pesan setelah simpan. Tetap diizinkan: bahan itu tetap tampil di toko yang
+        // stoknya masih ada sampai habis, jadi tidak ada stok yang hilang dari pandangan.
+        $sisaSaatNonaktif = ($ingredient->is_active && !$data['is_active'])
+            ? $this->stokTersisaPerToko($ingredient) : collect();
+
         $ingredient->update($data);
 
         if ($request->type === 'raw') {
@@ -171,7 +204,15 @@ class IngredientController extends Controller
             IngredientComposition::where('id', $compId)->where('parent_id', $ingredient->id)->delete();
         }
 
-        return redirect()->route('master.ingredients.index')->with('success', 'Bahan diupdate.');
+        $redirect = redirect()->route('master.ingredients.index')->with('success', 'Bahan diupdate.');
+        if ($sisaSaatNonaktif->isNotEmpty()) {
+            $daftar = $sisaSaatNonaktif->map(fn($r) => $r->toko . ' ' . rtrim(rtrim(number_format($r->dus, 2, ',', '.'), '0'), ',') . ' dus')
+                ->implode(', ');
+            $redirect->with('warning', "Bahan \"{$ingredient->name}\" dinonaktifkan, tapi stoknya masih ada di "
+                . $sisaSaatNonaktif->count() . " toko: {$daftar}. Bahan ini tetap muncul di Stok Opname & "
+                . "Pencatatan Harian toko-toko tersebut sampai stoknya habis atau di-nol-kan lewat opname.");
+        }
+        return $redirect;
     }
 
     public function destroy(Ingredient $ingredient)
