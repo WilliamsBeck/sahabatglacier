@@ -17,18 +17,24 @@ use Illuminate\Support\Facades\DB;
  */
 class DiagnosaStok extends Command
 {
-    protected $signature   = 'stok:diagnosa {toko : nama/ID toko} {bahan : nama/ID bahan} {tanggal : tanggal opname, mis. 2026-09-30}';
-    protected $description = 'Bandingkan Stok Sistem opname vs Stok Akhir pencatatan harian untuk satu bahan, beserta rinciannya';
+    protected $signature   = 'stok:diagnosa {toko : nama/ID toko} {bahan : nama/ID bahan, atau "semua" untuk memeriksa semua bahan} {tanggal : tanggal opname, mis. 2026-09-30}';
+    protected $description = 'Bandingkan Stok Sistem opname vs Stok Akhir pencatatan harian (satu bahan beserta rinciannya, atau semua bahan)';
 
     public function handle(): int
     {
         $store = is_numeric($this->argument('toko')) ? Store::find($this->argument('toko'))
                : Store::where('name', 'like', '%' . $this->argument('toko') . '%')->first();
+        if (!$store) { $this->error('Toko tidak ditemukan.'); return self::FAILURE; }
+        $tgl   = Carbon::parse($this->argument('tanggal'));
+
+        if (strtolower($this->argument('bahan')) === 'semua') {
+            return $this->semuaBahan($store, $tgl);
+        }
+
         $ing   = is_numeric($this->argument('bahan')) ? Ingredient::find($this->argument('bahan'))
                : Ingredient::where('name', 'like', '%' . $this->argument('bahan') . '%')->first();
-        if (!$store || !$ing) { $this->error('Toko atau bahan tidak ditemukan.'); return self::FAILURE; }
+        if (!$ing) { $this->error('Bahan tidak ditemukan.'); return self::FAILURE; }
 
-        $tgl   = Carbon::parse($this->argument('tanggal'));
         $awal  = $tgl->copy()->startOfMonth()->toDateString();
         $D     = $tgl->toDateString();
         $u     = User::where('role', 'super_admin')->first();
@@ -132,6 +138,90 @@ class DiagnosaStok extends Command
 
         $op = Opname::where('store_id', $store->id)->whereDate('opname_date', $D)->orderByDesc('id')->first();
         $this->line('Opname tersimpan di tanggal itu: ' . ($op ? "#{$op->id} status {$op->status} ({$op->opname_mode})" : 'tidak ada'));
+        return self::SUCCESS;
+    }
+
+    /**
+     * Mode SEMUA BAHAN: tampilkan setiap (bahan × kemasan) yang angkanya tidak cocok
+     * di antara tiga sumber:
+     *   1. Stok Sistem opname DIHITUNG ULANG sekarang (= yang tampil bila halaman dibuka ulang)
+     *   2. Stok Akhir Pencatatan Harian bulan itu
+     *   3. Stok Sistem yang TERSIMPAN di opname pada tanggal itu (kalau ada)
+     */
+    private function semuaBahan(Store $store, Carbon $tgl): int
+    {
+        $D = $tgl->toDateString();
+        $u = User::where('role', 'super_admin')->first();
+        auth()->login($u);
+        view()->share('errors', new \Illuminate\Support\ViewErrorBag);
+
+        $this->info("Toko: {$store->name} (#{$store->id}) | Tanggal opname: {$D} | SEMUA BAHAN");
+        $this->line('Hari ini: ' . now()->toDateString() . ' | bulan ' . $tgl->isoFormat('MMMM Y') . ' = '
+            . ($tgl->isSameMonth(now()) ? 'BULAN BERJALAN' : 'bulan lampau'));
+
+        // 1) Stok Sistem opname dihitung ulang
+        $r = \Illuminate\Http\Request::create('/x', 'GET', ['store_id' => $store->id, 'date' => $D]);
+        $r->setUserResolver(fn() => $u); app()->instance('request', $r);
+        $hitung = collect(json_decode(app(\App\Http\Controllers\Opname\OpnameController::class)->systemQty($r)->getContent(), true))
+            ->mapWithKeys(fn($x) => [$x['ingredient_id'] . '-' . ($x['packaging_id'] ?: 0) => (float) $x['system_qty']]);
+
+        // 2) Stok Akhir Pencatatan Harian
+        $r2 = \Illuminate\Http\Request::create('/x', 'GET', ['store_id' => $store->id, 'month' => $tgl->month, 'year' => $tgl->year]);
+        $r2->setUserResolver(fn() => $u); app()->instance('request', $r2);
+        $html = app(\App\Http\Controllers\Inventory\DailyLedgerController::class)->index($r2)->render();
+        $ledger = [];
+        preg_match_all('/<tr\s+data-opening="([-\d.]+)"\s+data-avail="([-\d.]+)"\s+data-ptb="([\d.]+)"\s+data-ctb="[\d.]+"\s+data-ing="(\d+)"\s+data-pkg="(\d*)"(.*?)<\/tr>/su',
+            $html, $m, PREG_SET_ORDER);
+        foreach ($m as $x) {
+            $tot = 0.0;
+            if (preg_match_all('/class="[^"]*td-usage-cell[^"]*"[^>]*data-val="([\d.]*)"/', $x[6], $c))
+                foreach ($c[1] as $v) $tot += (float) ($v ?: 0);
+            $ledger[$x[4] . '-' . ($x[5] ?: 0)] = (float) $x[2] - $tot * (float) $x[3];
+        }
+
+        // 3) Tersimpan di opname pada tanggal itu
+        $op = Opname::where('store_id', $store->id)->whereDate('opname_date', $D)->orderByDesc('id')->first();
+        $simpan = $op ? DB::table('opname_items')->where('opname_id', $op->id)
+            ->get(['ingredient_id', 'packaging_id', 'system_qty'])
+            ->mapWithKeys(fn($x) => [$x->ingredient_id . '-' . ($x->packaging_id ?: 0) => (float) $x->system_qty]) : collect();
+
+        $nama = Ingredient::pluck('name', 'id');
+        $pkgs = \App\Models\IngredientPackaging::get()->keyBy('id');
+        $fmt  = function ($base, $pid) use ($pkgs) {
+            if ($base === null) return '-';
+            $p   = $pkgs[$pid] ?? null;
+            $ctb = $p ? (float) $p->crate_to_pack * (float) $p->pack_to_base : 0;
+            $ptb = $p ? (float) $p->pack_to_base : 0;
+            if ($ctb <= 0 || $ptb <= 0) return number_format($base, 0, ',', '.');
+            $neg = $base < 0; $b = abs($base); $d = floor($b / $ctb); $pk = floor(($b - $d * $ctb) / $ptb);
+            return ($neg ? '-' : '') . "{$d} dus {$pk} pack";
+        };
+
+        $kunci = $hitung->keys()->merge(array_keys($ledger))->merge($simpan->keys())->unique();
+        $baris = []; $bedaLedger = 0; $basi = 0;
+        foreach ($kunci as $k) {
+            [$iid, $pid] = array_map('intval', explode('-', $k));
+            $h = $hitung[$k] ?? null; $l = $ledger[$k] ?? null; $s = $simpan[$k] ?? null;
+            $x1 = $h !== null && $l !== null && abs($h - $l) > 0.01;   // opname vs pencatatan
+            $x2 = $h !== null && $s !== null && abs($h - $s) > 0.01;   // angka tersimpan sudah basi
+            if (!$x1 && !$x2) continue;
+            $bedaLedger += $x1 ? 1 : 0; $basi += $x2 ? 1 : 0;
+            $baris[] = [mb_substr($nama[$iid] ?? "#$iid", 0, 28), $pid ? "#$pid" : '-',
+                        $fmt($h, $pid), $fmt($l, $pid), $op ? $fmt($s, $pid) : '-',
+                        trim(($x1 ? 'OPNAME≠PENCATATAN ' : '') . ($x2 ? 'TERSIMPAN BASI' : ''))];
+        }
+
+        $this->newLine();
+        $this->line('Dibandingkan: ' . $kunci->count() . ' baris bahan × kemasan | Opname tersimpan: '
+            . ($op ? "#{$op->id} ({$op->status})" : 'tidak ada'));
+        if (!$baris) {
+            $this->info('SEMUA COCOK — Stok Sistem opname, Stok Akhir Pencatatan Harian, dan angka tersimpan sama untuk semua bahan.');
+            return self::SUCCESS;
+        }
+        $this->table(['Bahan', 'Kms', 'Opname (hitung ulang)', 'Pencatatan Harian', 'Opname (tersimpan)', 'Masalah'], $baris);
+        $this->line("OPNAME≠PENCATATAN : {$bedaLedger} baris  ← perhitungan berbeda, perlu ditelusuri");
+        $this->line("TERSIMPAN BASI    : {$basi} baris  ← draft: beres sendiri saat halaman opname dibuka ulang");
+        $this->line('Rincian satu bahan: php artisan stok:diagnosa "' . $store->name . '" "NAMA BAHAN" ' . $D);
         return self::SUCCESS;
     }
 }
