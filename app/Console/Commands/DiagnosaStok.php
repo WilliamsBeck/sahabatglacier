@@ -218,7 +218,52 @@ class DiagnosaStok extends Command
             $this->info('SEMUA COCOK — Stok Sistem opname, Stok Akhir Pencatatan Harian, dan angka tersimpan sama untuk semua bahan.');
             return self::SUCCESS;
         }
-        $this->table(['Bahan', 'Kms', 'Opname (hitung ulang)', 'Pencatatan Harian', 'Opname (tersimpan)', 'Masalah'], $baris);
+
+        // ── Simulasi: apakah selisih OPNAME≠PENCATATAN hilang bila FIFO dihitung ulang?
+        // Dijalankan di dalam transaksi lalu DIBATALKAN — tidak ada yang berubah.
+        //   hilang  → FIFO tersimpan bergeser (data), beres dengan stok:hitung-ulang-fifo
+        //   tetap   → rumus kedua halaman memang berbeda (kode), harus diperbaiki
+        $ingBeda  = [];
+        foreach ($kunci as $k) {
+            $h = $hitung[$k] ?? null; $l = $ledger[$k] ?? null;
+            if ($h !== null && $l !== null && abs($h - $l) > 0.01) $ingBeda[(int) explode('-', $k)[0]] = true;
+        }
+        $setelah = collect();
+        if ($ingBeda) {
+            DB::beginTransaction();
+            try {
+                foreach (array_keys($ingBeda) as $iid) \App\Services\FifoService::recalculate($store->id, $iid);
+                $r3 = \Illuminate\Http\Request::create('/x', 'GET', ['store_id' => $store->id, 'date' => $D]);
+                $r3->setUserResolver(fn() => $u); app()->instance('request', $r3);
+                $setelah = collect(json_decode(app(\App\Http\Controllers\Opname\OpnameController::class)->systemQty($r3)->getContent(), true))
+                    ->mapWithKeys(fn($x) => [$x['ingredient_id'] . '-' . ($x['packaging_id'] ?: 0) => (float) $x['system_qty']]);
+            } finally {
+                DB::rollBack();
+            }
+        }
+        $i = 0;
+        foreach ($kunci as $k) {
+            [$iid, $pid] = array_map('intval', explode('-', $k));
+            $h = $hitung[$k] ?? null; $l = $ledger[$k] ?? null; $s = $simpan[$k] ?? null;
+            $x1 = $h !== null && $l !== null && abs($h - $l) > 0.01;
+            $x2 = $h !== null && $s !== null && abs($h - $s) > 0.01;
+            if (!$x1 && !$x2) continue;
+            if ($x1) {
+                $sa = $setelah[$k] ?? null;
+                $baris[$i][] = $fmt($sa, $pid);
+                $baris[$i][] = ($sa !== null && abs($sa - $l) <= 0.01) ? 'FIFO BERGESER' : 'RUMUS BEDA';
+            } else {
+                $baris[$i][] = '-'; $baris[$i][] = '';
+            }
+            $i++;
+        }
+
+        $this->table(['Bahan', 'Kms', 'Opname (hitung ulang)', 'Pencatatan Harian', 'Opname (tersimpan)', 'Masalah',
+                      'Opname stlh FIFO dihitung ulang', 'Jenis'], $baris);
+        $nGeser = collect($baris)->where(7, 'FIFO BERGESER')->count();
+        $nRumus = collect($baris)->where(7, 'RUMUS BEDA')->count();
+        $this->line("FIFO BERGESER : {$nGeser} baris  ← data, beres dgn: php artisan stok:hitung-ulang-fifo --store={$store->id} --apply");
+        $this->line("RUMUS BEDA    : {$nRumus} baris  ← kode, perlu diperbaiki — kirim hasil ini");
         $this->line("OPNAME≠PENCATATAN : {$bedaLedger} baris  ← perhitungan berbeda, perlu ditelusuri");
         $this->line("TERSIMPAN BASI    : {$basi} baris  ← draft: beres sendiri saat halaman opname dibuka ulang");
         $this->line('Rincian satu bahan: php artisan stok:diagnosa "' . $store->name . '" "NAMA BAHAN" ' . $D);
