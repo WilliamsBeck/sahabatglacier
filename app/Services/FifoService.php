@@ -39,6 +39,23 @@ class FifoService
                 "Stok bahan #{$ingredientId} di toko #{$storeId} sedang dihitung proses lain terlalu lama. Coba lagi sebentar.");
         }
         self::$kunciDipegang[$nama] = true;
+
+        // Dipanggil DI DALAM transaksi yang sudah terbuka (konfirmasi mutasi, approve
+        // opname, terima barang)? Maka hasil hitungan ini BELUM tersimpan saat $fn
+        // selesai — baru tersimpan ketika transaksi luar commit. Kalau kunci dilepas
+        // sekarang, proses lain bisa masuk, membaca data yang belum final, lalu
+        // menimpanya. Jadi kunci ditahan sampai transaksi luar commit.
+        // (Kalau transaksi luar di-rollback, kunci ikut lepas saat koneksi ditutup di
+        //  akhir request — GET_LOCK terikat ke sesi database.)
+        if (DB::transactionLevel() > 0) {
+            $hasil = DB::transaction($fn);
+            DB::afterCommit(function () use ($nama) {
+                unset(self::$kunciDipegang[$nama]);
+                DB::selectOne('SELECT RELEASE_LOCK(?) AS r', [$nama]);
+            });
+            return $hasil;
+        }
+
         try {
             return DB::transaction($fn);
         } finally {

@@ -59,6 +59,13 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // READ COMMITTED: setiap pembacaan melihat data TERBARU yang sudah tersimpan.
+            // Bawaan MySQL/MariaDB (REPEATABLE READ) memberi transaksi "foto" data saat ia
+            // mulai — akibatnya FifoService::recalculate yang dipanggil di dalam transaksi
+            // yang sudah terbuka (konfirmasi mutasi, approve opname, terima barang) bisa
+            // menghitung dari data lama lalu MENIMPA pemakaian yang baru dikonfirmasi
+            // operator lain. Terbukti: pemakaian 3 pack hilang dari FIFO.
+            'isolation_level' => env('DB_ISOLATION_LEVEL', 'READ COMMITTED'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
@@ -79,6 +86,13 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // READ COMMITTED: setiap pembacaan melihat data TERBARU yang sudah tersimpan.
+            // Bawaan MySQL/MariaDB (REPEATABLE READ) memberi transaksi "foto" data saat ia
+            // mulai — akibatnya FifoService::recalculate yang dipanggil di dalam transaksi
+            // yang sudah terbuka (konfirmasi mutasi, approve opname, terima barang) bisa
+            // menghitung dari data lama lalu MENIMPA pemakaian yang baru dikonfirmasi
+            // operator lain. Terbukti: pemakaian 3 pack hilang dari FIFO.
+            'isolation_level' => env('DB_ISOLATION_LEVEL', 'READ COMMITTED'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
