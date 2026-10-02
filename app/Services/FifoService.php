@@ -35,8 +35,9 @@ class FifoService
 
         $got = DB::selectOne('SELECT GET_LOCK(?, 30) AS l', [$nama]);
         if (!$got || (int) $got->l !== 1) {
-            throw new \RuntimeException(
-                "Stok bahan #{$ingredientId} di toko #{$storeId} sedang dihitung proses lain terlalu lama. Coba lagi sebentar.");
+            $nama = \App\Models\Ingredient::where('id', $ingredientId)->value('name') ?? "#{$ingredientId}";
+            throw new \App\Exceptions\StokSedangDihitungException(
+                "Stok {$nama} sedang dihitung oleh proses lain. Perubahan Anda dibatalkan supaya stok tetap benar — coba lagi beberapa detik lagi.");
         }
         self::$kunciDipegang[$nama] = true;
 
@@ -48,12 +49,21 @@ class FifoService
         // (Kalau transaksi luar di-rollback, kunci ikut lepas saat koneksi ditutup di
         //  akhir request — GET_LOCK terikat ke sesi database.)
         if (DB::transactionLevel() > 0) {
-            $hasil = DB::transaction($fn);
-            DB::afterCommit(function () use ($nama) {
+            $lepas = function () use ($nama) {
+                if (empty(self::$kunciDipegang[$nama])) return;      // sudah dilepas
                 unset(self::$kunciDipegang[$nama]);
                 DB::selectOne('SELECT RELEASE_LOCK(?) AS r', [$nama]);
-            });
-            return $hasil;
+            };
+            // Lepas saat transaksi luar COMMIT maupun ROLLBACK. Dulu hanya saat commit:
+            // kalau transaksi luar dibatalkan, kunci tertahan sampai proses selesai —
+            // di perintah panjang (mis. pratinjau hitung ulang ratusan bahan) itu bisa
+            // berlangsung menit, dan operator yang mengonfirmasi tanggal saat itu gagal.
+            // Keduanya dipasang DI MUKA ($lepas aman dipanggil dua kali), supaya tidak ada
+            // jalur yang lolos — termasuk bila $fn gagal tapi pemanggil menangkap errornya
+            // lalu tetap meng-commit transaksi luar.
+            DB::afterRollBack($lepas);
+            DB::afterCommit($lepas);
+            return DB::transaction($fn);
         }
 
         try {

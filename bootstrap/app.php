@@ -29,5 +29,14 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Kunci FIFO tidak didapat → aksi sudah dibatalkan utuh (transaksi), aman diulang.
+        // Jawab dengan pesan yang bisa dibaca operator, bukan "Server Error" generik.
+        $exceptions->render(function (\App\Exceptions\StokSedangDihitungException $e, $request) {
+            if ($request->expectsJson()) {
+                return response()->json(['error' => $e->getMessage()], 409);
+            }
+            return back()->withInput()->with('error', $e->getMessage());
+        });
+        // Ini kondisi sementara yang wajar, bukan bug — tidak perlu memenuhi log error.
+        $exceptions->dontReport(\App\Exceptions\StokSedangDihitungException::class);
     })->create();

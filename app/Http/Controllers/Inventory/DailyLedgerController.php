@@ -623,25 +623,29 @@ class DailyLedgerController extends Controller
             'usage_date'    => $request->date,
         ];
 
-        if ((float)$request->qty_pack === 0.0) {
-            DailyUsage::where($key)->delete();
-        } else {
-            DailyUsage::updateOrCreate($key, [
-                'qty_pack'   => $request->qty_pack,
-                'created_by' => auth()->id(),
-            ]);
-        }
-
-        // Cek apakah tanggal sudah dikonfirmasi.
+        // Simpan + cek konfirmasi + hitung ulang FIFO = SATU transaksi. Dulu terpisah:
+        // kalau hitung ulang gagal, pemakaian di tanggal terkonfirmasi tetap tersimpan
+        // tapi tidak pernah memotong FIFO → stok bergeser diam-diam.
         // - Belum dikonfirmasi (draft) → input disimpan TAPI saldo stok belum diupdate
         // - Sudah dikonfirmasi → recalculate FIFO supaya saldo stok langsung sinkron
-        $isConfirmed = DailyConfirmation::where('store_id', $request->store_id)
-            ->where('confirmation_date', $request->date)
-            ->exists();
+        $isConfirmed = \DB::transaction(function () use ($request, $key) {
+            if ((float)$request->qty_pack === 0.0) {
+                DailyUsage::where($key)->delete();
+            } else {
+                DailyUsage::updateOrCreate($key, [
+                    'qty_pack'   => $request->qty_pack,
+                    'created_by' => auth()->id(),
+                ]);
+            }
+            $konf = DailyConfirmation::where('store_id', $request->store_id)
+                ->where('confirmation_date', $request->date)
+                ->exists();
+            if ($konf) FifoService::recalculate((int)$request->store_id, (int)$request->ingredient_id);
+            return $konf;
+        });
 
         $fix = ['fixed' => [], 'locked' => []];
         if ($isConfirmed) {
-            FifoService::recalculate((int)$request->store_id, (int)$request->ingredient_id);
 
             // Pemakaian di tanggal yang SUDAH dikonfirmasi ikut memotong FIFO, jadi
             // mengubah angkanya bisa membuat transfer setelah tanggal ini memakai
@@ -715,12 +719,16 @@ class DailyLedgerController extends Controller
                     if ($earliestDate === null || $d < $earliestDate) $earliestDate = $d;
                 }
             }
-        });
 
-        // Recalculate FIFO sekali per bahan (sekuensial, tidak paralel) — aman dari race.
-        foreach (array_keys($affectedIngs) as $ingId) {
-            FifoService::recalculate($storeId, (int) $ingId);
-        }
+            // Recalculate FIFO sekali per bahan, DI DALAM transaksi yang sama dengan
+            // penghapusan: gagal hitung ulang = penghapusan ikut dibatalkan, jadi tidak
+            // mungkin ada pemakaian terhapus yang tidak tercermin di FIFO. Diurutkan
+            // supaya urutan pengambilan kunci FIFO selalu sama (cegah saling tunggu).
+            $ids = array_keys($affectedIngs); sort($ids);
+            foreach ($ids as $ingId) {
+                FifoService::recalculate($storeId, (int) $ingId);
+            }
+        });
 
         $fix = $earliestDate
             ? $this->autoFixAfterUsageChange($storeId, array_values($fixPairs), $earliestDate)
@@ -795,11 +803,12 @@ class DailyLedgerController extends Controller
                 ->values()->all();
             $affectedUnconfirm = MutationService::confirmedTransfersAfter($storeId, $pairsBefore, $date->toDateString());
 
-            $existing->delete();
-
-            // Setelah batal konfirmasi → recalculate FIFO supaya pemakaian hari itu
-            // dikembalikan ke saldo stok (karena tidak terkonfirmasi lagi)
-            $this->recalcAffectedIngredients($storeId, $date->toDateString());
+            // Hapus konfirmasi + recalculate FIFO = SATU transaksi: kalau hitung ulang
+            // gagal, konfirmasinya ikut kembali — tidak ada keadaan setengah jadi.
+            \DB::transaction(function () use ($existing, $storeId, $date) {
+                $existing->delete();
+                $this->recalcAffectedIngredients($storeId, $date->toDateString());
+            });
 
             // Auto-fix: transfer yang jadi stale krn pemakaian hari ini dibatalkan —
             // checkUsageGate=false (lihat penjelasan lengkap di
@@ -856,14 +865,20 @@ class DailyLedgerController extends Controller
             ->values()->all();
         $affected = MutationService::confirmedTransfersAfter($storeId, $pairs, $date->toDateString());
 
-        DailyConfirmation::create([
-            'store_id'          => $storeId,
-            'confirmation_date' => $date->toDateString(),
-            'confirmed_by'      => auth()->id(),
-        ]);
-
-        // Setelah konfirmasi → recalculate FIFO supaya pemakaian hari itu MENGURANGI saldo stok
-        $this->recalcAffectedIngredients($storeId, $date->toDateString());
+        // Buat konfirmasi + recalculate FIFO = SATU transaksi. Dulu terpisah: konfirmasi
+        // langsung tersimpan, lalu hitung ulangnya menyusul. Kalau hitung ulang gagal
+        // (mis. bahan sedang dihitung proses lain), tanggal sudah tercentang hijau tapi
+        // pemakaiannya TIDAK PERNAH memotong FIFO — terlacak di live: konfirmasi tgl 26
+        // & 28 tanpa penulisan FIFO sesudahnya, stok selisih tepat 1 pack.
+        // Sekarang gagal = konfirmasi ikut batal, operator melihat error & bisa mengulang.
+        \DB::transaction(function () use ($storeId, $date) {
+            DailyConfirmation::create([
+                'store_id'          => $storeId,
+                'confirmation_date' => $date->toDateString(),
+                'confirmed_by'      => auth()->id(),
+            ]);
+            $this->recalcAffectedIngredients($storeId, $date->toDateString());
+        });
 
         // Auto-fix: transfer yang kepakai batch keliru karena pencatatan harian ini
         // baru dikonfirmasi belakangan — logika & syarat kunci periode sama persis
@@ -915,7 +930,8 @@ class DailyLedgerController extends Controller
             ->where('usage_date', $date)
             ->where('qty_pack', '>', 0)
             ->pluck('ingredient_id')
-            ->unique();
+            ->unique()
+            ->sort();          // urutan tetap → urutan ambil kunci FIFO selalu sama
 
         foreach ($ingredientIds as $iid) {
             FifoService::recalculate($storeId, (int)$iid);
@@ -1505,15 +1521,16 @@ class DailyLedgerController extends Controller
                     }
                 }
             }
+            // Recalc FIFO untuk semua bahan yang terdampak — SEBELUM commit, supaya
+            // import & hitung ulangnya satu kesatuan (gagal = seluruh import batal).
+            $ids = array_keys($affectedIngs); sort($ids);
+            foreach ($ids as $ingId) {
+                FifoService::recalculate($storeId, $ingId);
+            }
             \DB::commit();
         } catch (\Exception $e) {
             \DB::rollback();
             throw new \Exception('Gagal import: ' . $e->getMessage());
-        }
-
-        // Recalc FIFO untuk semua bahan yang terdampak
-        foreach (array_keys($affectedIngs) as $ingId) {
-            FifoService::recalculate($storeId, $ingId);
         }
 
         // Auto-fix harga transfer yang jadi stale karena pemakaian di tanggal
