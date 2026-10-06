@@ -314,6 +314,23 @@
 </div>
 @endif
 
+{{-- Diisi oleh antrian simpan (script di bawah): angka yang belum sampai ke server --}}
+<div id="dlBelumTersimpan" class="alert alert-danger py-2 small mb-2 d-none align-items-center justify-content-between gap-2">
+    <span><i class="bi bi-wifi-off me-1"></i><span class="isi"></span></span>
+    <button type="button" id="btnKirimUlang" class="btn btn-danger btn-sm flex-shrink-0">
+        <i class="bi bi-arrow-repeat me-1"></i>Kirim ulang sekarang
+    </button>
+</div>
+<div id="dlCadangan" class="alert alert-warning py-2 small mb-2 d-none">
+    <div class="fw-semibold mb-1">
+        <i class="bi bi-exclamation-triangle me-1"></i>Ada angka dari sesi sebelumnya yang belum sempat tersimpan ke server
+        (mis. koneksi putus lalu halaman di-refresh):
+    </div>
+    <ul class="isi mb-2 ps-3"></ul>
+    <button type="button" id="btnCadanganKirim" class="btn btn-warning btn-sm"><i class="bi bi-cloud-upload me-1"></i>Simpan angka-angka ini</button>
+    <button type="button" id="btnCadanganBuang" class="btn btn-outline-secondary btn-sm">Buang</button>
+</div>
+
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -586,6 +603,8 @@
 .daily-ledger-table .td-usage-cell:focus { outline: 2px solid #3498db; background: #ebf5fb; }
 /* Seleksi blok ala Excel */
 .daily-ledger-table .td-usage-cell.dl-selected { background: #cfe8ff !important; box-shadow: inset 0 0 0 1px #2980b9; }
+/* Angka yang BELUM sampai ke server (koneksi putus) — lihat antrian simpan di script */
+.daily-ledger-table .td-usage-cell.dl-gagal { background: #fff3cd !important; box-shadow: inset 0 0 0 2px #dc3545; color: #dc3545; font-weight: 700; }
 body.dl-noselect, body.dl-noselect * { -webkit-user-select: none !important; user-select: none !important; }
 .usage-input {
     width: 100%;
@@ -627,35 +646,172 @@ var saveUrl       = '{{ route("inventory.daily-ledger.save-usage") }}';
 var bulkDeleteUrl = '{{ route("inventory.daily-ledger.bulk-delete-usage") }}';
 var confirmUrl    = '{{ route("inventory.daily-ledger.confirm-date") }}';
 var csrfToken  = '{{ csrf_token() }}';
-var saveTimers = {};
 
-// Jumlah perubahan yang belum tuntas tersimpan (masih menunggu 500 ms atau masih
-// dikirim ke server). Penyimpanan sengaja ditunda supaya tidak menembak server tiap
-// ketikan — tapi kalau halaman di-refresh/ditutup dalam jeda itu, angkanya hilang
-// tanpa jejak. Karena itu user diperingatkan dulu.
-var pendingSimpan = 0;
-var saveKirim     = {};   // key -> fungsi pengirim yang bisa dipaksa jalan lebih awal
-var saveInflight  = [];   // fetch simpan yang sedang berjalan
+// ── Antrian simpan pemakaian ──────────────────────────────────────────────
+// Tiap sel (bahan × kemasan × tanggal) punya SATU entri antrian sampai angkanya
+// benar-benar diterima server. Pengiriman ditunda 500 ms supaya tidak menembak
+// server tiap ketikan.
+//
+// Dulu fetch yang gagal (koneksi putus, server timeout) hanya menulis "⚠ Gagal
+// simpan" sekilas — langsung tertimpa "Tersimpan ✓" sel berikutnya — sementara sel
+// tetap menampilkan angkanya dan Konfirmasi tanggal tetap jalan. Setelah refresh,
+// angkanya hilang tanpa jejak. Sekarang:
+//   - gagal sementara → dikirim ULANG otomatis (aman: server menyimpan angka
+//     mutlak, bukan selisih, jadi terkirim dua kali hasilnya sama);
+//   - tetap gagal → sel ditandai merah + banner, dan Konfirmasi tanggal ditolak;
+//   - setiap angka juga dicadangkan di localStorage sampai tersimpan, jadi kalau
+//     halaman sempat di-refresh, angkanya ditawarkan untuk dikirim lagi.
+var antrian         = {};      // key sel -> entri (lihat postUsage)
+var JEDA_ULANG      = [1000, 2000, 4000, 8000, 15000];  // ms antar kirim ulang; habis → ditandai gagal
+var BATAS_WAKTU     = 20000;   // ms; permintaan yang menggantung lebih lama dianggap gagal
+var penungguSelesai = [];      // resolver milik flushSimpanTertunda()
+var sesiHabisDiberitahu = false;
+var CADANGAN        = 'glacier_dl_belum_tersimpan';
+
+function bacaCadangan() {
+    try { return JSON.parse(localStorage.getItem(CADANGAN) || '{}') || {}; } catch (e) { return {}; }
+}
+function ubahCadangan(fn) {
+    try { var d = bacaCadangan(); fn(d); localStorage.setItem(CADANGAN, JSON.stringify(d)); } catch (e) {}
+}
+
+function jumlahAntrian(filter) {
+    return Object.keys(antrian).filter(function (k) { return !filter || filter(antrian[k]); }).length;
+}
 
 window.addEventListener('beforeunload', function (e) {
-    if (pendingSimpan > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
+    if (jumlahAntrian() > 0) { e.preventDefault(); e.returnValue = ''; return ''; }
 });
 
+// Dipanggil tiap kali status antrian berubah: perbarui banner, dan lepaskan
+// penunggu flushSimpanTertunda() bila tidak ada lagi yang sedang/akan dikirim.
+function cekSelesai() {
+    var nGagal = jumlahAntrian(function (s) { return s.gagal; });
+    var box = document.getElementById('dlBelumTersimpan');
+    if (box) {
+        box.classList.toggle('d-none', nGagal === 0);
+        box.classList.toggle('d-flex', nGagal > 0);
+        if (nGagal > 0) {
+            box.querySelector('.isi').innerHTML = '<strong>' + nGagal + ' angka BELUM tersimpan</strong> ke server'
+                + ' (sel bertanda merah) — koneksi bermasalah. Jangan refresh/tutup halaman dulu;'
+                + ' sistem mencoba lagi otomatis begitu koneksi kembali.';
+        }
+    }
+    if (jumlahAntrian(function (s) { return s.busy || s.timer; }) === 0) {
+        var r = penungguSelesai; penungguSelesai = [];
+        r.forEach(function (f) { f(); });
+    }
+}
+
+function kirimUlangGagal() {
+    Object.keys(antrian).forEach(function (k) {
+        var s = antrian[k];
+        if (s.gagal && !s.busy) { s.coba = 0; jalankanSimpan(k); }
+    });
+}
+window.addEventListener('online', kirimUlangGagal);
+document.getElementById('btnKirimUlang')?.addEventListener('click', kirimUlangGagal);
+
 /**
- * Paksa semua simpanan yang masih menunggu jeda 500 ms untuk dikirim SEKARANG,
- * lalu tunggu sampai semuanya selesai.
+ * Paksa semua angka yang masih menunggu (jeda 500 ms, jeda kirim ulang, atau
+ * sudah ditandai gagal) untuk dikirim SEKARANG, lalu tunggu sampai semuanya
+ * tuntas — tersimpan, atau gagal lagi.
  *
- * Dipakai sebelum Konfirmasi tanggal: kalau user mengetik lalu langsung menekan
- * konfirmasi, dulu permintaan konfirmasi bisa mendahului simpanan angkanya —
- * server menghitung stok tanpa angka yang baru diketik. Dengan ini, konfirmasi
- * selalu berjalan di atas data yang sudah lengkap.
+ * Dipakai sebelum Konfirmasi tanggal: konfirmasi harus berjalan di atas data
+ * yang sudah lengkap di server, bukan yang baru ada di layar.
  */
 function flushSimpanTertunda() {
-    Object.keys(saveKirim).forEach(function (k) {
-        var f = saveKirim[k];
-        if (typeof f === 'function') f();     // fungsi ini sendiri yang membersihkan timer & daftar
+    Object.keys(antrian).forEach(function (k) {
+        var s = antrian[k];
+        if (!s.busy && (s.timer || s.gagal)) { s.coba = 0; jalankanSimpan(k); }
     });
-    return Promise.all(saveInflight.slice());
+    return new Promise(function (resolve) { penungguSelesai.push(resolve); cekSelesai(); });
+}
+
+// Kirim angka TERBARU satu sel ke server. Satu sel tidak pernah punya dua
+// permintaan berjalan bersamaan, jadi angka lama tidak bisa menimpa angka baru.
+function jalankanSimpan(key) {
+    var s = antrian[key];
+    if (!s || s.busy) return;
+    clearTimeout(s.timer); s.timer = null;
+    s.busy = true; s.gagal = false;
+    s.td.classList.remove('dl-gagal');
+
+    var ver      = s.ver;
+    var terkirim = s.data.qty_pack;
+    var status   = document.getElementById('saveStatus');
+    status.style.color = '';
+    status.textContent = 'Menyimpan...';
+
+    var ctrl  = window.AbortController ? new AbortController() : null;
+    var batas = setTimeout(function () { if (ctrl) ctrl.abort(); }, BATAS_WAKTU);
+
+    fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
+        body: JSON.stringify(s.data),
+        signal: ctrl ? ctrl.signal : undefined
+    })
+    .then(function (r) {
+        // Jawaban bukan JSON (halaman error hosting, 419 sesi habis, dll.) tetap ditangani di bawah.
+        return r.json().then(function (d) { return { status: r.status, ok: r.ok, data: d }; },
+                             function ()  { return { status: r.status, ok: false, data: null }; });
+    }, function () { return { status: 0, ok: false, data: null }; })   // koneksi putus / timeout
+    .then(function (res) {
+        clearTimeout(batas);
+        s.busy = false;
+
+        if (res.ok && !(res.data && res.data.error)) {
+            s.nilaiServer = terkirim > 0 ? String(terkirim) : '';
+            s.coba = 0;
+            if (s.ver !== ver) { jalankanSimpan(key); return; }   // ada ketikan baru selama terkirim
+            delete antrian[key];
+            ubahCadangan(function (d) { delete d[s.cadKey]; });
+            var nFix = ((res.data && res.data.fixed) || []).length;
+            status.textContent = nFix > 0 ? 'Tersimpan ✓ · ' + nFix + ' transfer disegarkan otomatis' : 'Tersimpan ✓';
+            setTimeout(function () { if (status.textContent.indexOf('Tersimpan') === 0) status.textContent = ''; }, nFix > 0 ? 4000 : 1500);
+            laporTransferTerkunci(res.data && res.data.locked);
+            cekSelesai();
+            return;
+        }
+
+        // Ditolak server secara pasti (periode terkunci, validasi, akses) → kirim ulang
+        // percuma. Kembalikan sel ke angka yang ada di server.
+        if (res.status === 422 || res.status === 403 || res.status === 404) {
+            delete antrian[key];
+            ubahCadangan(function (d) { delete d[s.cadKey]; });
+            var td = s.td, prev = s.nilaiServer;
+            td.dataset.val = prev;
+            td.classList.toggle('has-val', (parseFloat(prev) || 0) > 0);
+            var live = td.querySelector('input');
+            if (live) live.value = prev; else td.textContent = prev;
+            updateRowSummary(td.closest('tr'));
+            status.textContent = '⚠ ' + ((res.data && (res.data.error || res.data.message)) || 'Ditolak server');
+            cekSelesai();
+            return;
+        }
+
+        // Sementara (koneksi putus, timeout, server sibuk 5xx, kunci stok 409) → ulang
+        // otomatis. 419 = sesi login habis: diulang pun tetap gagal sampai login ulang.
+        if (res.status !== 419 && s.coba < JEDA_ULANG.length) {
+            status.textContent = '⚠ Koneksi bermasalah — mencoba lagi...';
+            s.timer = setTimeout(function () { s.timer = null; jalankanSimpan(key); }, JEDA_ULANG[s.coba++]);
+            cekSelesai();
+            return;
+        }
+
+        s.gagal = true;
+        s.td.classList.add('dl-gagal');
+        status.style.color = '#dc3545';
+        status.textContent = '⚠ Ada angka belum tersimpan';
+        if (res.status === 419 && !sesiHabisDiberitahu && window.uiAlert) {
+            sesiHabisDiberitahu = true;
+            window.uiAlert('Sesi login Anda sudah habis, jadi angka yang baru diketik tidak bisa disimpan.\n\n'
+                + 'Angka-angka itu SUDAH dicadangkan di browser ini. Buka tab baru, login lagi, lalu refresh halaman ini — '
+                + 'sistem akan menawarkan untuk menyimpannya.', { type: 'warning', title: 'Sesi habis' });
+        }
+        cekSelesai();
+    });
 }
 
 // Transfer yang terdampak tapi TIDAK bisa disegarkan otomatis (periode terkunci).
@@ -771,80 +927,51 @@ if (ledgerTable) {
         if (target) target.focus();         // blur sel kini → focusin sel tujuan → jadi input
     });
 
-    // Simpan satu sel ke server. Dipakai edit tunggal (via saveUsage) & hapus massal.
+    // KEMASAN wajib ikut jadi kunci. Dulu kuncinya hanya bahan+tanggal, sehingga
+    // untuk bahan ber-kemasan lebih dari satu (Single Fine Straw s/d Big Bag),
+    // mengisi baris kemasan kedua menimpa simpanan baris pertama.
+    function kunciSel(td) {
+        var tr = td.closest('tr');
+        return tr.dataset.ing + '|' + (tr.dataset.pkg || '0') + '|' + td.dataset.date;
+    }
+
+    // Masukkan angka satu sel ke antrian simpan. Dipakai edit tunggal (via saveUsage),
+    // hapus massal (sel yang masih antre), dan pemulihan cadangan.
     function postUsage(td, qtyPack) {
-        var tr      = td.closest('tr');
-        var date    = td.dataset.date;
-        var ingId   = tr.dataset.ing;
-        var pkg     = tr.dataset.pkg || null;
-        var newVal  = qtyPack > 0 ? String(qtyPack) : '';
-        var prevVal = td.dataset.val;
-        // KEMASAN wajib ikut jadi kunci. Dulu kuncinya hanya bahan+tanggal, sehingga
-        // untuk bahan ber-kemasan lebih dari satu (Single Fine Straw s/d Big Bag),
-        // mengisi baris kemasan kedua dalam 500 ms akan clearTimeout() milik baris
-        // pertama → simpanan baris pertama DIBATALKAN dan angkanya hilang saat refresh.
-        var key     = ingId + '|' + (pkg || '0') + '|' + date;
+        var tr    = td.closest('tr');
+        var date  = td.dataset.date;
+        var ingId = tr.dataset.ing;
+        var pkg   = tr.dataset.pkg || null;
+        var key   = kunciSel(td);
 
-        td.dataset.val = newVal;
+        var s = antrian[key];
+        if (!s) {
+            s = antrian[key] = {
+                td: td, ver: 0, timer: null, busy: false, coba: 0, gagal: false,
+                nilaiServer: td.dataset.val || '',      // angka yang (diketahui) ada di server
+                cadKey: ledgerStore + '|' + key
+            };
+        }
+        td.dataset.val = qtyPack > 0 ? String(qtyPack) : '';
         td.classList.toggle('has-val', qtyPack > 0);
+        td.classList.remove('dl-gagal');
+        s.td = td; s.ver++; s.coba = 0; s.gagal = false;
+        s.data = { store_id: ledgerStore, ingredient_id: ingId, packaging_id: pkg, date: date, qty_pack: qtyPack };
 
-        var status = document.getElementById('saveStatus');
-        clearTimeout(saveTimers[key]);
-        if (!(key in saveTimers)) pendingSimpan++;   // hitung perubahan yg belum tersimpan
-        status.textContent = 'Menyimpan...';
+        // Cadangan di browser — bertahan walau halaman di-refresh sebelum tersimpan.
+        var namaEl = tr.querySelector('.sticky-col .fw-semibold');
+        ubahCadangan(function (d) {
+            d[s.cadKey] = { store_id: ledgerStore, ingredient_id: ingId, packaging_id: pkg, date: date,
+                            qty_pack: qtyPack, nama: namaEl ? namaEl.textContent.trim() : '', t: Date.now() };
+        });
 
-        // Fungsi pengirimnya disimpan terpisah supaya bisa DIPAKSA jalan lebih awal
-        // (lihat flushSimpanTertunda) — dipakai saat user menekan Konfirmasi tanggal
-        // sebelum jeda 500 ms selesai.
-        var kirim = function () {
-            clearTimeout(saveTimers[key]);
-            delete saveTimers[key];
-            delete saveKirim[key];
-            var p = fetch(saveUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrfToken,
-                    'Accept': 'application/json'
-                },
-                body: JSON.stringify({
-                    store_id:      ledgerStore,
-                    ingredient_id: ingId,
-                    packaging_id:  pkg,
-                    date:          date,
-                    qty_pack:      qtyPack
-                })
-            })
-            .then(function(r) { return r.json().then(function(d){ return { ok: r.ok, data: d }; }); })
-            .then(function(res) {
-                if (!res.ok || (res.data && res.data.error)) {
-                    status.textContent = '⚠ ' + ((res.data && res.data.error) || 'Gagal simpan');
-                    td.dataset.val = prevVal;
-                    td.classList.toggle('has-val', (parseFloat(prevVal) || 0) > 0);
-                    var live = td.querySelector('input');
-                    if (live) live.value = prevVal; else td.textContent = prevVal;
-                    updateRowSummary(tr);
-                    return;
-                }
-                var nFix = ((res.data && res.data.fixed) || []).length;
-                status.textContent = nFix > 0
-                    ? 'Tersimpan ✓ · ' + nFix + ' transfer disegarkan otomatis'
-                    : 'Tersimpan ✓';
-                setTimeout(function() { status.textContent = ''; }, nFix > 0 ? 4000 : 1500);
-                laporTransferTerkunci(res.data && res.data.locked);
-            })
-            .catch(function() { status.textContent = '⚠ Gagal simpan'; })
-            .then(function() {
-                if (pendingSimpan > 0) pendingSimpan--;
-                var i = saveInflight.indexOf(p);
-                if (i > -1) saveInflight.splice(i, 1);
-            });
-            saveInflight.push(p);
-            return p;
-        };
-
-        saveKirim[key]  = kirim;
-        saveTimers[key] = setTimeout(kirim, 500);
+        document.getElementById('saveStatus').textContent = 'Menyimpan...';
+        // Sedang terkirim? Tidak perlu timer: selesai kirim, angka terbaru otomatis menyusul.
+        if (!s.busy) {
+            clearTimeout(s.timer);
+            s.timer = setTimeout(function () { s.timer = null; jalankanSimpan(key); }, 500);
+        }
+        cekSelesai();
     }
 
     function saveUsage(input) {
@@ -925,9 +1052,12 @@ if (ledgerTable) {
         var payload = [], affectedRows = new Set();
         Array.from(selCells).forEach(function(td) {
             var tr  = td.closest('tr');
+            affectedRows.add(tr);
+            // Sel yang angkanya masih antre/belum tersimpan ikut lewat antrian, supaya
+            // simpanan lama yang tertunda tidak menimpa penghapusan ini belakangan.
+            if (antrian[kunciSel(td)]) { postUsage(td, 0); td.textContent = ''; return; }
             var had = (parseFloat(td.dataset.val) || 0) > 0;
             td.textContent = ''; td.dataset.val = ''; td.classList.remove('has-val');
-            affectedRows.add(tr);
             if (had) payload.push({ ingredient_id: tr.dataset.ing, packaging_id: tr.dataset.pkg || null, date: td.dataset.date });
         });
         affectedRows.forEach(function(tr){ updateRowSummary(tr); });
@@ -956,6 +1086,53 @@ if (ledgerTable) {
         })
         .catch(function() { status.textContent = '⚠ Gagal hapus'; window.location.reload(); });
     });
+
+    // ── Pulihkan cadangan: angka yang diketik di sesi sebelumnya tapi tidak pernah
+    //    sampai ke server (koneksi putus lalu halaman di-refresh / ditutup).
+    //    TIDAK dikirim otomatis — bisa saja sudah diisi ulang dari perangkat lain —
+    //    jadi ditampilkan dulu dan user yang memutuskan.
+    (function pulihkanCadangan() {
+        var box = document.getElementById('dlCadangan');
+        if (!box) return;
+        var semua = bacaCadangan(), cocok = [], SEMINGGU = 7 * 24 * 3600 * 1000;
+        Object.keys(semua).forEach(function (k) {
+            var c = semua[k];
+            if (!c || Date.now() - (c.t || 0) > SEMINGGU) { ubahCadangan(function (d) { delete d[k]; }); return; }
+            if (String(c.store_id) !== String(ledgerStore)) return;          // toko lain
+            var tr = ledgerTable.querySelector('tr[data-ing="' + c.ingredient_id + '"][data-pkg="' + (c.packaging_id || '') + '"]');
+            var td = tr && tr.querySelector('.td-usage-cell[data-date="' + c.date + '"]');
+            if (!td) return;                                                  // bulan lain — tunggu dibuka
+            var diServer = parseFloat(td.dataset.val) || 0;
+            if (diServer === (parseFloat(c.qty_pack) || 0)) {                 // ternyata sudah sampai
+                ubahCadangan(function (d) { delete d[k]; }); return;
+            }
+            cocok.push({ k: k, c: c, td: td, diServer: diServer });
+        });
+        if (!cocok.length) return;
+
+        var ul = box.querySelector('.isi');
+        cocok.forEach(function (x) {
+            var li = document.createElement('li');
+            li.textContent = 'Tgl ' + parseInt(x.c.date.split('-')[2], 10) + ' · ' + (x.c.nama || 'bahan #' + x.c.ingredient_id)
+                + ': ' + (parseFloat(x.c.qty_pack) || 0) + ' pack (di server sekarang: ' + (x.diServer || 'kosong') + ')';
+            ul.appendChild(li);
+        });
+        box.classList.remove('d-none');
+
+        document.getElementById('btnCadanganKirim').addEventListener('click', function () {
+            cocok.forEach(function (x) {
+                var q = parseFloat(x.c.qty_pack) || 0;
+                postUsage(x.td, q);
+                x.td.textContent = q > 0 ? String(q) : '';
+                updateRowSummary(x.td.closest('tr'));
+            });
+            box.classList.add('d-none');
+        });
+        document.getElementById('btnCadanganBuang').addEventListener('click', function () {
+            ubahCadangan(function (d) { cocok.forEach(function (x) { delete d[x.k]; }); });
+            box.classList.add('d-none');
+        });
+    })();
 }
 
 // ── Update TOT + Stok Akhir ──────────────────────
@@ -1009,12 +1186,24 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
         var storeId = el.dataset.store;
         var st      = document.getElementById('saveStatus');
 
-        if (pendingSimpan > 0) st.textContent = 'Menyimpan dulu sebelum konfirmasi...';
+        if (jumlahAntrian() > 0) st.textContent = 'Menyimpan dulu sebelum konfirmasi...';
 
         // Tunggu semua angka yang baru diketik benar-benar tersimpan. Tanpa ini,
         // menekan konfirmasi dalam jeda 500 ms membuat server menghitung stok
         // tanpa angka terakhir — persis gejala "stok sistem beda dgn pencatatan".
         flushSimpanTertunda().then(function () {
+        // Masih ada angka yang gagal terkirim → JANGAN konfirmasi: tanggalnya akan
+        // tercentang padahal sebagian pemakaiannya tidak pernah sampai ke server.
+        var nGagal = jumlahAntrian(function (s) { return s.gagal; });
+        if (nGagal > 0) {
+            st.style.color = '#dc3545';
+            st.textContent = '⚠ Konfirmasi dibatalkan — ' + nGagal + ' angka belum tersimpan';
+            if (window.uiAlert) window.uiAlert(
+                nGagal + ' angka (sel bertanda merah) belum berhasil tersimpan ke server karena koneksi bermasalah.\n\n'
+                + 'Tunggu koneksi stabil, klik "Kirim ulang sekarang", lalu konfirmasi lagi.',
+                { type: 'warning', title: 'Konfirmasi dibatalkan' });
+            return;
+        }
         return fetch(confirmUrl, {
             method: 'POST',
             headers: {
@@ -1061,7 +1250,8 @@ document.querySelectorAll('.confirm-date-th').forEach(function(th) {
             laporTransferTerkunci(res.data.locked);
         })
         .catch(function() {
-            document.getElementById('saveStatus').textContent = '⚠ Gagal terhubung ke server';
+            // Konfirmasi bisa saja sudah diproses server walau jawabannya tidak sampai.
+            document.getElementById('saveStatus').textContent = '⚠ Gagal terhubung ke server — refresh halaman untuk melihat status tanggal';
         });
         });
     });
