@@ -284,11 +284,20 @@ class FifoService
             ->where(fn($q) => $q->whereNull('price_per_base')->orWhere('price_per_base', '<=', 0))
             ->get();
 
-        if ($batches->isEmpty()) return 0;
+        return self::tulisHargaBatch($batches, $packagingId, $ppb);
+    }
 
+    /**
+     * Tulis harga ke batch-batch (MutationItem) — semua kolom harga sekaligus supaya
+     * per-base, per-dus, dan subtotal tidak saling bertentangan. Dipakai bareng oleh
+     * isiHargaBatchKosong (approve opname) dan koreksi harga opname approved.
+     */
+    public static function tulisHargaBatch(iterable $batches, ?int $packagingId, float $ppb): int
+    {
         $pkg = $packagingId ? IngredientPackaging::find($packagingId) : null;
         $ctb = $pkg ? (float) $pkg->crate_to_pack * (float) $pkg->pack_to_base : 0;
 
+        $n = 0;
         foreach ($batches as $b) {
             $b->update([
                 'price_per_base'       => $ppb,
@@ -296,8 +305,9 @@ class FifoService
                 'price_per_crate'      => $ctb > 0 ? round($ppb * $ctb, 2) : null,
                 'cost_subtotal'        => round((float) $b->total_in_base * $ppb, 2),
             ]);
+            $n++;
         }
-        return $batches->count();
+        return $n;
     }
 
     /**

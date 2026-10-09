@@ -444,7 +444,15 @@ class OpnameController extends Controller
         $priceMap   = $this->displayPriceMap($opname, $priceKnown);
         $fifoPrice  = $this->fifoEffectivePrice($opname);
         $lockData   = $this->buildLockData($opname);
-        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice', 'priceKnown') + $lockData);
+
+        // Koreksi Harga (opname approved): harga/dus bisa diubah, jumlah tetap terkunci.
+        $bolehKoreksi = $opname->status === 'approved'
+            && (auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea());
+        $koreksiKunci = $bolehKoreksi ? $this->koreksiHargaKunci($opname) : null;
+        $modeKoreksi  = $bolehKoreksi && !$koreksiKunci && request()->boolean('koreksi_harga');
+
+        return view('opname.show', compact('opname', 'priceMap', 'fifoPrice', 'priceKnown',
+            'bolehKoreksi', 'koreksiKunci', 'modeKoreksi') + $lockData);
     }
 
     public function edit(Opname $opname)
@@ -997,6 +1005,179 @@ class OpnameController extends Controller
 
         return redirect()->route('opname.opnames.edit', $opname)
             ->with('success', 'Approve dibatalkan. Opname kembali ke draft & bisa diedit — jangan lupa Approve lagi setelah selesai.' . $extra);
+    }
+
+    /**
+     * Alasan Koreksi Harga tidak boleh dijalankan (null = boleh).
+     *
+     * Harga opname dipakai sebagai nilai SO periode ini DAN terbawa ke batch FIFO yang
+     * dipakai bulan-bulan sesudahnya (SO Awal, harga transfer keluar). Jadi bukan cuma
+     * HPP periode ini — HPP periode sesudahnya yang sudah dikunci juga harus dibuka dulu,
+     * kalau tidak angka yang sudah dibekukan diam-diam tidak cocok lagi dengan datanya.
+     */
+    private function koreksiHargaKunci(Opname $opname): ?string
+    {
+        // Opname tengah bulan (1–15) juga ikut membentuk HPP akhir bulan yang sama.
+        $kunciPeriodeIni = $opname->period_type === 'mid_month'
+            ? \App\Models\HppSnapshot::isPeriodLocked($opname->store_id, $opname->period_month, $opname->period_year)
+            : (bool) $this->hppLockMsg($opname);
+        if ($kunciPeriodeIni) {
+            return \App\Models\HppSnapshot::lockMessageFor($opname->store_id, $opname->period_month, $opname->period_year);
+        }
+
+        $sesudah = \App\Models\HppSnapshot::where('store_id', $opname->store_id)
+            ->where(fn($q) => $q->where('year', '>', $opname->period_year)
+                ->orWhere(fn($w) => $w->where('year', $opname->period_year)->where('month', '>', $opname->period_month)))
+            ->orderBy('year')->orderBy('month')
+            ->first(['month', 'year']);
+        return $sesudah
+            ? \App\Models\HppSnapshot::lockMessageFor($opname->store_id, $sesudah->month, $sesudah->year)
+            : null;
+    }
+
+    /**
+     * Koreksi HARGA opname yang sudah approved. Jumlah fisik/stok tidak disentuh.
+     *
+     * Kasus: harga/dus lupa diisi saat opname, padahal sesudahnya sudah ada mutasi —
+     * Batalkan Approve ditolak (transactionsAfterReason) karena itu juga membalikkan
+     * efek STOK opname. Padahal yang salah cuma rupiahnya, jadi cukup:
+     *   1. harga item opname diganti  → nilai SO (dan HPP) ikut benar;
+     *   2. batch bootstrap dari opname ini diberi harga yang sama;
+     *   3. batch TANPA HARGA (0/NULL) yang sudah diterima s/d tanggal opname diisi —
+     *      sama dengan Langkah 0 approve, tapi termasuk yang sudah terpakai habis
+     *      SETELAH opname, karena justru batch itulah yang dipakai transfer sesudahnya;
+     *   4. harga transfer/penjualan keluar setelah tanggal opname disegarkan lewat
+     *      auto-fix biasa (yang terkunci dilewati & dilaporkan, sama seperti approve).
+     */
+    public function koreksiHarga(Request $request, Opname $opname)
+    {
+        abort_unless(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea(), 403);
+        abort_if($opname->status !== 'approved', 422, 'Koreksi harga hanya untuk opname yang sudah approved.');
+
+        $kembali = redirect()->route('opname.opnames.show', $opname);
+        if ($m = $this->koreksiHargaKunci($opname)) {
+            return $kembali->with('error', 'Koreksi harga ditolak: ' . $m);
+        }
+
+        $opname->load('items.packaging', 'items.ingredient', 'store');
+        $ubah = [];
+        foreach ((array) $request->input('items', []) as $itemId => $data) {
+            $item = $opname->items->firstWhere('id', (int) $itemId);
+            if (!$item || !is_array($data)) continue;
+            $baru = $this->rupiah($data['price_per_dus'] ?? null);
+            // Hanya kolom yang BENAR-BENAR diubah. Angka di layar sudah dibulatkan per
+            // dus, jadi kolom yang tidak disentuh jangan disimpan ulang — harga per gram
+            // aslinya bisa bergeser sedikit gara-gara pembulatan itu.
+            if ($baru === null || $baru < 0 || $baru === $this->rupiah($data['price_awal'] ?? null)) continue;
+            $ctb = $item->packaging
+                ? (float) $item->packaging->crate_to_pack * (float) $item->packaging->pack_to_base : 0;
+            $ubah[] = ['item' => $item, 'ppb' => $ctb > 0 ? $baru / $ctb : $baru, 'dus' => $baru, 'ctb' => $ctb];
+        }
+        if (!$ubah) return $kembali->with('success', 'Tidak ada harga yang diubah.');
+
+        $tglOpname = $opname->opname_date->toDateString();
+        $bootstrapNotes = 'Auto-generated dari Opname #' . $opname->id;
+        $perPasangan = $opname->items->countBy(fn($i) => $i->ingredient_id . '-' . ($i->packaging_id ?: 0));
+        $lama = []; $baruLog = []; $nBatch = 0; $nDilewati = 0;
+
+        DB::transaction(function () use ($opname, $ubah, $tglOpname, $bootstrapNotes, $perPasangan,
+                                         &$lama, &$baruLog, &$nBatch, &$nDilewati) {
+            foreach ($ubah as $u) {
+                $item  = $u['item'];
+                $pkgId = $item->packaging_id ? (int) $item->packaging_id : null;
+                $label = $item->ingredient->name . ($item->packaging ? ' @' . $item->packaging->crate_to_pack : '');
+                $hargaLama = $item->price_per_base;
+                $lama[$label]    = $hargaLama === null ? null
+                    : round((float) $hargaLama * ($u['ctb'] > 0 ? $u['ctb'] : 1));
+                $baruLog[$label] = $u['dus'];
+
+                $item->update(['price_per_base' => $u['ppb']]);
+
+                $filterPkg = fn($q) => $pkgId ? $q->where('packaging_id', $pkgId) : $q->whereNull('packaging_id');
+
+                // (2) Batch bootstrap opname ini. Kalau satu bahan×kemasan punya beberapa
+                // baris (batch harga berbeda di mode stok_awal), hanya batch yang harganya
+                // sama dengan harga lama baris ini yang ikut — supaya batch milik baris
+                // lain tidak tertimpa.
+                $bootstrap = MutationItem::whereHas('mutation', fn($q) => $q
+                        ->where('type', 'opening_stock')->where('notes', $bootstrapNotes))
+                    ->where('ingredient_id', $item->ingredient_id)
+                    ->where($filterPkg)
+                    ->get();
+                if (($perPasangan[$item->ingredient_id . '-' . ($pkgId ?: 0)] ?? 1) > 1) {
+                    $bootstrap = $bootstrap->filter(fn($b) => $hargaLama !== null
+                        && abs((float) $b->price_per_base - (float) $hargaLama) < 1e-6);
+                }
+                $nBatch += FifoService::tulisHargaBatch($bootstrap, $pkgId, $u['ppb']);
+
+                // (3) Batch tanpa harga yang MEMBENTUK stok SO ini. Karena FIFO memakai
+                // yang lama duluan, stok pada tanggal opname = batch TERBARU yang diterima
+                // s/d tanggal itu, sebanyak qty fisiknya (cara yang sama dengan
+                // fifoEffectivePrice menilai SO). Batch lebih tua sudah habis sebelum
+                // opname — itu urusan periode lalu, tidak disentuh.
+                if ($u['ppb'] > 0) {
+                    $sqlMasuk = \App\Services\StockRecognition::sqlMasuk();
+                    $kandidat = MutationItem::query()
+                        ->join('mutations', 'mutations.id', '=', 'mutation_items.mutation_id')
+                        ->where('mutations.destination_store_id', $opname->store_id)
+                        ->where('mutations.status', 'confirmed')
+                        ->whereRaw($sqlMasuk . ' <= ?', [$tglOpname])
+                        ->where('mutation_items.ingredient_id', $item->ingredient_id)
+                        ->when($pkgId,
+                            fn($q) => $q->where('mutation_items.packaging_id', $pkgId),
+                            fn($q) => $q->whereNull('mutation_items.packaging_id'))
+                        ->orderByDesc(DB::raw($sqlMasuk))
+                        ->orderByDesc('mutation_items.id')
+                        ->select('mutation_items.*', DB::raw($sqlMasuk . ' AS tgl_masuk'))
+                        ->get();
+
+                    $sisa = (float) $opname->items
+                        ->filter(fn($i) => $i->ingredient_id == $item->ingredient_id && ($i->packaging_id ?: 0) == ($pkgId ?: 0))
+                        ->sum('physical_qty');
+                    $isi = [];
+                    foreach ($kandidat as $b) {
+                        if ($sisa <= 1e-6) break;
+                        $sisa -= (float) $b->total_in_base;
+                        if ((float) $b->price_per_base > 0) continue;
+                        // Batch dari periode yang HPP-nya terkunci tidak diubah: harganya
+                        // ikut membentuk nilai pembelian periode itu yang sudah dibekukan.
+                        if (\App\Models\HppSnapshot::isDateLocked((int) $opname->store_id, (string) $b->tgl_masuk)) {
+                            $nDilewati++;
+                            continue;
+                        }
+                        $isi[] = $b;
+                    }
+                    $nBatch += FifoService::tulisHargaBatch($isi, $pkgId, $u['ppb']);
+                }
+            }
+        });
+
+        // (4) Segarkan harga transfer keluar SETELAH tanggal opname yang mungkin memakai
+        // batch tadi. Transfer sebelum tanggal opname sudah tertutup oleh opname ini
+        // sendiri (Opname::isDateLocked), jadi tidak dicoba — hanya akan jadi daftar
+        // "terkunci" yang panjang tanpa bisa diapa-apakan.
+        $pairs = collect($ubah)
+            ->map(fn($u) => [(int) $u['item']->ingredient_id, $u['item']->packaging_id ? (int) $u['item']->packaging_id : null])
+            ->unique(fn($p) => $p[0] . '-' . $p[1])->values()->all();
+        $hasil = MutationService::applyBackdateAutoFix(
+            MutationService::confirmedTransfersAfter((int) $opname->store_id, $pairs, $tglOpname)
+        );
+
+        \App\Models\AuditLog::record(
+            'koreksi_harga', 'Opname', $opname->id,
+            'Koreksi harga opname ' . $opname->store->name . ' ' . $opname->opname_date->isoFormat('D MMM Y')
+                . ': ' . count($ubah) . ' bahan, ' . $nBatch . ' batch stok ikut diperbarui',
+            ['harga_per_dus' => $lama],
+            ['harga_per_dus' => $baruLog]
+        );
+
+        return MutationService::withBackdateFixMessage(
+            $kembali,
+            'Harga ' . count($ubah) . ' bahan dikoreksi (' . implode(', ', array_keys($baruLog)) . '). '
+                . 'Jumlah stok tidak berubah; ' . $nBatch . ' batch stok ikut memakai harga baru.'
+                . ($nDilewati ? ' ' . $nDilewati . ' batch tanpa harga dari periode yang HPP-nya terkunci tidak diubah.' : ''),
+            $hasil
+        );
     }
 
     public function destroy(Opname $opname)

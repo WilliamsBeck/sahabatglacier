@@ -83,6 +83,20 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                     @csrf
                     <button class="btn btn-warning btn-sm"><i class="bi bi-pencil-square me-1"></i>Edit</button>
                 </form>
+                {{-- Koreksi Harga: ubah harga/dus saja, jumlah tetap. Tetap bisa walau Edit
+                     (batalkan approve) ditolak karena sudah ada mutasi sesudahnya. --}}
+                @if(!($modeKoreksi ?? false))
+                    @if($koreksiKunci ?? null)
+                        <button class="btn btn-outline-primary btn-sm" disabled title="{{ $koreksiKunci }}">
+                            <i class="bi bi-lock me-1"></i>Koreksi Harga
+                        </button>
+                    @else
+                        <a href="{{ route('opname.opnames.show', [$opname, 'koreksi_harga' => 1]) }}" class="btn btn-outline-primary btn-sm"
+                           title="Perbaiki harga/dus (mis. lupa diisi) tanpa membatalkan approve">
+                            <i class="bi bi-currency-dollar me-1"></i>Koreksi Harga
+                        </a>
+                    @endif
+                @endif
                 <button class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#modalHapusOpname">
                     <i class="bi bi-trash me-1"></i>Hapus
                 </button>
@@ -137,10 +151,28 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
     </div>
 @endif
 
+@if($modeKoreksi ?? false)
+<div class="alert alert-primary small">
+    <div class="fw-semibold mb-1"><i class="bi bi-currency-dollar me-1"></i>Mode Koreksi Harga</div>
+    Ubah <strong>Harga/Dus</strong> yang salah atau lupa diisi, lalu klik <strong>Simpan Koreksi Harga</strong>.
+    Jumlah fisik &amp; stok <strong>tidak berubah</strong>. Yang ikut diperbarui:
+    <ul class="mb-0 mt-1">
+        <li>Nilai SO opname ini (dan HPP Aktual periode ini &amp; SO Awal periode berikutnya)</li>
+        <li>Harga stok yang berasal dari opname ini, serta stok yang dulu tercatat tanpa harga (Rp 0)</li>
+        <li>Harga penjualan internal / keluar setelah tanggal opname yang memakai stok tersebut</li>
+    </ul>
+</div>
+@endif
+
 {{-- FORM INPUT FISIK --}}
 @if($opname->status !== 'approved')
 <form method="POST" action="{{ route('opname.opnames.update', $opname) }}">
     @csrf @method('PUT')
+@elseif($modeKoreksi ?? false)
+<form method="POST" action="{{ route('opname.opnames.koreksi-harga', $opname) }}"
+      data-confirm="Simpan koreksi harga? Nilai SO, harga stok terkait, dan harga penjualan internal sesudah tanggal opname akan ikut diperbarui."
+      data-confirm-type="warning" data-confirm-ok="Ya, simpan">
+    @csrf
 @endif
 
 <div class="card">
@@ -278,6 +310,10 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                         data-pack="{{ $packBase ?? 1 }}"
                         data-ing="{{ $item->ingredient_id }}"
                         data-pkg="{{ $item->packaging_id }}"
+                        {{-- Fisik untuk hitung nilai live saat tidak ada input fisik (Koreksi Harga) --}}
+                        data-phys-crate="{{ (float) ($item->physical_crate ?? 0) }}"
+                        data-phys-pack="{{ (float) ($item->physical_pack ?? 0) }}"
+                        data-phys-base="{{ (float) ($item->physical_base ?? 0) }}"
                         @if($isExtraBatch) style="background:rgba(255,193,7,.07)" @endif
                     >
                         <td style="width:260px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
@@ -352,15 +388,21 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                             // termasuk mode Bulanan dan termasuk setelah approve dibatalkan.
                             // Angka yang muncul cuma SARAN dari batch FIFO; kalau harga
                             // barangnya memang lain, operator harus bisa memperbaikinya.
-                            // Setelah approved, harga dibekukan (tidak boleh diubah) karena
-                            // sudah dipakai membentuk batch FIFO & nilai HPP periode itu.
-                            $showPriceInput = $opname->status !== 'approved';
+                            // Setelah approved, harga dibekukan karena sudah dipakai membentuk
+                            // batch FIFO & nilai HPP periode itu — kecuali lewat Koreksi Harga,
+                            // yang ikut memperbarui batch & transfer terkait (lihat koreksiHarga).
+                            $showPriceInput = $opname->status !== 'approved' || ($modeKoreksi ?? false);
                         @endphp
                         <td class="text-end border-start small text-muted">
                             @if($showPriceInput)
                                 @php $hargaDusInput = $item->price_per_base !== null && $ctrPack && $packBase
                                     ? round($item->price_per_base * $ctrPack * $packBase)
                                     : ($hargaDus > 0 ? round($hargaDus) : ''); @endphp
+                                @if($modeKoreksi ?? false)
+                                    {{-- Pembanding: server hanya menyimpan kolom yang angkanya diubah --}}
+                                    <input type="hidden" name="items[{{ $item->id }}][price_awal]"
+                                           value="{{ $hargaDusInput !== '' ? number_format($hargaDusInput, 0, ',', '.') : '' }}">
+                                @endif
                                 <input type="text" inputmode="numeric"
                                        name="items[{{ $item->id }}][price_per_dus]"
                                        class="form-control form-control-sm text-end price-input"
@@ -488,10 +530,17 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
             <i class="bi bi-save me-1"></i>Simpan Stok Fisik
         </button>
     </div>
+    @elseif($modeKoreksi ?? false)
+    <div class="card-footer d-flex justify-content-end gap-2">
+        <a href="{{ route('opname.opnames.show', $opname) }}" class="btn btn-outline-secondary">Batal</a>
+        <button type="submit" class="btn btn-primary px-4">
+            <i class="bi bi-save me-1"></i>Simpan Koreksi Harga
+        </button>
+    </div>
     @endif
 </div>
 
-@if($opname->status !== 'approved')</form>@endif
+@if($opname->status !== 'approved' || ($modeKoreksi ?? false))</form>@endif
 
 @if($opname->status === 'approved')
 <div class="card mt-3 border-0 bg-light">
@@ -623,6 +672,14 @@ function nilaiPerKomponen(crate, pack, c, p, b, priceBase) {
     return Math.round(nilaiRaw(crate, pack, c, p, b, priceBase));
 }
 
+// Fisik satu baris: dari kotak isian (draft), atau dari data-phys-* bila tidak ada
+// isian (opname approved, mis. saat Koreksi Harga) — tanpa ini nilainya terhitung 0.
+function fisik(row, kunci) {
+    var el = row.querySelector('[name$="[physical_' + kunci + ']"]');
+    var cadangan = row.dataset['phys' + kunci.charAt(0).toUpperCase() + kunci.slice(1)];
+    return parseFloat(el ? el.value : cadangan) || 0;
+}
+
 // Grand total dari semua baris
 function recomputeGrandTotal() {
     var grandTotal = 0;
@@ -632,9 +689,9 @@ function recomputeGrandTotal() {
         var price = parseFloat(nilaiEl.dataset.price) || 0;
         var cr    = parseFloat(r.dataset.crate) || 0;
         var pk    = parseFloat(r.dataset.pack)  || 1;
-        var c2    = parseFloat(r.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-        var p2    = parseFloat(r.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-        var b2    = parseFloat(r.querySelector('[name$="[physical_base]"]')?.value)  || 0;
+        var c2    = fisik(r, 'crate');
+        var p2    = fisik(r, 'pack');
+        var b2    = fisik(r, 'base');
         grandTotal += nilaiRaw(cr, pk, c2, p2, b2, price);
     });
     var gtCell = document.getElementById('grand-total');
@@ -653,9 +710,9 @@ function priceInputHandler() {
     var nilaiCell = document.getElementById('nilai-' + id);
     if (nilaiCell) {
         nilaiCell.dataset.price = priceBase;
-        var c2 = parseFloat(row.querySelector('[name$="[physical_crate]"]')?.value) || 0;
-        var p2 = parseFloat(row.querySelector('[name$="[physical_pack]"]')?.value)  || 0;
-        var b2 = parseFloat(row.querySelector('[name$="[physical_base]"]')?.value)  || 0;
+        var c2 = fisik(row, 'crate');
+        var p2 = fisik(row, 'pack');
+        var b2 = fisik(row, 'base');
         var nilai = nilaiPerKomponen(crate, pack, c2, p2, b2, priceBase);
         nilaiCell.textContent = priceBase > 0 ? 'Rp ' + nilai.toLocaleString('id-ID') : '—';
     }
