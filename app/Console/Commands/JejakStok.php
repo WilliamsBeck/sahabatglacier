@@ -14,6 +14,10 @@ use Illuminate\Support\Facades\DB;
  * transfer, waste, opname) tapi TIDAK diikuti penulisan ulang remaining_qty.
  * Penulisan remaining_qty tercatat di audit_logs (MutationItem), jadi kejadian yang
  * terjadi SETELAH penulisan terakhir adalah tersangka utama.
+ *
+ * CATATAN: sejak 29 Okt 2026 perubahan yang HANYA remaining_qty tidak lagi dicatat
+ * (lihat AuditObserver::$skipUpdateOnly — audit_logs membengkak 3,6 GB). Baris FIFO
+ * di garis waktu ini tinggal yang berasal dari sebelum tanggal itu.
  */
 class JejakStok extends Command
 {

@@ -9,6 +9,17 @@ class AuditObserver
     // Fields to always skip (timestamps, large binary etc.)
     private array $skipFields = ['updated_at', 'created_at', 'remember_token'];
 
+    // Perubahan yang HANYA menyentuh kolom ini tidak dicatat sama sekali.
+    // remaining_qty = sisa batch FIFO: berubah di puluhan batch setiap kali stok satu
+    // bahan dihitung ulang (FifoService::decrement per potongan). Itu pembukuan turunan
+    // yang selalu bisa dihitung ulang dari transaksinya, bukan aktivitas pengguna.
+    // Dulu ikut dicatat dan membuat audit_logs membengkak sampai 3,6 GB / 7,8 juta baris,
+    // sampai Hostinger mencabut izin tulis database (Okt 2026 — seluruh input error 500).
+    // Perubahan lain pada model yang sama (mis. harga) tetap dicatat seperti biasa.
+    private array $skipUpdateOnly = [
+        'MutationItem' => ['remaining_qty'],
+    ];
+
     public function created(Model $model): void
     {
         AuditLog::record(
@@ -25,6 +36,9 @@ class AuditObserver
     {
         $dirty = $model->getDirty();
         if (empty($dirty)) return;
+
+        $abaikan = array_merge($this->skipFields, $this->skipUpdateOnly[class_basename($model)] ?? []);
+        if (array_diff(array_keys($dirty), $abaikan) === []) return;
 
         $old = array_intersect_key($model->getOriginal(), $dirty);
         $new = $dirty;
