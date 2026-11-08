@@ -435,6 +435,7 @@ class OpnameController extends Controller
 
     public function show(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         $opname->load(['store', 'items.ingredient', 'items.packaging.supplier', 'performedBy', 'approvedBy']);
         // Draft bulanan: sinkronkan stok sistem dari transaksi terkini (mis. setelah
         // mutasi diperbaiki) supaya fisik vs sistem tetap akurat.
@@ -457,6 +458,7 @@ class OpnameController extends Controller
 
     public function edit(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 403, 'Opname yang sudah approved tidak bisa diedit.');
         $opname->load(['items.ingredient', 'items.packaging.supplier', 'store', 'performedBy', 'approvedBy']);
         $this->refreshDraftSystemQty($opname);
@@ -689,6 +691,7 @@ class OpnameController extends Controller
 
     public function update(Request $request, Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 403);
         if ($m = $this->hppLockMsg($opname)) return back()->with('error', $m);
 
@@ -747,6 +750,7 @@ class OpnameController extends Controller
 
     public function addBatch(Request $request, Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 403);
         abort_if($opname->opname_mode !== 'stok_awal', 403, 'Hanya mode stok_awal yang mendukung multi-batch.');
 
@@ -795,6 +799,7 @@ class OpnameController extends Controller
 
     public function destroyItem(Opname $opname, OpnameItem $item)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 403);
         abort_if($item->opname_id !== $opname->id, 404);
 
@@ -891,6 +896,7 @@ class OpnameController extends Controller
      */
     public function recalculate(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 403);
 
         if (MonthLockService::isLocked('opname', $opname->id, $opname->period_month, $opname->period_year)) {
@@ -966,6 +972,7 @@ class OpnameController extends Controller
      */
     public function unapprove(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_unless(auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea(), 403);
         abort_if($opname->status !== 'approved', 422, 'Hanya opname approved yang bisa dibatalkan.');
 
@@ -1051,6 +1058,7 @@ class OpnameController extends Controller
      */
     public function koreksiHarga(Request $request, Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_unless(auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea(), 403);
         abort_if($opname->status !== 'approved', 422, 'Koreksi harga hanya untuk opname yang sudah approved.');
 
@@ -1182,6 +1190,7 @@ class OpnameController extends Controller
 
     public function destroy(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         // Approved boleh dihapus oleh Super Admin, Manager & Admin Area (supervisor diblok middleware).
         if ($opname->status === 'approved'
             && !auth()->user()->isSuperAdminOrManager() && !auth()->user()->isAdminArea()) {
@@ -1246,6 +1255,7 @@ class OpnameController extends Controller
 
     public function approve(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         abort_if($opname->status === 'approved', 422, 'Opname sudah di-approve sebelumnya.');
 
         // ── Lock check ──────────────────────────────────────────────────────────
@@ -1565,6 +1575,7 @@ class OpnameController extends Controller
 
     public function export(Opname $opname)
     {
+        $this->wajibAksesToko((int) $opname->store_id);
         $opname->load(['store', 'items.ingredient', 'items.packaging', 'performedBy']);
 
         // Sumber harga persis seperti halaman Detail Opname

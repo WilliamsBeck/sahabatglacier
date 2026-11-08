@@ -337,12 +337,14 @@ class WasteLogController extends Controller
 
     public function show(WasteLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $log->load(['store','items.sourceIngredient','items.ingredient','items.packaging','recordedBy']);
         return view('waste.show', compact('log'));
     }
 
     public function edit(WasteLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $log->load('items.packaging');
 
         $stores      = auth()->user()->accessibleStores();
@@ -413,6 +415,7 @@ class WasteLogController extends Controller
 
     public function update(Request $request, WasteLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $request->validate([
             'waste_date'                  => 'required|date',
             'notes'                       => 'nullable|string',
@@ -672,6 +675,7 @@ class WasteLogController extends Controller
 
     public function destroy(WasteLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         // Lock periode oleh opname / snapshot HPP: menghapus waste di periode tertutup
         // akan men-recalc FIFO dan mengubah stok historis yang sudah dibekukan → blokir.
         $wd = $log->waste_date->format('Y-m-d');

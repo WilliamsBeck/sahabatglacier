@@ -397,6 +397,7 @@ class MutationController extends Controller
 
     public function edit(Mutation $mutation)
     {
+        $this->wajibAksesToko($mutation->tokoPemilik());
         abort_if($mutation->status !== 'draft', 403, 'Hanya mutasi draft yang bisa diedit.');
         abort_if($mutation->type === 'opening_stock', 403, 'Input stok awal tidak bisa diedit.');
         $this->blockIfOpnameExistsAfter($mutation);
@@ -432,6 +433,7 @@ class MutationController extends Controller
 
     public function update(Request $request, Mutation $mutation)
     {
+        $this->wajibAksesToko($mutation->tokoPemilik());
         abort_if($mutation->status !== 'draft', 403, 'Hanya mutasi draft yang bisa diedit.');
         abort_if($mutation->type === 'opening_stock', 403, 'Input stok awal tidak bisa diedit.');
         $this->blockIfOpnameExistsAfter($mutation);
@@ -641,6 +643,8 @@ class MutationController extends Controller
 
     public function destroy(Mutation $mutation)
     {
+        $this->wajibAksesToko($mutation->tokoPemilik());
+
         // ── Lock check ──────────────────────────────────────────────────────────
         $txDate  = $mutation->transaction_date;
         $txMonth = $txDate->month;
@@ -764,6 +768,8 @@ class MutationController extends Controller
 
     public function show(Mutation $mutation)
     {
+        // Transfer boleh dibuka toko pengirim MAUPUN penerima.
+        $this->wajibAksesSalahSatuToko($mutation->tokoTerlibat());
         $mutation->load(['items.ingredient','items.packaging','destinationStore','sourceStore','supplier','createdBy','confirmedBy']);
 
         // Lock info
@@ -827,6 +833,8 @@ class MutationController extends Controller
 
     public function confirm(Mutation $mutation, Request $request)
     {
+        // Konfirmasi kirim oleh toko pemilik (transfer: toko pengirim).
+        $this->wajibAksesToko($mutation->tokoPemilik());
         abort_if($mutation->status !== 'draft', 422, 'Hanya mutasi draft yang bisa dikonfirmasi.');
 
         // Peringatan LUNAK: boleh dilanjutkan dengan tombol "Lanjutkan saja" (force_fifo=1)
@@ -893,12 +901,12 @@ class MutationController extends Controller
      */
     public function terima(Mutation $mutation, Request $request)
     {
+        // Terima barang hanya oleh toko PENERIMA.
+        $this->wajibAksesToko($mutation->destination_store_id ? (int) $mutation->destination_store_id : null);
         abort_if($mutation->status !== 'confirmed', 422,
             'Hanya mutasi terkonfirmasi yang bisa diterima.');
         abort_if(!MutationService::masihDiPerjalanan($mutation), 422,
             'Mutasi ini bukan barang dalam perjalanan — tanggal terimanya sudah terisi.');
-        abort_unless(in_array($mutation->destination_store_id,
-            auth()->user()->accessibleStoreIds()), 403);
 
         $data = $request->validate([
             'delivery_date' => 'required|date|after_or_equal:' . $mutation->transaction_date->toDateString(),
@@ -942,6 +950,7 @@ class MutationController extends Controller
 
     public function unconfirm(Mutation $mutation)
     {
+        $this->wajibAksesToko($mutation->tokoPemilik());
         abort_if($mutation->status !== 'confirmed', 422, 'Hanya mutasi terkonfirmasi yang bisa dibatalkan konfirmasinya.');
         abort_if($mutation->type === 'opening_stock', 403, 'Input stok awal tidak bisa dibatalkan konfirmasinya.');
 
@@ -972,6 +981,8 @@ class MutationController extends Controller
 
     public function cancel(Mutation $mutation)
     {
+        $this->wajibAksesToko($mutation->tokoPemilik());
+
         // ── Lock check ──────────────────────────────────────────────────────────
         $txDate  = $mutation->transaction_date;
         $txMonth = $txDate->month;

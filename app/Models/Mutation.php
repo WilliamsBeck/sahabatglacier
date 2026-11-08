@@ -97,4 +97,27 @@ class Mutation extends Model
     {
         return in_array($this->type, ['sale_internal', 'sale_external_out']);
     }
+
+    /**
+     * Toko PEMILIK mutasi — yang menginput & berhak mengubah, mengonfirmasi, membatalkan,
+     * atau menghapusnya (PBI-028). Barang keluar (penjualan internal / eksternal keluar)
+     * dimiliki toko PENGIRIM; barang masuk (pembelian, stok awal, sale_external) dimiliki
+     * toko PENERIMA. Di lapangan, transfer memang hanya diinput toko pengirim.
+     */
+    public function tokoPemilik(): ?int
+    {
+        $id = $this->deductsFromSource() ? $this->source_store_id : $this->destination_store_id;
+        return $id ? (int) $id : null;
+    }
+
+    /**
+     * Semua toko yang TERLIBAT — boleh membuka detailnya. Untuk transfer: pengirim
+     * MAUPUN penerima (penerima perlu melihat kiriman & menekan Terima).
+     *
+     * @return int[]
+     */
+    public function tokoTerlibat(): array
+    {
+        return array_values(array_map('intval', array_filter([$this->source_store_id, $this->destination_store_id])));
+    }
 }

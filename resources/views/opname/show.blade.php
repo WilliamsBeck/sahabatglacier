@@ -6,6 +6,9 @@
  * Format selisih (dalam base unit) ke Dus + Pack.
  * Contoh: +2 Dus +3 Pack  |  -1 Pack  |  0
  */
+// Dibungkus function_exists: tanpa ini halaman yang dirender DUA KALI dalam satu proses
+// PHP (mis. test suite) gagal "Cannot redeclare fmtVariance()".
+if (!function_exists('fmtVariance')) {
 function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
     if (!$ctrPack || !$packBase) {
         if (abs($var) < 0.01) return '0';
@@ -22,6 +25,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
     if ($pk  > 0) $parts[] = $sign . $pk  . ' Pack';
     if (empty($parts)) $parts[] = $sign . '< 1 Pack';
     return implode(' ', $parts);
+}
 }
 @endphp
 

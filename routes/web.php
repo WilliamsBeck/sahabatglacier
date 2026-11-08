@@ -233,14 +233,19 @@ Route::middleware(['auth'])->group(function () {
 
     // API INTERNAL (AJAX)
     Route::prefix('api-internal')->name('api.')->group(function () {
-        Route::get('ingredient/{ingredient}/last-price', [MutationController::class, 'lastPrice'])->name('ingredient.last-price');
-        // Versi banyak-sekaligus: dipakai tombol "Muat semua bahan Zhisheng" supaya
-        // tidak menembakkan puluhan request AJAX serentak (sebagian bisa gagal diam-diam).
-        Route::post('ingredient/last-price-bulk', [MutationController::class, 'lastPriceBulk'])->name('ingredient.last-price-bulk');
-        Route::get('ingredient/{ingredient}/stock-price', [MutationController::class, 'stockPrice'])->name('ingredient.stock-price');
-        Route::get('store/{store}/stock-summary', [MutationController::class, 'storeStockSummary'])->name('store.stock-summary');
+        // Stok & harga PER TOKO — dicek tokonya ({store} atau store_id) lewat store.access.
+        // Dulu tanpa cek: siapa pun yang login bisa membaca stok & harga toko mana pun.
+        Route::middleware(['store.access'])->group(function () {
+            Route::get('ingredient/{ingredient}/last-price', [MutationController::class, 'lastPrice'])->name('ingredient.last-price');
+            // Versi banyak-sekaligus: dipakai tombol "Muat semua bahan Zhisheng" supaya
+            // tidak menembakkan puluhan request AJAX serentak (sebagian bisa gagal diam-diam).
+            Route::post('ingredient/last-price-bulk', [MutationController::class, 'lastPriceBulk'])->name('ingredient.last-price-bulk');
+            Route::get('ingredient/{ingredient}/stock-price', [MutationController::class, 'stockPrice'])->name('ingredient.stock-price');
+            Route::get('store/{store}/stock-summary', [MutationController::class, 'storeStockSummary'])->name('store.stock-summary');
+            Route::get('opname/system-qty', [OpnameController::class, 'systemQty'])->name('opname.system-qty');
+        });
+        // Master data (kemasan & komposisi bahan) — sama untuk semua toko.
         Route::get('ingredient/{ingredient}/packagings', [IngredientController::class, 'packagings'])->name('ingredient.packagings');
         Route::get('ingredient/{ingredient}/compositions', [IngredientController::class, 'compositions'])->name('ingredient.compositions');
-        Route::get('opname/system-qty', [OpnameController::class, 'systemQty'])->name('opname.system-qty');
     });
 });

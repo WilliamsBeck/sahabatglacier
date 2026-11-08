@@ -86,4 +86,22 @@ class User extends Authenticatable
     {
         return $this->accessibleStores()->pluck('id')->toArray();
     }
+
+    /** Cache per request: id toko yang di-assign (termasuk toko nonaktif). */
+    private ?array $tokoDiAssign = null;
+
+    /**
+     * SATU-SATUNYA aturan akses data per toko (PBI-028). Dipakai CheckStoreAccess
+     * (toko dari URL/form) dan Controller::wajibAksesToko (toko pemilik data yang
+     * dibuka lewat nomor ID). Super admin bebas; jenis akun lain hanya toko yang
+     * di-assign — termasuk toko yang sudah nonaktif, supaya riwayatnya tetap terbuka.
+     */
+    public function bisaAksesToko(?int $storeId): bool
+    {
+        if ($this->isSuperAdmin()) return true;
+        if (!$storeId) return false;
+
+        $this->tokoDiAssign ??= $this->stores()->pluck('stores.id')->map(fn ($id) => (int) $id)->all();
+        return in_array($storeId, $this->tokoDiAssign, true);
+    }
 }

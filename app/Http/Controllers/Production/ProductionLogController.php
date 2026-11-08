@@ -82,12 +82,14 @@ class ProductionLogController extends Controller
 
     public function show(ProductionLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $log->load(['store','semiFinished','items.rawIngredient','createdBy']);
         return view('production.show', compact('log'));
     }
 
     public function edit(ProductionLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $log->load('items.rawIngredient');
         $stores       = auth()->user()->accessibleStores();
         $semiFinished = Ingredient::with('compositions.child')
@@ -97,6 +99,7 @@ class ProductionLogController extends Controller
 
     public function update(Request $request, ProductionLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         $request->validate([
             'semi_finished_id' => 'required|exists:ingredients,id',
             'production_date'  => 'required|date',
@@ -137,6 +140,7 @@ class ProductionLogController extends Controller
 
     public function destroy(ProductionLog $log)
     {
+        $this->wajibAksesToko((int) $log->store_id);
         DB::transaction(function () use ($log) {
             // Bersihkan stock ledger lama jika ada (dari versi sebelumnya yang masih potong stok)
             $ingIds = $log->items->pluck('raw_ingredient_id')->push($log->semi_finished_id)->unique()->filter()->all();

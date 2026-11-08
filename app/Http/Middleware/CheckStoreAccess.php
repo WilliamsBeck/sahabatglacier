@@ -30,8 +30,10 @@ class CheckStoreAccess
                 ?? $request->input('source_store_id')
                 ?? $request->input('destination_store_id');
 
-        // Selain super admin hanya boleh akses toko yang di-assign
-        if ($storeId && !$user->stores()->where('stores.id', $storeId)->exists()) {
+        // Selain super admin hanya boleh akses toko yang di-assign (aturan: User::bisaAksesToko).
+        // {store} bisa berupa model (route model binding) atau angka.
+        $storeId = $storeId instanceof \App\Models\Store ? $storeId->id : $storeId;
+        if ($storeId && !$user->bisaAksesToko((int) $storeId)) {
             abort(403, 'Anda tidak memiliki akses ke toko ini.');
         }
 
