@@ -17,8 +17,10 @@ return new class extends Migration
 
         // Backfill toko yang sudah punya lead time: default 40% lead time (min 1 hari),
         // supaya perilaku langsung berguna & bisa diedit sendiri oleh user.
+        // SQLite (database test) tidak punya GREATEST; MAX dua argumen di sana artinya sama.
+        $terbesar = DB::getDriverName() === 'sqlite' ? 'MAX' : 'GREATEST';
         DB::table('stores')->whereNotNull('lead_time_days')->where('lead_time_days', '>', 0)
-            ->update(['safety_stock_days' => DB::raw('GREATEST(1, ROUND(lead_time_days * 0.4))')]);
+            ->update(['safety_stock_days' => DB::raw("$terbesar(1, ROUND(lead_time_days * 0.4))")]);
     }
 
     public function down(): void

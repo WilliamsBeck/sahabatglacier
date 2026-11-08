@@ -8,10 +8,13 @@
         <p class="page-subtitle">Database rantai pasok logistik resmi</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        {{-- Supplier berlaku untuk semua toko → ubah hanya Super Admin --}}
+        @if(auth()->user()->isSuperAdmin())
         @include('master.partials.import-buttons', ['entity' => 'suppliers', 'label' => 'Supplier'])
         <a href="{{ route('master.suppliers.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Tambah Supplier
         </a>
+        @endif
     </div>
 </div>
 
@@ -81,9 +84,11 @@
                         <td>
                             <x-action-menu>
                                 <x-action-view :href="route('master.suppliers.show', $sup)" />
+                                @if(auth()->user()->isSuperAdmin())
                                 <x-action-edit :href="route('master.suppliers.edit', $sup)" />
                                 <x-action-delete :action="route('master.suppliers.destroy', $sup)"
                                                  confirm="Hapus supplier ini?" />
+                                @endif
                             </x-action-menu>
                         </td>
                     </tr>

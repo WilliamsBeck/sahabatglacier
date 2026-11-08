@@ -8,11 +8,11 @@
         <p class="page-subtitle">Detail bahan (hanya lihat)</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
-        @unless(auth()->user()->role === 'admin_area')
+        @if(auth()->user()->isSuperAdmin())
         <a href="{{ route('master.ingredients.edit', $ingredient) }}" class="btn btn-primary">
             <i class="bi bi-pencil me-1"></i> Edit
         </a>
-        @endunless
+        @endif
         <a href="{{ route('master.ingredients.index') }}" class="btn btn-outline-secondary btn-sm btn-back">
             <i class="bi bi-arrow-left me-1"></i>Kembali
         </a>

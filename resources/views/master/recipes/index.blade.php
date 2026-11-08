@@ -1,4 +1,4 @@
-﻿@extends('layouts.app')
+@extends('layouts.app')
 @section('title','Resep')
 @section('content')
 <div class="page-header d-flex justify-content-between align-items-start">
@@ -7,10 +7,10 @@
         <p class="page-subtitle">Versi resep aktif menentukan HPP per periode</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end align-items-start">
-        @unless(auth()->user()->role === 'admin_area')
+        @if(auth()->user()->isSuperAdmin())
         @include('master.partials.import-buttons', ['entity' => 'recipes', 'label' => 'Resep Menu'])
         <a href="{{ route('master.recipes.create') }}" class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i> Tambah Resep</a>
-        @endunless
+        @endif
     </div>
 </div>
 <div class="card mb-3"><div class="card-body py-2">
@@ -84,7 +84,7 @@
                 <td class="align-top small text-soft">
                     {{ $group->pluck('createdBy.name')->filter()->unique()->implode(', ') ?: '-' }}
                 </td>
-                @unless(auth()->user()->role === 'admin_area')
+                @if(auth()->user()->isSuperAdmin())
                 <td class="align-top">
                     <x-action-menu>
                         <li>
@@ -94,7 +94,7 @@
                         </li>
                     </x-action-menu>
                 </td>
-                @endunless
+                @endif
             </tr>
             @empty
             <tr><td colspan="6" class="py-4 text-soft text-center">Belum ada resep</td></tr>

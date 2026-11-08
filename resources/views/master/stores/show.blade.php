@@ -8,9 +8,11 @@
         <p class="page-subtitle">Detail toko (hanya lihat)</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        @if(auth()->user()->isSuperAdmin())
         <a href="{{ route('master.stores.edit', $store) }}" class="btn btn-primary">
             <i class="bi bi-pencil me-1"></i> Edit
         </a>
+        @endif
         <a href="{{ route('master.stores.index') }}" class="btn btn-outline-secondary btn-sm btn-back">
             <i class="bi bi-arrow-left me-1"></i>Kembali
         </a>

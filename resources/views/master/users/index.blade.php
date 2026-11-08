@@ -21,9 +21,10 @@
             </div>
             <div class="col-md-3">
                 <select name="role" class="form-select">
-                    <option value="">Semua Role</option>
-                    <option value="super_admin" {{ request('role') === 'super_admin' ? 'selected' : '' }}>Super Admin</option>
-                    <option value="admin_area" {{ request('role') === 'admin_area' ? 'selected' : '' }}>Admin Area</option>
+                    <option value="">Semua Jenis Akun</option>
+                    @foreach($roleBoleh as $r)
+                        <option value="{{ $r }}" {{ request('role') === $r ? 'selected' : '' }}>{{ \App\Models\User::ROLES[$r] }}</option>
+                    @endforeach
                 </select>
             </div>
             <div class="col-md-3 d-flex gap-2 justify-content-end">
@@ -42,7 +43,7 @@
                     <th width="48">#</th>
                     <th class="col-name">User</th>
                     <th>Email</th>
-                    <th>Role</th>
+                    <th>Jenis Akun</th>
                     <th>Toko Akses</th>
                     <th width="80">Aksi</th>
                 </tr>
@@ -56,11 +57,8 @@
                         </td>
                         <td><span class="text-soft">{{ $user->email }}</span></td>
                         <td>
-                            @if($user->isSuperAdmin())
-                                <span class="badge bg-danger">Super Admin</span>
-                            @else
-                                <span class="badge bg-primary">Admin Area</span>
-                            @endif
+                            @php $warna = ['super_admin' => 'bg-danger', 'manager' => 'bg-warning text-dark', 'admin_area' => 'bg-primary', 'supervisor' => 'bg-secondary'][$user->role] ?? 'bg-light text-dark'; @endphp
+                            <span class="badge {{ $warna }}">{{ $user->roleLabel() }}</span>
                         </td>
                         <td>
                             @if($user->isSuperAdmin())

@@ -22,7 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'store.access' => CheckStoreAccess::class,
         ]);
 
-        // Blokir semua aksi tulis untuk akun hanya-lihat (role 'viewer') di seluruh web.
+        // Blokir semua aksi tulis untuk akun Supervisor (hanya-lihat) di seluruh web.
         $middleware->web(append: [
             RestrictViewer::class,
             \App\Http\Middleware\RememberActiveStore::class,

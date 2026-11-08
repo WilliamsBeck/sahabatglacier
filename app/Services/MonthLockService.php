@@ -39,7 +39,8 @@ class MonthLockService
      */
     public static function isLocked(string $resourceType, int $resourceId, int $month, int $year): bool
     {
-        if (auth()->user()->isSuperAdmin()) return false;
+        // Super admin & manager selalu boleh (manager tetap terbatas tokonya sendiri).
+        if (auth()->user()->isSuperAdminOrManager()) return false;
 
         if (!self::isPastLock($month, $year)) return false;
 

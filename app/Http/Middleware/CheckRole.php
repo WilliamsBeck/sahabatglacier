@@ -10,7 +10,10 @@ class CheckRole
     /**
      * Contoh penggunaan di route:
      * Route::middleware(['role:super_admin'])
-     * Route::middleware(['role:super_admin,admin_area'])
+     * Route::middleware(['role:super_admin,manager,admin_area'])
+     *
+     * Setiap route menyebut role yang boleh secara eksplisit. Dulu akun viewer lolos
+     * semua cek di sini; supervisor tidak — dia hanya masuk ke route yang menyebutnya.
      */
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
@@ -18,12 +21,7 @@ class CheckRole
             return redirect()->route('login');
         }
 
-        // Akun hanya-lihat boleh membuka semua halaman (aksi tulis diblok terpisah).
-        if (auth()->user()->isViewer()) {
-            return $next($request);
-        }
-
-        if (!in_array(auth()->user()->role, $roles)) {
+        if (!in_array(auth()->user()->role, $roles, true)) {
             abort(403, 'Anda tidak memiliki akses ke halaman ini.');
         }
 

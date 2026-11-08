@@ -19,7 +19,10 @@
             <i class="bi bi-speedometer2"></i><span>Dashboard</span>
         </a>
 
-        @if(auth()->user()->isSuperAdmin() || auth()->user()->isViewer())
+        {{-- Master Data: super admin, manager & supervisor melihat semua (manager &
+             supervisor hanya lihat — ubah data global hak super admin). Menu User hanya
+             untuk super admin & manager. Admin area: bahan & menu saja. --}}
+        @if(!auth()->user()->isAdminArea())
             <a href="#masterMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
                 <i class="bi bi-database"></i>
                 <span>Master Data</span>
@@ -36,10 +39,12 @@
                         class="bi bi-cup-straw"></i><span>Menu & Resep</span></a>
                 <a href="{{ route('master.categories.index') }}" class="sidebar-link sub-link"><i
                         class="bi bi-tags"></i><span>Kategori</span></a>
+                @if(auth()->user()->isSuperAdminOrManager())
                 <a href="{{ route('master.users.index') }}" class="sidebar-link sub-link"><i
                         class="bi bi-people"></i><span>User</span></a>
+                @endif
             </div>
-        @elseif(auth()->user()->role === 'admin_area')
+        @else
             <a href="#masterMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
                 <i class="bi bi-database"></i>
                 <span>Master Data</span>
@@ -118,7 +123,7 @@
                 class="sidebar-link sub-link"><i class="bi bi-cart-plus"></i><span>Rencana Order</span></a>
         </div>
 
-        @if(auth()->user()->isSuperAdmin() || auth()->user()->isViewer())
+        @if(auth()->user()->isSuperAdminOrManager())
             <a href="#sistemMenu" class="sidebar-link collapsed" data-bs-toggle="collapse">
                 <i class="bi bi-shield-check"></i>
                 <span>Sistem</span>

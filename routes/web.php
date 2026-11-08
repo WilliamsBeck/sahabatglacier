@@ -43,36 +43,69 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
-    Route::middleware(['role:super_admin,admin_area'])->prefix('master')->name('master.')->group(function () {
-        Route::resource('stores', StoreController::class);
-        Route::resource('suppliers', SupplierController::class);
-        Route::resource('ingredients', IngredientController::class);
-        Route::resource('packagings', IngredientPackagingController::class);
-        Route::post('packagings/{packaging}/toggle-active', [IngredientPackagingController::class, 'toggleActive'])->name('packagings.toggle-active');
-        Route::resource('menus', MenuController::class);
-        Route::delete('menus/{menu}/recipe-version/{group}', [MenuController::class, 'destroyRecipeVersion'])->name('menus.recipe-version.destroy');
-        Route::resource('recipes', RecipeController::class);
-        Route::get('recipes/{recipe}/duplicate', [RecipeController::class, 'duplicate'])->name('recipes.duplicate');
-        Route::resource('users', UserController::class);
-        Route::post('users/{user}/assign-store', [UserController::class, 'assignStore'])->name('users.assign-store');
-        Route::delete('users/{user}/revoke-store/{store}', [UserController::class, 'revokeStore'])->name('users.revoke-store');
-        Route::get('categories', [CategoriesController::class, 'index'])->name('categories.index');
-        Route::resource('ingredient-categories', IngredientCategoryController::class)->only(['index','store','update','destroy']);
-        Route::post('ingredient-categories/reorder', [IngredientCategoryController::class, 'reorder'])->name('ingredient-categories.reorder');
-        Route::resource('menu-categories', MenuCategoryController::class)->only(['index','store','update','destroy']);
-        Route::post('menu-categories/reorder', [MenuCategoryController::class, 'reorder'])->name('menu-categories.reorder');
+    // MASTER DATA
+    // Master data (toko, supplier, bahan, kemasan, menu, resep, kategori) berlaku untuk
+    // SEMUA toko, jadi mengubahnya hak super admin saja. Dulu seluruh grup ini terbuka
+    // untuk admin area di sisi server (hanya tombolnya yang disembunyikan) — termasuk
+    // /master/users, sehingga lewat URL admin area bisa membuat akun super admin.
+    //
+    // PENTING urutan: grup tulis (create/edit) didaftarkan SEBELUM grup lihat, supaya
+    // "/master/stores/create" tidak tertangkap route show "/master/stores/{store}".
+    Route::prefix('master')->name('master.')->group(function () {
 
-        // Impor massal master data (template + preview + commit)
-        Route::get('import/{entity}/template', [MasterImportController::class, 'template'])->name('import.template');
-        Route::post('import/{entity}/preview', [MasterImportController::class, 'preview'])->name('import.preview');
-        Route::post('import/{entity}/commit',  [MasterImportController::class, 'commit'])->name('import.commit');
-        // Bundle multi-sheet (mis. Bahan + Kemasan + Komposisi dalam 1 file)
-        Route::get('export/{entity}', [MasterImportController::class, 'exportData'])->name('export');
-        Route::get('export-bundle/{bundle}', [MasterImportController::class, 'bundleExportData'])->name('export-bundle');
+        // Kelola user: super admin (semua akun) & manager (dibatasi di UserController).
+        Route::middleware(['role:super_admin,manager'])->group(function () {
+            Route::resource('users', UserController::class);
+            Route::post('users/{user}/assign-store', [UserController::class, 'assignStore'])->name('users.assign-store');
+            Route::delete('users/{user}/revoke-store/{store}', [UserController::class, 'revokeStore'])->name('users.revoke-store');
+        });
 
-        Route::get('import-bundle/{bundle}/template', [MasterImportController::class, 'bundleTemplate'])->name('import-bundle.template');
-        Route::post('import-bundle/{bundle}/preview', [MasterImportController::class, 'bundlePreview'])->name('import-bundle.preview');
-        Route::post('import-bundle/{bundle}/commit',  [MasterImportController::class, 'bundleCommit'])->name('import-bundle.commit');
+        // Ubah data global: super admin saja.
+        Route::middleware(['role:super_admin'])->group(function () {
+            Route::resource('stores', StoreController::class)->except(['index', 'show']);
+            Route::resource('suppliers', SupplierController::class)->except(['index', 'show']);
+            Route::resource('ingredients', IngredientController::class)->except(['index', 'show']);
+            Route::resource('packagings', IngredientPackagingController::class)->except(['index', 'show']);
+            Route::post('packagings/{packaging}/toggle-active', [IngredientPackagingController::class, 'toggleActive'])->name('packagings.toggle-active');
+            Route::resource('menus', MenuController::class)->only(['create', 'store', 'destroy']);
+            Route::resource('recipes', RecipeController::class)->except(['index', 'show']);
+            Route::get('recipes/{recipe}/duplicate', [RecipeController::class, 'duplicate'])->name('recipes.duplicate');
+            Route::resource('ingredient-categories', IngredientCategoryController::class)->only(['store', 'update', 'destroy']);
+            Route::post('ingredient-categories/reorder', [IngredientCategoryController::class, 'reorder'])->name('ingredient-categories.reorder');
+            Route::resource('menu-categories', MenuCategoryController::class)->only(['store', 'update', 'destroy']);
+            Route::post('menu-categories/reorder', [MenuCategoryController::class, 'reorder'])->name('menu-categories.reorder');
+
+            // Impor massal master data (template + preview + commit)
+            Route::get('import/{entity}/template', [MasterImportController::class, 'template'])->name('import.template');
+            Route::post('import/{entity}/preview', [MasterImportController::class, 'preview'])->name('import.preview');
+            Route::post('import/{entity}/commit',  [MasterImportController::class, 'commit'])->name('import.commit');
+            // Bundle multi-sheet (mis. Bahan + Kemasan + Komposisi dalam 1 file)
+            Route::get('import-bundle/{bundle}/template', [MasterImportController::class, 'bundleTemplate'])->name('import-bundle.template');
+            Route::post('import-bundle/{bundle}/preview', [MasterImportController::class, 'bundlePreview'])->name('import-bundle.preview');
+            Route::post('import-bundle/{bundle}/commit',  [MasterImportController::class, 'bundleCommit'])->name('import-bundle.commit');
+        });
+
+        // Versi resep per toko: manager & admin area hanya untuk toko yang dia pegang
+        // (dibatasi di MenuController — info menu & versi default tetap hak super admin).
+        Route::middleware(['role:super_admin,manager,admin_area'])->group(function () {
+            Route::resource('menus', MenuController::class)->only(['edit', 'update']);
+            Route::delete('menus/{menu}/recipe-version/{group}', [MenuController::class, 'destroyRecipeVersion'])->name('menus.recipe-version.destroy');
+        });
+
+        // Lihat: keempat jenis akun.
+        Route::middleware(['role:super_admin,manager,admin_area,supervisor'])->group(function () {
+            Route::resource('stores', StoreController::class)->only(['index', 'show']);
+            Route::resource('suppliers', SupplierController::class)->only(['index', 'show']);
+            Route::resource('ingredients', IngredientController::class)->only(['index', 'show']);
+            Route::resource('packagings', IngredientPackagingController::class)->only(['index', 'show']);
+            Route::resource('menus', MenuController::class)->only(['index', 'show']);
+            Route::resource('recipes', RecipeController::class)->only(['index', 'show']);
+            Route::get('categories', [CategoriesController::class, 'index'])->name('categories.index');
+            Route::resource('ingredient-categories', IngredientCategoryController::class)->only(['index']);
+            Route::resource('menu-categories', MenuCategoryController::class)->only(['index']);
+            Route::get('export/{entity}', [MasterImportController::class, 'exportData'])->name('export');
+            Route::get('export-bundle/{bundle}', [MasterImportController::class, 'bundleExportData'])->name('export-bundle');
+        });
     });
 
     // INVENTORI
@@ -179,8 +212,8 @@ Route::middleware(['auth'])->group(function () {
         });
     });
 
-    // AUDIT LOG
-    Route::middleware(['role:super_admin'])->prefix('audit')->name('audit.')->group(function () {
+    // AUDIT LOG — super admin (semua log) & manager (log user di tokonya, lihat AuditLogController)
+    Route::middleware(['role:super_admin,manager'])->prefix('audit')->name('audit.')->group(function () {
         Route::get('/', [AuditLogController::class, 'index'])->name('index');
         Route::get('{auditLog}', [AuditLogController::class, 'show'])->name('show');
     });

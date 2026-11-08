@@ -68,14 +68,48 @@
                                     </div>
                                     
                                     <div class="col-12 mb-2">
-                                        <label class="form-label">Role Akses Sistem <span class="text-danger">*</span></label>
+                                        <label class="form-label">Jenis Akun <span class="text-danger">*</span></label>
+                                        @php
+                                            $keteranganRole = [
+                                                'super_admin' => 'Super Admin — akses penuh ke seluruh toko',
+                                                'manager'     => 'Manager — menyetujui, membuka kunci HPP, mengelola user, hanya di toko yang ditentukan',
+                                                'admin_area'  => 'Admin Area — input & kelola transaksi di toko yang ditentukan',
+                                                'supervisor'  => 'Supervisor — hanya melihat data toko yang ditentukan, tidak bisa input',
+                                            ];
+                                        @endphp
                                         <select name="role" class="form-select" required>
-                                            <option value="">— Pilih Level Akses —</option>
-                                            <option value="super_admin" {{ old('role', $user->role ?? '') === 'super_admin' ? 'selected' : '' }}>Super Admin (Akses Penuh Seluruh Toko)</option>
-                                            <option value="admin_area" {{ old('role', $user->role ?? '') === 'admin_area' ? 'selected' : '' }}>Admin Area (Terbatas pada Toko yang Ditentukan)</option>
-                                            <option value="viewer" {{ old('role', $user->role ?? '') === 'viewer' ? 'selected' : '' }}>Hanya Lihat (Demo — Lihat Semua, Tidak Bisa Input)</option>
+                                            <option value="">— Pilih Jenis Akun —</option>
+                                            @foreach($roleBoleh as $r)
+                                                <option value="{{ $r }}" {{ old('role', $user->role ?? '') === $r ? 'selected' : '' }}>{{ $keteranganRole[$r] }}</option>
+                                            @endforeach
                                         </select>
                                     </div>
+
+                                    @unless(isset($user))
+                                    {{-- Toko langsung dipilih saat membuat akun. Wajib untuk manager: akun
+                                         tanpa toko tidak bisa bekerja & tidak terlihat lagi di daftarnya. --}}
+                                    <div class="col-12 mb-2">
+                                        <label class="form-label">
+                                            Toko yang Dipegang
+                                            @if(auth()->user()->isManager())<span class="text-danger">*</span>
+                                            @else<span class="text-muted fw-normal" style="font-size: 0.78rem;">(tidak perlu untuk Super Admin — otomatis semua toko)</span>@endif
+                                        </label>
+                                        <div class="border rounded bg-white" style="max-height:220px;overflow-y:auto">
+                                            @forelse($stores as $s)
+                                            <label class="d-flex align-items-center gap-2 px-3 py-2 border-bottom w-100" style="cursor:pointer">
+                                                <input class="flex-shrink-0" type="checkbox" name="store_ids[]" value="{{ $s->id }}"
+                                                       {{ in_array($s->id, old('store_ids', [])) ? 'checked' : '' }}>
+                                                <span><span class="fw-semibold">{{ $s->name }}</span>
+                                                    <span class="text-muted small ms-2">({{ $s->store_code }}) — {{ $s->area }}</span></span>
+                                            </label>
+                                            @empty
+                                            <div class="text-muted small p-3">Belum ada toko yang bisa dipilih.</div>
+                                            @endforelse
+                                        </div>
+                                        @error('store_ids')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+                                        @error('store_ids.*')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+                                    </div>
+                                    @endunless
                                     
                                     <div class="col-md-6 mb-2">
                                         <label class="form-label">
@@ -104,7 +138,8 @@
                         </div>
                     </div>
 
-                    @if(isset($user) && $user->role === 'admin_area')
+                    {{-- Semua jenis akun selain Super Admin terbatas pada toko yang di-assign --}}
+                    @if(isset($user) && !$user->isSuperAdmin())
                         <div class="card mb-5">
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <div class="d-flex align-items-center gap-3">
@@ -122,8 +157,8 @@
                                 <div class="alert alert-info mb-4 d-flex gap-3 align-items-start">
                                     <i class="bi bi-patch-check-fill fs-4 mt-1"></i>
                                     <div>
-                                        <div class="fw-bold mb-1">Status: Admin Area</div>
-                                        User dengan role Admin Area **wajib** diberikan akses ke minimal satu toko agar dapat bekerja. Pilih toko dari daftar di bawah untuk menambah akses.
+                                        <div class="fw-bold mb-1">Jenis Akun: {{ $user->roleLabel() }}</div>
+                                        Akun {{ $user->roleLabel() }} <strong>wajib</strong> diberikan akses ke minimal satu toko agar dapat bekerja. Pilih toko dari daftar di bawah untuk menambah akses.
                                     </div>
                                 </div>
 

@@ -16,6 +16,16 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // SQLite (database test): FK tidak bergantung pada index ini & tidak bisa dilepas
+        // per nama — cukup ganti unique index-nya. Jalur MySQL/MariaDB di bawah tidak berubah.
+        if (\Illuminate\Support\Facades\DB::getDriverName() === 'sqlite') {
+            Schema::table('monthly_revenues', function (Blueprint $table) {
+                $table->dropUnique('mr_unique');
+                $table->unique(['store_id', 'month', 'year', 'period_type'], 'mr_unique');
+            });
+            return;
+        }
+
         Schema::table('monthly_revenues', function (Blueprint $table) {
             $table->dropForeign('monthly_revenues_store_id_foreign');
             $table->dropUnique('mr_unique');
@@ -26,6 +36,14 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (\Illuminate\Support\Facades\DB::getDriverName() === 'sqlite') {
+            Schema::table('monthly_revenues', function (Blueprint $table) {
+                $table->dropUnique('mr_unique');
+                $table->unique(['store_id', 'month', 'year'], 'mr_unique');
+            });
+            return;
+        }
+
         Schema::table('monthly_revenues', function (Blueprint $table) {
             $table->dropForeign('monthly_revenues_store_id_foreign');
             $table->dropUnique('mr_unique');

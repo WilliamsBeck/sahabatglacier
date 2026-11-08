@@ -1,4 +1,4 @@
-﻿@extends('layouts.app')
+@extends('layouts.app')
 @section('title', 'Saldo Stok')
 @section('content')
 
@@ -118,7 +118,7 @@ $warnAt = $critAt !== null ? ($critAt + (int)($orderCycleDays ?? 0)) : null;
                     <td>
                         {{-- Hanya toko TUJUAN yang boleh menandai barang diterima, dan
                              hanya bila tanggal terimanya masih kosong (masih di jalan). --}}
-                        @if(!$keluar && !$m->delivery_date && auth()->user()->role !== 'viewer')
+                        @if(!$keluar && !$m->delivery_date && !auth()->user()->isSupervisor())
                             <button type="button" class="btn btn-sm btn-success py-0 px-2"
                                     style="font-size:.72rem"
                                     data-bs-toggle="modal" data-bs-target="#modalTerima"

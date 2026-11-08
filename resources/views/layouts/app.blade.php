@@ -19,9 +19,28 @@
     <link rel="stylesheet" href="{{ asset('css/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ asset('css/app.css') }}?v={{ filemtime(public_path('css/app.css')) }}">
     @stack('styles')
+    @php
+        // MODE HANYA-LIHAT — tombol tambah/edit/hapus/simpan disembunyikan & isian dikunci:
+        //  - Supervisor: di semua halaman.
+        //  - Halaman data global (@section('data_global')) untuk selain Super Admin.
+        // Ini kenyamanan tampilan saja. Penjaganya tetap di server: RestrictViewer menolak
+        // semua request non-GET dari supervisor, dan route data global hanya super admin.
+        $modeLihat = auth()->check() && (auth()->user()->isSupervisor()
+            || (View::hasSection('data_global') && !auth()->user()->isSuperAdmin()));
+    @endphp
+    @if($modeLihat)
+    <style>
+        .mode-lihat form[method="post" i]:not([action$="/logout"]) :is(button[type="submit"], button:not([type]), input[type="submit"]),
+        .mode-lihat a[href$="/create"], .mode-lihat a[href*="/create?"],
+        .mode-lihat a[href$="/edit"],   .mode-lihat a[href*="/edit?"],
+        .mode-lihat .hanya-tulis,
+        /* Pencatatan Harian: tombol atur urutan (menyimpan lewat AJAX, bukan form) */
+        .mode-lihat #btnToggleReorder, .mode-lihat #btnResetOrder { display: none !important; }
+    </style>
+    @endif
 </head>
 
-<body>
+<body @if($modeLihat) class="mode-lihat" @endif>
 
     @include('layouts.sidebar')
 
@@ -84,7 +103,7 @@
                             <div class="fw-semibold small">{{ auth()->user()->name }}</div>
                             <div class="text-muted" style="font-size:11px">{{ auth()->user()->email }}</div>
                             <span class="badge bg-primary mt-1">
-                                {{ auth()->user()->isSuperAdmin() ? 'Super Admin' : 'Admin Area' }}
+                                {{ auth()->user()->roleLabel() }}{{ auth()->user()->isSupervisor() ? ' · hanya lihat' : '' }}
                             </span>
                         </li>
                         <li>
@@ -466,6 +485,41 @@
         document.getElementById('welcomePopupOverlay').addEventListener('click', function (e) {
             if (e.target === this) closeWelcomePopup(); // klik area gelap = tutup
         });
+    </script>
+    @endif
+
+    @if($modeLihat)
+    <script>
+        // Mode hanya-lihat (lihat catatan di <head>): isian di form tulis dikunci supaya
+        // tidak ada yang mengetik lalu mengira datanya tersimpan, dan tombol yang membuka
+        // modal berisi form tulis disembunyikan. Form GET (filter/pencarian) tidak disentuh.
+        (function () {
+            var formTulis = function (f) {
+                return (f.getAttribute('method') || 'get').toLowerCase() === 'post'
+                    && !/\/logout$/.test(f.getAttribute('action') || '');
+            };
+            document.querySelectorAll('form').forEach(function (f) {
+                if (!formTulis(f)) return;
+                f.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach(function (el) {
+                    el.disabled = true;
+                });
+            });
+            document.querySelectorAll('[data-bs-toggle="modal"]').forEach(function (b) {
+                var sel = b.getAttribute('data-bs-target');
+                var m = sel && document.querySelector(sel);
+                if (m && Array.prototype.some.call(m.querySelectorAll('form'), formTulis)) b.style.display = 'none';
+            });
+            // Pencatatan Harian menyimpan lewat AJAX, bukan form. Perlakukan seperti tanggal
+            // terkunci: sel tidak bisa diisi (tabindex -1) & header tanggal tidak bisa diklik.
+            // Skrip ini jalan SEBELUM skrip halaman (@stack('scripts')), jadi pemasang
+            // event halaman tidak pernah menemukan header yang bisa dikonfirmasi.
+            document.querySelectorAll('.td-usage-cell').forEach(function (td) { td.setAttribute('tabindex', '-1'); });
+            document.querySelectorAll('.confirm-date-th').forEach(function (th) {
+                th.classList.remove('confirm-date-th');
+                th.style.cursor = 'default';
+                th.title = 'Akun Supervisor hanya bisa melihat';
+            });
+        })();
     </script>
     @endif
 

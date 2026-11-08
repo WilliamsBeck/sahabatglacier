@@ -3,12 +3,35 @@ namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class AuditLogController extends Controller
 {
+    /**
+     * Log yang boleh dilihat user yang sedang login.
+     * - Super admin: semua log.
+     * - Manager: log yang dibuat user di toko-toko yang dia pegang (termasuk dirinya).
+     *   Tabel audit_logs tidak punya kolom toko, jadi dibatasi lewat PELAKUNYA.
+     */
+    private function logTerlihat()
+    {
+        $query = AuditLog::query();
+        $user  = auth()->user();
+
+        if (!$user->isSuperAdmin()) {
+            $userIds = DB::table('store_user')
+                ->whereIn('store_id', $user->accessibleStoreIds())
+                ->pluck('user_id')
+                ->push($user->id)
+                ->unique()->values();
+            $query->whereIn('user_id', $userIds);
+        }
+        return $query;
+    }
+
     public function index(Request $request)
     {
-        $query = AuditLog::query()->latest();
+        $query = $this->logTerlihat()->latest();
 
         if ($request->filled('action')) {
             $query->where('action', $request->action);
@@ -39,6 +62,7 @@ class AuditLogController extends Controller
 
     public function show(AuditLog $auditLog)
     {
+        abort_unless($this->logTerlihat()->whereKey($auditLog->id)->exists(), 403);
         return view('audit.show', ['log' => $auditLog]);
     }
 }

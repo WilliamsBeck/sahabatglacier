@@ -1,4 +1,4 @@
-﻿@extends('layouts.app')
+@extends('layouts.app')
 @section('title', 'Detail Mutasi')
 
 @section('content')
@@ -75,15 +75,15 @@
                 @endif
             </div>
         </div>
-    @elseif($hasUnlock && !auth()->user()->isSuperAdmin())
+    @elseif($hasUnlock && !auth()->user()->isSuperAdminOrManager())
         <div class="alert alert-success d-flex align-items-center gap-2 mb-3">
             <i class="bi bi-unlock-fill fs-5"></i>
             <span><strong>Unlock Aktif</strong> — Data ini sudah dibuka oleh Super Admin dan dapat diedit.</span>
         </div>
-    @elseif(auth()->user()->isSuperAdmin())
+    @elseif(auth()->user()->isSuperAdminOrManager())
         <div class="alert alert-secondary d-flex align-items-center gap-2 mb-3 py-2">
             <i class="bi bi-shield-check fs-5"></i>
-            <span class="small">Data bulan ini terkunci untuk user biasa. Anda login sebagai Super Admin — akses penuh tetap diberikan.</span>
+            <span class="small">Data bulan ini terkunci untuk user biasa. Anda login sebagai {{ auth()->user()->roleLabel() }} — akses penuh tetap diberikan.</span>
         </div>
     @endif
 @endif

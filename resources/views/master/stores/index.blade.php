@@ -8,10 +8,13 @@
         <p class="page-subtitle">Total {{ $stores->total() }} toko terdaftar dalam sistem</p>
     </div>
     <div class="d-flex gap-2 flex-wrap justify-content-end">
+        {{-- Data toko berlaku untuk semua toko → ubah hanya Super Admin --}}
+        @if(auth()->user()->isSuperAdmin())
         @include('master.partials.import-buttons', ['entity' => 'stores', 'label' => 'Toko'])
         <a href="{{ route('master.stores.create') }}" class="btn btn-primary">
             <i class="bi bi-plus-lg me-1"></i> Tambah Toko
         </a>
+        @endif
     </div>
 </div>
 
@@ -80,9 +83,11 @@
                         <td>
                             <x-action-menu>
                                 <x-action-view :href="route('master.stores.show', $s)" />
+                                @if(auth()->user()->isSuperAdmin())
                                 <x-action-edit :href="route('master.stores.edit', $s)" />
                                 <x-action-delete :action="route('master.stores.destroy', $s)"
                                                  confirm="Hapus toko {{ $s->name }}?" />
+                                @endif
                             </x-action-menu>
                         </td>
                     </tr>

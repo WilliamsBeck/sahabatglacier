@@ -26,9 +26,12 @@ class UserFactory extends Factory
     {
         return [
             'name' => fake()->name(),
+            // Glacier login memakai username (bukan email) — kolomnya wajib & unik.
+            'username' => fake()->unique()->userName(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
+            'role' => 'admin_area',
             'remember_token' => Str::random(10),
         ];
     }
@@ -41,5 +44,25 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'email_verified_at' => null,
         ]);
+    }
+
+    public function superAdmin(): static
+    {
+        return $this->state(fn () => ['role' => 'super_admin']);
+    }
+
+    public function manager(): static
+    {
+        return $this->state(fn () => ['role' => 'manager']);
+    }
+
+    public function adminArea(): static
+    {
+        return $this->state(fn () => ['role' => 'admin_area']);
+    }
+
+    public function supervisor(): static
+    {
+        return $this->state(fn () => ['role' => 'supervisor']);
     }
 }

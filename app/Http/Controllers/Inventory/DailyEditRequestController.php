@@ -45,26 +45,32 @@ class DailyEditRequestController extends Controller
         return back()->with('success', 'Request perpanjangan edit berhasil dikirim. Menunggu persetujuan Super Admin.');
     }
 
-    // ── Super Admin: daftar semua request ─────────────────────────────────────
+    // CATATAN: controller ini belum punya route (tidak bisa diakses). Cek hak akses
+    // tetap diselaraskan dengan empat jenis akun supaya aman bila kelak didaftarkan.
+
+    // ── Super Admin / Manager: daftar request (manager: toko yang dia pegang) ──
     public function index(Request $request)
     {
-        abort_unless(auth()->user()->isSuperAdmin(), 403);
+        abort_unless(auth()->user()->isSuperAdminOrManager(), 403);
 
+        $storeIds = auth()->user()->accessibleStoreIds();
         $query = DailyEditRequest::with(['store', 'requestedBy', 'reviewedBy'])
+            ->whereIn('store_id', $storeIds)
             ->latest();
 
         if ($request->status) $query->where('status', $request->status);
 
         $requests      = $query->paginate(20);
-        $pendingCount  = DailyEditRequest::where('status', 'pending')->count();
+        $pendingCount  = DailyEditRequest::where('status', 'pending')->whereIn('store_id', $storeIds)->count();
 
         return view('inventory.daily-edit-requests.index', compact('requests', 'pendingCount'));
     }
 
-    // ── Super Admin: approve ──────────────────────────────────────────────────
+    // ── Super Admin / Manager: approve ────────────────────────────────────────
     public function approve(Request $request, DailyEditRequest $editRequest)
     {
-        abort_unless(auth()->user()->isSuperAdmin(), 403);
+        abort_unless(auth()->user()->isSuperAdminOrManager(), 403);
+        abort_unless(in_array($editRequest->store_id, auth()->user()->accessibleStoreIds()), 403);
         abort_if($editRequest->status !== 'pending', 422, 'Request ini sudah diproses.');
 
         $request->validate([
@@ -91,10 +97,11 @@ class DailyEditRequestController extends Controller
         );
     }
 
-    // ── Super Admin: reject ───────────────────────────────────────────────────
+    // ── Super Admin / Manager: reject ─────────────────────────────────────────
     public function reject(Request $request, DailyEditRequest $editRequest)
     {
-        abort_unless(auth()->user()->isSuperAdmin(), 403);
+        abort_unless(auth()->user()->isSuperAdminOrManager(), 403);
+        abort_unless(in_array($editRequest->store_id, auth()->user()->accessibleStoreIds()), 403);
         abort_if($editRequest->status !== 'pending', 422, 'Request ini sudah diproses.');
 
         $request->validate([

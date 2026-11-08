@@ -116,7 +116,7 @@ class MonthlySaleController extends Controller
 
             $isLocked = $existingRevenue
                 ? MonthLockService::isLocked('monthly_sale', $existingRevenue->id, $month, $year)
-                : !auth()->user()->isSuperAdmin();
+                : !auth()->user()->isSuperAdminOrManager();
 
             if ($isLocked) {
                 return back()->withInput()
@@ -240,7 +240,7 @@ class MonthlySaleController extends Controller
         $p = $this->groupParams($request);
 
         if (MonthLockService::isPastLock($p['month'], $p['year'])) {
-            if (!auth()->user()->isSuperAdmin()) {
+            if (!auth()->user()->isSuperAdminOrManager()) {
                 return back()->with('error', MonthLockService::lockMessage($p['month'], $p['year']));
             }
         }
@@ -277,7 +277,7 @@ class MonthlySaleController extends Controller
         $p = $this->groupParams($request);
 
         if (MonthLockService::isPastLock($p['month'], $p['year'])) {
-            if (!auth()->user()->isSuperAdmin()) {
+            if (!auth()->user()->isSuperAdminOrManager()) {
                 return back()->with('error', MonthLockService::lockMessage($p['month'], $p['year']));
             }
         }
@@ -502,7 +502,7 @@ class MonthlySaleController extends Controller
             return back()->withErrors(['file' => 'Bulan/tahun tidak valid dalam file.']);
         }
 
-        if (!auth()->user()->isSuperAdmin() && MonthLockService::isPastLock($month, $year)) {
+        if (!auth()->user()->isSuperAdminOrManager() && MonthLockService::isPastLock($month, $year)) {
             return back()->withErrors(['file' => MonthLockService::lockMessage($month, $year)]);
         }
 
@@ -613,7 +613,7 @@ class MonthlySaleController extends Controller
         $storeIds = auth()->user()->accessibleStoreIds();
         if (!in_array($storeId, $storeIds)) abort(403);
 
-        if (!auth()->user()->isSuperAdmin() && MonthLockService::isPastLock($month, $year)) {
+        if (!auth()->user()->isSuperAdminOrManager() && MonthLockService::isPastLock($month, $year)) {
             return back()->with('error', MonthLockService::lockMessage($month, $year));
         }
 

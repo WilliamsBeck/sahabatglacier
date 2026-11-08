@@ -15,8 +15,9 @@ class CheckStoreAccess
 
         $user = auth()->user();
 
-        // Super admin & akun hanya-lihat bebas akses semua toko
-        if ($user->isSuperAdmin() || $user->isViewer()) {
+        // Hanya super admin yang bebas akses semua toko. Manager, admin area, dan
+        // supervisor dibatasi ke toko yang di-assign.
+        if ($user->isSuperAdmin()) {
             return $next($request);
         }
 
@@ -29,7 +30,7 @@ class CheckStoreAccess
                 ?? $request->input('source_store_id')
                 ?? $request->input('destination_store_id');
 
-        // Admin area hanya boleh akses toko yang di-assign
+        // Selain super admin hanya boleh akses toko yang di-assign
         if ($storeId && !$user->stores()->where('stores.id', $storeId)->exists()) {
             abort(403, 'Anda tidak memiliki akses ke toko ini.');
         }

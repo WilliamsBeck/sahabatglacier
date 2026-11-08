@@ -1,5 +1,7 @@
 @extends('layouts.app')
 @section('title', 'Kategori Bahan Baku')
+{{-- Kategori berlaku untuk semua toko: selain Super Admin hanya bisa melihat --}}
+@section('data_global', '1')
 @section('content')
 <div class="page-header d-flex justify-content-between align-items-center">
     <h4 class="page-title">Kategori Bahan Baku</h4>

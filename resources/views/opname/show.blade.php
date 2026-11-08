@@ -1,4 +1,4 @@
-﻿@extends('layouts.app')
+@extends('layouts.app')
 @section('title','Detail Opname')
 
 @php
@@ -76,7 +76,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
             @else
                 {{-- Approved: Admin Area & Super Admin bisa Batalkan Approve (untuk edit) atau Hapus.
                      Server menolak kalau sudah ada mutasi/pencatatan setelah tanggal opname. --}}
-                @if(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea())
+                @if(auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea())
                 <form method="POST" action="{{ route('opname.opnames.unapprove', $opname) }}" class="d-inline"
                       data-confirm="Batalkan approve opname ini? Opname kembali ke draft & efek stoknya dibalikkan agar bisa diedit. Hanya bisa jika belum ada mutasi setelahnya. Jangan lupa Approve lagi setelah selesai."
                       data-confirm-type="warning" data-confirm-ok="Ya, batalkan approve">
@@ -123,15 +123,15 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
                 @endif
             </div>
         </div>
-    @elseif($hasUnlock && !auth()->user()->isSuperAdmin())
+    @elseif($hasUnlock && !auth()->user()->isSuperAdminOrManager())
         <div class="alert alert-success d-flex align-items-center gap-2 mt-3">
             <i class="bi bi-unlock-fill fs-5"></i>
             <span><strong>Unlock Aktif</strong> — Data ini sudah dibuka oleh Super Admin dan dapat diedit.</span>
         </div>
-    @elseif(auth()->user()->isSuperAdmin())
+    @elseif(auth()->user()->isSuperAdminOrManager())
         <div class="alert alert-secondary d-flex align-items-center gap-2 mt-3 py-2">
             <i class="bi bi-shield-check fs-5"></i>
-            <span class="small">Data bulan ini terkunci untuk user biasa. Anda login sebagai Super Admin — akses penuh.</span>
+            <span class="small">Data bulan ini terkunci untuk user biasa. Anda login sebagai {{ auth()->user()->roleLabel() }} — akses penuh.</span>
         </div>
     @endif
 @endif
@@ -554,7 +554,7 @@ function fmtVariance(float $var, ?int $ctrPack, ?int $packBase): string {
 @endif
 
 {{-- Modal Hapus Opname (hanya untuk approved, Super Admin) --}}
-@if($opname->status === 'approved' && (auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea()))
+@if($opname->status === 'approved' && (auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea()))
 <div class="modal fade" id="modalHapusOpname" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content border-danger">

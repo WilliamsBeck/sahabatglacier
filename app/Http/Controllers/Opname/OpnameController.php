@@ -55,7 +55,7 @@ class OpnameController extends Controller
         $year       = $carbonDate->year;
 
         // ── Lock check: bulan sudah lewat H+7? ─────────────────────────────────
-        if (!auth()->user()->isSuperAdmin() && MonthLockService::isPastLock($month, $year)) {
+        if (!auth()->user()->isSuperAdminOrManager() && MonthLockService::isPastLock($month, $year)) {
             return back()->withInput()
                 ->with('error', MonthLockService::lockMessage($month, $year));
         }
@@ -447,7 +447,7 @@ class OpnameController extends Controller
 
         // Koreksi Harga (opname approved): harga/dus bisa diubah, jumlah tetap terkunci.
         $bolehKoreksi = $opname->status === 'approved'
-            && (auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea());
+            && (auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea());
         $koreksiKunci = $bolehKoreksi ? $this->koreksiHargaKunci($opname) : null;
         $modeKoreksi  = $bolehKoreksi && !$koreksiKunci && request()->boolean('koreksi_harga');
 
@@ -966,7 +966,7 @@ class OpnameController extends Controller
      */
     public function unapprove(Opname $opname)
     {
-        abort_unless(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea(), 403);
+        abort_unless(auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea(), 403);
         abort_if($opname->status !== 'approved', 422, 'Hanya opname approved yang bisa dibatalkan.');
 
         if ($m = $this->hppLockMsg($opname)) {
@@ -1051,7 +1051,7 @@ class OpnameController extends Controller
      */
     public function koreksiHarga(Request $request, Opname $opname)
     {
-        abort_unless(auth()->user()->isSuperAdmin() || auth()->user()->isAdminArea(), 403);
+        abort_unless(auth()->user()->isSuperAdminOrManager() || auth()->user()->isAdminArea(), 403);
         abort_if($opname->status !== 'approved', 422, 'Koreksi harga hanya untuk opname yang sudah approved.');
 
         $kembali = redirect()->route('opname.opnames.show', $opname);
@@ -1182,10 +1182,10 @@ class OpnameController extends Controller
 
     public function destroy(Opname $opname)
     {
-        // Approved boleh dihapus oleh Admin Area & Super Admin (viewer diblok middleware).
+        // Approved boleh dihapus oleh Super Admin, Manager & Admin Area (supervisor diblok middleware).
         if ($opname->status === 'approved'
-            && !auth()->user()->isSuperAdmin() && !auth()->user()->isAdminArea()) {
-            abort(403, 'Opname yang sudah disetujui hanya dapat dihapus oleh Admin Area atau Super Admin.');
+            && !auth()->user()->isSuperAdminOrManager() && !auth()->user()->isAdminArea()) {
+            abort(403, 'Opname yang sudah disetujui hanya dapat dihapus oleh Super Admin, Manager, atau Admin Area.');
         }
 
         // Terkunci oleh snapshot HPP? Tidak boleh dihapus (snapshot bergantung padanya).
