@@ -17,7 +17,7 @@
         <form method="GET" class="row g-2 align-items-center">
             <div class="col-md-6">
                 <input type="text" name="search" class="form-control"
-                       placeholder="Cari nama atau email…" value="{{ request('search') }}">
+                       placeholder="Cari nama, username, atau email…" value="{{ request('search') }}">
             </div>
             <div class="col-md-3">
                 <select name="role" class="form-select">
@@ -42,6 +42,7 @@
                 <tr>
                     <th width="48">#</th>
                     <th class="col-name">User</th>
+                    <th>Username</th>
                     <th>Email</th>
                     <th>Jenis Akun</th>
                     <th>Toko Akses</th>
@@ -55,6 +56,7 @@
                         <td class="col-name">
                             <span class="fw-medium">{{ $user->name }}</span>
                         </td>
+                        <td><span class="font-monospace small">{{ $user->username }}</span></td>
                         <td><span class="text-soft">{{ $user->email }}</span></td>
                         <td>
                             @php $warna = ['super_admin' => 'bg-danger', 'manager' => 'bg-warning text-dark', 'admin_area' => 'bg-primary', 'supervisor' => 'bg-secondary'][$user->role] ?? 'bg-light text-dark'; @endphp
@@ -79,7 +81,7 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="6" class="py-5 text-soft text-center">
+                        <td colspan="7" class="py-5 text-soft text-center">
                             <i class="bi bi-people fs-3 d-block mb-2 opacity-25"></i>
                             Belum ada data user.
                         </td>

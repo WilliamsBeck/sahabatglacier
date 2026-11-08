@@ -77,12 +77,20 @@
                                                 'supervisor'  => 'Supervisor — hanya melihat data toko yang ditentukan, tidak bisa input',
                                             ];
                                         @endphp
-                                        <select name="role" class="form-select" required>
+                                        @php $akunSendiri = isset($user) && $user->id === auth()->id(); @endphp
+                                        {{-- Jenis akun sendiri dikunci (ditolak juga di server) — supaya tidak ada
+                                             yang tanpa sengaja menurunkan haknya sendiri. --}}
+                                        @if($akunSendiri)<input type="hidden" name="role" value="{{ $user->role }}">@endif
+                                        <select @unless($akunSendiri) name="role" @endunless class="form-select" required @disabled($akunSendiri)>
                                             <option value="">— Pilih Jenis Akun —</option>
                                             @foreach($roleBoleh as $r)
                                                 <option value="{{ $r }}" {{ old('role', $user->role ?? '') === $r ? 'selected' : '' }}>{{ $keteranganRole[$r] }}</option>
                                             @endforeach
                                         </select>
+                                        @if($akunSendiri)
+                                            <div class="form-text">Jenis akun Anda sendiri tidak bisa diubah di sini. Minta Super Admin lain bila memang perlu.</div>
+                                        @endif
+                                        @error('role')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
                                     </div>
 
                                     @unless(isset($user))

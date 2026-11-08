@@ -1,7 +1,7 @@
 <?php
 namespace App\Http\Controllers\MasterData;
 use App\Http\Controllers\Controller;
-use App\Models\{User, Store, Mutation, Opname, WasteLog, ProductionLog, StockLedger};
+use App\Models\{User, Store, Mutation, Opname, WasteLog, ProductionLog, StockLedger, AuditLog};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -42,6 +42,34 @@ class UserController extends Controller
             ->whereIn('id', $this->tokoSaya())
             ->orderByRaw('CAST(store_code AS UNSIGNED)')
             ->get();
+    }
+
+    /**
+     * Catat perubahan akses toko ke Log Aktivitas. Tabel pivot store_user tidak punya
+     * model sehingga tidak tersentuh AuditObserver — tanpa ini, siapa memberi/mencabut
+     * akses toko siapa tidak terlacak. Pelakunya dicatat otomatis oleh AuditLog::record.
+     *
+     * @param string $jenis 'ditambahkan' | 'dicabut'
+     * @param int[]  $tokoIds toko yang berubah
+     * @param int[]  $sebelum id toko user SEBELUM perubahan
+     */
+    private function catatAksesToko(User $user, string $jenis, array $tokoIds, array $sebelum): void
+    {
+        if (!$tokoIds) return;
+
+        $nama     = Store::pluck('name', 'id');
+        $daftar   = fn (array $ids) => collect($ids)->map(fn ($id) => $nama[$id] ?? "#$id")->sort()->implode(', ') ?: '(tidak ada)';
+        $sesudah  = $jenis === 'ditambahkan'
+            ? array_values(array_unique(array_merge($sebelum, $tokoIds)))
+            : array_values(array_diff($sebelum, $tokoIds));
+        $arah     = $jenis === 'ditambahkan' ? 'untuk' : 'dari';
+
+        AuditLog::record(
+            'updated', 'User', $user->id,
+            "Akses toko {$jenis} {$arah} {$user->name} ({$user->username}): " . $daftar($tokoIds),
+            ['akses_toko' => $daftar($sebelum)],
+            ['akses_toko' => $daftar($sesudah)]
+        );
     }
 
     /** Apakah akun $target boleh dilihat/diubah oleh user yang sedang login. */
@@ -111,7 +139,9 @@ class UserController extends Controller
         $data['password'] = Hash::make($data['password']);
         $user = User::create($data);
         if ($storeIds) {
+            $storeIds = array_values(array_unique(array_map('intval', $storeIds)));
             $user->stores()->attach(array_fill_keys($storeIds, ['assigned_at' => now()]));
+            $this->catatAksesToko($user, 'ditambahkan', $storeIds, []);
         }
         return redirect()->route('master.users.index')->with('success', 'User ditambahkan.');
     }
@@ -135,6 +165,16 @@ class UserController extends Controller
             'role' => ['required', Rule::in($this->roleBoleh())],
             'password' => 'nullable|min:8|confirmed',
         ]);
+
+        // Jenis akun SENDIRI tidak bisa diubah lewat form ini — mis. super admin yang
+        // tanpa sengaja menjadikan dirinya manager langsung kehilangan akses ke toko lain,
+        // Master Data global, dan tidak bisa mengembalikannya sendiri.
+        if ($user->id === auth()->id() && $data['role'] !== $user->role) {
+            return back()->withInput()->withErrors([
+                'role' => 'Anda tidak bisa mengubah jenis akun Anda sendiri. Minta Super Admin lain untuk mengubahnya bila memang perlu.',
+            ]);
+        }
+
         if (empty($data['password']))
             unset($data['password']);
         else
@@ -173,10 +213,11 @@ class UserController extends Controller
             'store_ids.*' => [Rule::in($this->tokoSaya())],
         ], ['store_ids.*.in' => 'Ada toko yang di luar wilayah Anda.']);
 
-        $existing = $user->stores()->pluck('stores.id')->toArray();
-        $toAttach = array_diff($request->store_ids, $existing);
+        $existing = $user->stores()->pluck('stores.id')->map(fn ($id) => (int) $id)->all();
+        $toAttach = array_values(array_diff(array_unique(array_map('intval', $request->store_ids)), $existing));
         if ($toAttach) {
             $user->stores()->attach(array_fill_keys($toAttach, ['assigned_at' => now()]));
+            $this->catatAksesToko($user, 'ditambahkan', $toAttach, $existing);
         }
         return back()->with('success', count($toAttach) . ' toko berhasil di-assign.');
     }
@@ -192,7 +233,10 @@ class UserController extends Controller
             return back()->with('error', 'Toko terakhir tidak bisa dicabut. Hubungi Super Admin bila akun ini perlu dinonaktifkan.');
         }
 
-        $user->stores()->detach($store->id);
+        $sebelum = $user->stores()->pluck('stores.id')->map(fn ($id) => (int) $id)->all();
+        if ($user->stores()->detach($store->id)) {
+            $this->catatAksesToko($user, 'dicabut', [(int) $store->id], $sebelum);
+        }
         return back()->with('success', 'Akses toko dicabut.');
     }
 }
