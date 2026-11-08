@@ -214,12 +214,16 @@ class UserController extends Controller
         ]);
     }
 
-    /** 10 karakter tanpa huruf/angka yang mirip (0/O, 1/l/I) — mudah didiktekan. */
+    /**
+     * 8 karakter (= syarat minimal password) tanpa huruf/angka yang mirip (0/O, 1/l/I)
+     * — mudah didiktekan. Cukup karena sifatnya sementara: wajib diganti saat login,
+     * dan tebak-tebakan dibatasi jeda 5x gagal di halaman login.
+     */
     private function buatPasswordSementara(): string
     {
         $karakter = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         $hasil = '';
-        for ($i = 0; $i < 10; $i++) {
+        for ($i = 0; $i < 8; $i++) {
             $hasil .= $karakter[random_int(0, strlen($karakter) - 1)];
         }
         return $hasil;

@@ -25,25 +25,35 @@
                 <form method="POST" action="{{ route('akun.password.update') }}" data-boleh-tulis>
                     @csrf @method('PUT')
 
+                    {{-- Tombol mata (.lihat-pwd) menampilkan/menyembunyikan isian — sama seperti di halaman login --}}
                     <div class="mb-3">
                         <label class="form-label">Password Lama {{ $wajib ? '(password sementara)' : '' }} <span class="text-danger">*</span></label>
-                        <input type="password" name="current_password" required autocomplete="current-password"
-                               class="form-control @error('current_password') is-invalid @enderror">
-                        @error('current_password')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <div class="input-group has-validation">
+                            <input type="password" name="current_password" required autocomplete="current-password"
+                                   class="form-control @error('current_password') is-invalid @enderror">
+                            <button type="button" class="btn btn-outline-secondary lihat-pwd" aria-label="Tampilkan password"><i class="bi bi-eye"></i></button>
+                            @error('current_password')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
                     </div>
 
                     <div class="mb-3">
                         <label class="form-label">Password Baru <span class="text-danger">*</span></label>
-                        <input type="password" name="password" required minlength="8" autocomplete="new-password"
-                               placeholder="Minimal 8 karakter"
-                               class="form-control @error('password') is-invalid @enderror">
-                        @error('password')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        <div class="input-group has-validation">
+                            <input type="password" name="password" required minlength="8" autocomplete="new-password"
+                                   placeholder="Minimal 8 karakter"
+                                   class="form-control @error('password') is-invalid @enderror">
+                            <button type="button" class="btn btn-outline-secondary lihat-pwd" aria-label="Tampilkan password"><i class="bi bi-eye"></i></button>
+                            @error('password')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                        </div>
                     </div>
 
                     <div class="mb-4">
                         <label class="form-label">Ulangi Password Baru <span class="text-danger">*</span></label>
-                        <input type="password" name="password_confirmation" required minlength="8" autocomplete="new-password"
-                               class="form-control">
+                        <div class="input-group">
+                            <input type="password" name="password_confirmation" required minlength="8" autocomplete="new-password"
+                                   class="form-control">
+                            <button type="button" class="btn btn-outline-secondary lihat-pwd" aria-label="Tampilkan password"><i class="bi bi-eye"></i></button>
+                        </div>
                     </div>
 
                     <button type="submit" class="btn btn-primary w-100">
@@ -55,3 +65,17 @@
     </div>
 </div>
 @endsection
+
+@push('scripts')
+<script>
+document.querySelectorAll('.lihat-pwd').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var input = btn.parentElement.querySelector('input');
+        var tampil = input.type === 'password';
+        input.type = tampil ? 'text' : 'password';
+        btn.querySelector('i').className = tampil ? 'bi bi-eye-slash' : 'bi bi-eye';
+        btn.setAttribute('aria-label', tampil ? 'Sembunyikan password' : 'Tampilkan password');
+    });
+});
+</script>
+@endpush

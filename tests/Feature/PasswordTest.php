@@ -170,7 +170,7 @@ class PasswordTest extends TestCase
             ->assertSessionHas('password_sementara');
 
         $sementara = session('password_sementara')['password'];
-        $this->assertSame(10, strlen($sementara));
+        $this->assertSame(8, strlen($sementara));
 
         $u = $this->adminA->fresh();
         $this->assertTrue(Hash::check($sementara, $u->password), 'password sementara berlaku');
