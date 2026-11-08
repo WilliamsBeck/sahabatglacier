@@ -7,7 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 class AuditObserver
 {
     // Fields to always skip (timestamps, large binary etc.)
-    private array $skipFields = ['updated_at', 'created_at', 'remember_token'];
+    // 'password': hash password tidak boleh ikut tersimpan di Log Aktivitas. Dulu ikut
+    // tercatat saat akun dibuat/diubah; perubahan password kini dicatat terpisah tanpa
+    // nilainya (UserController::resetPassword, Akun\PasswordController).
+    private array $skipFields = ['updated_at', 'created_at', 'remember_token', 'password'];
 
     // Perubahan yang HANYA menyentuh kolom ini tidak dicatat sama sekali.
     // remaining_qty = sisa batch FIFO: berubah di puluhan batch setiap kali stok satu

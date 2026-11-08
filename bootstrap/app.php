@@ -24,6 +24,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Blokir semua aksi tulis untuk akun Supervisor (hanya-lihat) di seluruh web.
         $middleware->web(append: [
+            // Password sementara wajib diganti dulu sebelum membuka halaman lain (PBI-105).
+            \App\Http\Middleware\WajibGantiPassword::class,
             RestrictViewer::class,
             \App\Http\Middleware\RememberActiveStore::class,
         ]);
@@ -39,4 +41,21 @@ return Application::configure(basePath: dirname(__DIR__))
         });
         // Ini kondisi sementara yang wajar, bukan bug — tidak perlu memenuhi log error.
         $exceptions->dontReport(\App\Exceptions\StokSedangDihitungException::class);
+
+        // Sesi habis saat menyimpan form (CSRF token kedaluwarsa → 419 "Page Expired").
+        // Arahkan ke login dengan pesan yang jelas, bukan halaman 419 polos. Halaman
+        // terakhir dicatat sebagai tujuan, jadi setelah login user kembali ke sana
+        // (isian form-nya memang tidak bisa diselamatkan — sesinya sudah hilang).
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\HttpException $e, $request) {
+            if ($e->getStatusCode() !== 419) return null;
+            $pesan = 'Sesi berakhir, silakan login lagi.';
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $pesan], 419);
+            }
+            $sebelumnya = url()->previous();
+            if ($sebelumnya && $sebelumnya !== $request->fullUrl() && !str_contains($sebelumnya, '/login')) {
+                $request->session()->put('url.intended', $sebelumnya);
+            }
+            return redirect()->route('login')->with('status', $pesan);
+        });
     })->create();

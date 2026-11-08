@@ -4,6 +4,7 @@ use App\Http\Controllers\Controller;
 use App\Models\{User, Store, Mutation, Opname, WasteLog, ProductionLog, StockLedger, AuditLog};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -137,7 +138,11 @@ class UserController extends Controller
         $storeIds = $data['store_ids'] ?? [];
         unset($data['store_ids']);
         $data['password'] = Hash::make($data['password']);
-        $user = User::create($data);
+        // Password yang diketik pembuat akun = password SEMENTARA: wajib diganti pemiliknya
+        // saat login pertama (PBI-105).
+        $user = new User($data);
+        $user->wajib_ganti_password = true;
+        $user->save();
         if ($storeIds) {
             $storeIds = array_values(array_unique(array_map('intval', $storeIds)));
             $user->stores()->attach(array_fill_keys($storeIds, ['assigned_at' => now()]));
@@ -163,8 +168,9 @@ class UserController extends Controller
             'name' => 'required|string',
             'email' => 'required|email|unique:users,email,' . $user->id,
             'role' => ['required', Rule::in($this->roleBoleh())],
-            'password' => 'nullable|min:8|confirmed',
         ]);
+        // Password TIDAK diubah dari form edit (PBI-105) — isian 'password' apa pun
+        // diabaikan karena tidak divalidasi di atas. Pakai resetPassword().
 
         // Jenis akun SENDIRI tidak bisa diubah lewat form ini — mis. super admin yang
         // tanpa sengaja menjadikan dirinya manager langsung kehilangan akses ke toko lain,
@@ -175,12 +181,48 @@ class UserController extends Controller
             ]);
         }
 
-        if (empty($data['password']))
-            unset($data['password']);
-        else
-            $data['password'] = Hash::make($data['password']);
         $user->update($data);
         return redirect()->route('master.users.index')->with('success', 'User diupdate.');
+    }
+
+    /**
+     * Reset password (PBI-105): buat password SEMENTARA, tampilkan sekali ke yang
+     * mereset, dan wajibkan pemilik akun menggantinya saat login berikutnya.
+     * Hak aksesnya sama dengan mengelola akun itu — manager hanya akun di tokonya.
+     */
+    public function resetPassword(User $user)
+    {
+        abort_unless($this->bolehDikelola($user), 403, 'Anda tidak bisa mengelola akun ini.');
+        if ($user->id === auth()->id()) {
+            return back()->with('error', 'Untuk akun Anda sendiri, gunakan menu Ganti Password.');
+        }
+
+        $sementara = $this->buatPasswordSementara();
+
+        // saveQuietly: dicatat sendiri di bawah TANPA nilai password-nya. Remember token
+        // diganti supaya sesi "Ingat saya" lama di perangkat lain ikut tidak berlaku.
+        $user->forceFill(['password' => $sementara, 'wajib_ganti_password' => true])
+            ->setRememberToken(Str::random(60));
+        $user->saveQuietly();
+
+        AuditLog::record('updated', 'User', $user->id,
+            "Password direset untuk {$user->name} ({$user->username}) — wajib diganti saat login berikutnya",
+            null, ['wajib_ganti_password' => true]);
+
+        return redirect()->route('master.users.edit', $user)->with('password_sementara', [
+            'nama' => $user->name, 'username' => $user->username, 'password' => $sementara,
+        ]);
+    }
+
+    /** 10 karakter tanpa huruf/angka yang mirip (0/O, 1/l/I) — mudah didiktekan. */
+    private function buatPasswordSementara(): string
+    {
+        $karakter = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        $hasil = '';
+        for ($i = 0; $i < 10; $i++) {
+            $hasil .= $karakter[random_int(0, strlen($karakter) - 1)];
+        }
+        return $hasil;
     }
 
     public function destroy(User $user)

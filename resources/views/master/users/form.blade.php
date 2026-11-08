@@ -119,22 +119,21 @@
                                     </div>
                                     @endunless
                                     
+                                    {{-- Password hanya diisi saat MEMBUAT akun, dan berlaku sebagai password
+                                         sementara: wajib diganti pemiliknya saat login pertama. Untuk akun yang
+                                         sudah ada, password tidak diisi di sini — pakai tombol Reset Password. --}}
+                                    @unless(isset($user))
                                     <div class="col-md-6 mb-2">
-                                        <label class="form-label">
-                                            Password 
-                                            @if(isset($user)) 
-                                                <span class="text-muted fw-normal" style="font-size: 0.78rem;">(Biarkan kosong jika tidak ingin mengubah)</span> 
-                                            @else 
-                                                <span class="text-danger">*</span> 
-                                            @endif
-                                        </label>
-                                        <input type="password" name="password" class="form-control" placeholder="Minimal 8 karakter" {{ isset($user) ? '' : 'required' }} minlength="8">
+                                        <label class="form-label">Password Sementara <span class="text-danger">*</span></label>
+                                        <input type="password" name="password" class="form-control" placeholder="Minimal 8 karakter" required minlength="8">
+                                        <div class="form-text">Pemilik akun wajib menggantinya saat login pertama.</div>
                                     </div>
-                                    
+
                                     <div class="col-md-6 mb-4">
-                                        <label class="form-label">Ulangi Password Baru</label>
+                                        <label class="form-label">Ulangi Password Sementara</label>
                                         <input type="password" name="password_confirmation" class="form-control" placeholder="Konfirmasi password" minlength="8">
                                     </div>
+                                    @endunless
                                     
                                     <div class="col-12 pt-3 border-top">
                                         <button type="submit" class="btn btn-primary w-100">
@@ -145,6 +144,49 @@
                             </form>
                         </div>
                     </div>
+
+                    {{-- Reset password: membuat password sementara, ditampilkan SEKALI di sini.
+                         Akun sendiri tidak di-reset dari sini — pakai menu Ganti Password. --}}
+                    @if(isset($user))
+                        <div class="card">
+                            <div class="card-header d-flex align-items-center gap-3">
+                                <div class="d-flex align-items-center justify-content-center rounded bg-warning bg-opacity-10 text-warning flex-shrink-0" style="width:46px;height:46px">
+                                    <i class="bi bi-key-fill fs-4"></i>
+                                </div>
+                                <div>
+                                    <h4 class="fw-semibold mb-0">Password</h4>
+                                    <div class="text-muted small mt-1">Password tidak diisi langsung — buat password sementara untuk user ini</div>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                @if($sementara = session('password_sementara'))
+                                    <div class="alert alert-success mb-3">
+                                        <div class="fw-bold mb-1"><i class="bi bi-check-circle-fill me-1"></i>Password sementara untuk {{ $sementara['nama'] }} ({{ $sementara['username'] }}):</div>
+                                        <div class="d-flex align-items-center gap-2 my-2">
+                                            <code class="fs-4 px-3 py-1 bg-white border rounded" id="pwdSementara">{{ $sementara['password'] }}</code>
+                                            <button type="button" class="btn btn-sm btn-outline-success"
+                                                    onclick="navigator.clipboard.writeText(document.getElementById('pwdSementara').textContent); this.textContent='Tersalin ✓'">Salin</button>
+                                        </div>
+                                        <div class="small">Sampaikan langsung ke pemilik akun. Password ini <strong>hanya ditampilkan sekali</strong> dan tidak disimpan di log. Pemilik akun wajib menggantinya saat login.</div>
+                                    </div>
+                                @endif
+
+                                @if($user->id === auth()->id())
+                                    <p class="text-muted mb-0">Untuk akun Anda sendiri, gunakan menu
+                                        <a href="{{ route('akun.password.edit') }}">Ganti Password</a>.</p>
+                                @else
+                                    <form method="POST" action="{{ route('master.users.reset-password', $user) }}"
+                                          data-confirm="Buat password sementara baru untuk {{ $user->name }}? Password lamanya langsung tidak berlaku, dan dia wajib menggantinya saat login berikutnya."
+                                          data-confirm-type="warning" data-confirm-ok="Ya, reset">
+                                        @csrf
+                                        <button type="submit" class="btn btn-outline-warning">
+                                            <i class="bi bi-arrow-repeat me-1"></i>Reset Password
+                                        </button>
+                                    </form>
+                                @endif
+                            </div>
+                        </div>
+                    @endif
 
                     {{-- Semua jenis akun selain Super Admin terbatas pada toko yang di-assign --}}
                     @if(isset($user) && !$user->isSuperAdmin())

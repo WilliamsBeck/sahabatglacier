@@ -371,7 +371,15 @@
     <div class="card">
 
         <div class="card-title">Masuk ke Akun Anda</div>
-        <div class="card-sub">Silakan masukkan username dan kata sandi Anda.</div>
+        <div class="card-sub">Silakan masukkan username atau email dan kata sandi Anda.</div>
+
+        {{-- Mis. "Sesi berakhir, silakan login lagi" (lihat bootstrap/app.php, penanganan 419) --}}
+        @if(session('status'))
+        <div class="err-box" style="background:#eef6ff;border-color:#b6d4fe;color:#084298">
+            <i class="bi bi-info-circle-fill"></i>
+            {{ session('status') }}
+        </div>
+        @endif
 
         @if($errors->any())
         <div class="err-box">
@@ -384,11 +392,11 @@
             @csrf
 
             <div class="field">
-                <label for="username">Username</label>
+                <label for="username">Username atau Email</label>
                 <div class="input-wrap">
                     <input type="text" id="username" name="username"
                            value="{{ old('username') }}"
-                           placeholder="Masukkan username"
+                           placeholder="Masukkan username atau email"
                            class="{{ $errors->has('username') ? 'is-invalid' : '' }}"
                            required autofocus autocomplete="username">
                     <i class="bi bi-person lead-ico"></i>

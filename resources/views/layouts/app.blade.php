@@ -30,7 +30,7 @@
     @endphp
     @if($modeLihat)
     <style>
-        .mode-lihat form[method="post" i]:not([action$="/logout"]) :is(button[type="submit"], button:not([type]), input[type="submit"]),
+        .mode-lihat form[method="post" i]:not([action$="/logout"]):not([data-boleh-tulis]) :is(button[type="submit"], button:not([type]), input[type="submit"]),
         .mode-lihat a[href$="/create"], .mode-lihat a[href*="/create?"],
         .mode-lihat a[href$="/edit"],   .mode-lihat a[href*="/edit?"],
         .mode-lihat .hanya-tulis,
@@ -108,6 +108,11 @@
                         </li>
                         <li>
                             <hr class="dropdown-divider">
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{{ route('akun.password.edit') }}">
+                                <i class="bi bi-key me-2"></i>Ganti Password
+                            </a>
                         </li>
                         <li>
                             <form method="POST" action="{{ route('logout') }}">
@@ -494,9 +499,11 @@
         // tidak ada yang mengetik lalu mengira datanya tersimpan, dan tombol yang membuka
         // modal berisi form tulis disembunyikan. Form GET (filter/pencarian) tidak disentuh.
         (function () {
+            // data-boleh-tulis: form yang tetap boleh dipakai di mode ini (mis. ganti password sendiri)
             var formTulis = function (f) {
                 return (f.getAttribute('method') || 'get').toLowerCase() === 'post'
-                    && !/\/logout$/.test(f.getAttribute('action') || '');
+                    && !/\/logout$/.test(f.getAttribute('action') || '')
+                    && !f.hasAttribute('data-boleh-tulis');
             };
             document.querySelectorAll('form').forEach(function (f) {
                 if (!formTulis(f)) return;

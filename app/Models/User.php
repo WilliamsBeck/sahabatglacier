@@ -13,7 +13,9 @@ class User extends Authenticatable
 
     protected $hidden = ['password', 'remember_token'];
 
-    protected $casts = ['email_verified_at' => 'datetime', 'password' => 'hashed'];
+    // wajib_ganti_password sengaja TIDAK di $fillable: hanya diubah lewat jalur khusus
+    // (buat akun, reset password, ganti password), bukan dari isian form.
+    protected $casts = ['email_verified_at' => 'datetime', 'password' => 'hashed', 'wajib_ganti_password' => 'boolean'];
 
     /**
      * Empat jenis akun (PBI-104 / PBI-027) beserta nama tampilannya.

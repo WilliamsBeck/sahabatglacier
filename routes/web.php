@@ -43,6 +43,10 @@ Route::middleware(['auth'])->group(function () {
 
     Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
+    // Ganti password akun sendiri — semua jenis akun (PBI-105)
+    Route::get('akun/password', [\App\Http\Controllers\Akun\PasswordController::class, 'edit'])->name('akun.password.edit');
+    Route::put('akun/password', [\App\Http\Controllers\Akun\PasswordController::class, 'update'])->name('akun.password.update');
+
     // MASTER DATA
     // Master data (toko, supplier, bahan, kemasan, menu, resep, kategori) berlaku untuk
     // SEMUA toko, jadi mengubahnya hak super admin saja. Dulu seluruh grup ini terbuka
@@ -58,6 +62,7 @@ Route::middleware(['auth'])->group(function () {
             Route::resource('users', UserController::class);
             Route::post('users/{user}/assign-store', [UserController::class, 'assignStore'])->name('users.assign-store');
             Route::delete('users/{user}/revoke-store/{store}', [UserController::class, 'revokeStore'])->name('users.revoke-store');
+            Route::post('users/{user}/reset-password', [UserController::class, 'resetPassword'])->name('users.reset-password');
         });
 
         // Ubah data global: super admin saja.

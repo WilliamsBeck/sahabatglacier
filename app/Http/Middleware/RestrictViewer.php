@@ -9,7 +9,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Akun Supervisor (hanya-lihat): boleh membuka halaman di toko yang di-assign, tapi
  * TIDAK boleh melakukan aksi tulis apa pun. Semua request non-GET (POST/PUT/PATCH/
- * DELETE) ditolak — kecuali logout, agar user tetap bisa keluar.
+ * DELETE) ditolak — kecuali logout, agar user tetap bisa keluar, dan ganti password
+ * akun sendiri.
  *
  * Ini penjaga utamanya. Tombol tambah/edit/hapus/simpan yang disembunyikan di layout
  * hanya kenyamanan tampilan — kalaupun tombol lolos tampil, server tetap menolak.
@@ -24,6 +25,9 @@ class RestrictViewer
             && !in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)
             && !$request->routeIs('logout')
             && !$request->is('logout')
+            // Mengganti password AKUN SENDIRI bukan mengubah data toko — dan wajib bisa
+            // dilakukan supervisor yang masih memakai password sementara (PBI-105).
+            && !$request->routeIs('akun.password.update')
         ) {
             if ($request->expectsJson()) {
                 abort(403, 'Akun Supervisor hanya bisa melihat data.');

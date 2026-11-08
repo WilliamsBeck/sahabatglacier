@@ -32,8 +32,15 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'role' => 'admin_area',
+            'wajib_ganti_password' => false,
             'remember_token' => Str::random(10),
         ];
+    }
+
+    /** Akun dengan password sementara — wajib diganti saat login. */
+    public function wajibGantiPassword(): static
+    {
+        return $this->state(fn () => ['wajib_ganti_password' => true]);
     }
 
     /**
