@@ -922,13 +922,26 @@ class OpnameController extends Controller
     }
 
     /**
-     * Alasan (string) bila ada mutasi/pencatatan harian terkonfirmasi SETELAH tanggal
+     * Alasan (string) bila ada mutasi/pencatatan harian terkonfirmasi SETELAH periode
      * opname — transaksi tsb bergantung pada stok opname ini, jadi opname tidak boleh
      * dihapus/dibatalkan. NULL bila aman.
+     *
+     * Patokannya AKHIR PERIODE opname (sama dengan kunci periode, Opname::akhirPeriode),
+     * bukan tanggal input. Transaksi di dalam periode yang sama tidak menghalangi —
+     * dan memang tidak bisa dibatalkan selama opname approved, jadi kalau dihitung di
+     * sini keduanya saling mengunci. (Tanggal input yang jatuh SESUDAH akhir periode
+     * tetap dihormati lewat max().)
      */
     private function transactionsAfterReason(Opname $opname): ?string
     {
-        $afterDate = \Carbon\Carbon::parse($opname->opname_date)->toDateString();
+        $afterDate = max(
+            \Carbon\Carbon::parse($opname->opname_date)->toDateString(),
+            $opname->akhirPeriode()->toDateString()
+        );
+        // "Sesudah tanggal X" = mulai X+1. Dibandingkan '>=' hari berikutnya, bukan '>' X:
+        // kolom tanggal yang tersimpan beserta jam ("2026-10-31 00:00:00", mis. di SQLite)
+        // tidak ikut terhitung "sesudah" 31 Okt — dan index tetap terpakai di MySQL.
+        $mulai = \Carbon\Carbon::parse($afterDate)->addDay()->toDateString();
 
         // Tanggal pengakuannya beda per sisi: barang masuk diakui saat DITERIMA,
         // barang keluar diakui saat DIKIRIM. Jadi dicek terpisah, tidak bisa satu
@@ -939,17 +952,17 @@ class OpnameController extends Controller
             ->where(fn($q) => $q
                 ->where(fn($w) => $w
                     ->where('destination_store_id', $opname->store_id)
-                    ->where(\DB::raw($R::sqlMasuk()), '>', $afterDate))
+                    ->where(\DB::raw($R::sqlMasuk()), '>=', $mulai))
                 ->orWhere(fn($w) => $w
                     ->where('source_store_id', $opname->store_id)
                     ->whereIn('type', $R::KELUAR)
-                    ->where(\DB::raw($R::sqlKeluar()), '>', $afterDate))
+                    ->where(\DB::raw($R::sqlKeluar()), '>=', $mulai))
             )
             ->exists();
 
         $hasDaily = \App\Models\DailyUsage::where('store_id', $opname->store_id)
             ->where('qty_pack', '>', 0)
-            ->where('usage_date', '>', $afterDate)
+            ->where('usage_date', '>=', $mulai)
             ->whereExists(fn($q) => $q->from('daily_confirmations')
                 ->whereColumn('daily_confirmations.store_id', 'daily_usages.store_id')
                 ->whereColumn('daily_confirmations.confirmation_date', 'daily_usages.usage_date'))
@@ -962,7 +975,7 @@ class OpnameController extends Controller
             $hasDaily    ? 'sudah ada pencatatan harian terkonfirmasi' : null,
         ]);
         return implode(' dan ', $reasons)
-            . ' setelah tanggal ' . \Carbon\Carbon::parse($opname->opname_date)->isoFormat('D MMMM Y') . '.';
+            . ' setelah tanggal ' . \Carbon\Carbon::parse($afterDate)->isoFormat('D MMMM Y') . '.';
     }
 
     /**

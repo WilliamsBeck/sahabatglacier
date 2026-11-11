@@ -26,12 +26,25 @@ class Opname extends Model
         $max = null;
         foreach (static::where('store_id', $storeId)->where('status', 'approved')
                     ->get(['period_month', 'period_year', 'period_type']) as $o) {
-            $d = $o->period_type === 'mid_month'
-                ? \Carbon\Carbon::create($o->period_year, $o->period_month, 15)
-                : \Carbon\Carbon::create($o->period_year, $o->period_month, 1)->endOfMonth();
+            $d = $o->akhirPeriode();
             if (!$max || $d->gt($max)) $max = $d;
         }
         return $max?->toDateString();
+    }
+
+    /**
+     * Tanggal terakhir periode yang ditutup opname ini: end_month → akhir bulan,
+     * mid_month → tgl 15. SATU-SATUNYA definisi — dipakai kunci periode (lockDateFor)
+     * MAUPUN pengecekan "ada transaksi sesudah opname" saat batal approve/hapus.
+     * Dulu yang kedua memakai tanggal INPUT opname, sehingga SO akhir Oktober yang
+     * diinput tgl 30 membuat tgl 31 terkunci (masuk periode) sekaligus dianggap
+     * "sesudah opname" — opname tidak bisa dibatalkan, tgl 31 tidak bisa dibuka.
+     */
+    public function akhirPeriode(): \Carbon\Carbon
+    {
+        return $this->period_type === 'mid_month'
+            ? \Carbon\Carbon::create($this->period_year, $this->period_month, 15)
+            : \Carbon\Carbon::create($this->period_year, $this->period_month, 1)->endOfMonth()->startOfDay();
     }
 
     /**
