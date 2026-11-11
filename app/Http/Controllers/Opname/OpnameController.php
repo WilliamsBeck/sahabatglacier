@@ -1924,7 +1924,11 @@ class OpnameController extends Controller
             return back()->withErrors(['file' => 'File tidak valid: pastikan menggunakan template yang benar.']);
         }
         $storeId    = (int)$ws->getCell('B1')->getValue();
-        $date       = $ws->getCell('C1')->getValue();
+        $date       = $this->tanggalDariExcel($ws->getCell('C1')->getValue());
+        if (!$date) {
+            return back()->withErrors(['file' => 'Tanggal opname di sel C1 tidak terbaca. '
+                . 'Isi dengan format 2026-10-31 (tahun-bulan-tanggal) atau 31/10/2026.']);
+        }
         $periodType = $ws->getCell('D1')->getValue();
         $opnameMode = $ws->getCell('E1')->getValue() ?: 'bulanan';
         if (!in_array($opnameMode, ['bulanan', 'stok_awal'])) $opnameMode = 'bulanan';
@@ -2084,5 +2088,38 @@ class OpnameController extends Controller
 
         return redirect()->route('opname.opnames.show', $opname)
             ->with('success', 'Opname berhasil diimport. Periksa data lalu klik Approve.');
+    }
+
+    /**
+     * Tanggal di sel C1 template import → 'Y-m-d', atau null bila tidak terbaca.
+     * Template menulis teks "2026-10-31", tapi begitu sel itu diketik ulang di Excel,
+     * Excel menyimpannya sebagai ANGKA SERI tanggal (mis. 46326) atau teks "31/10/2026".
+     * Dulu keduanya langsung masuk Carbon::parse → error 500 (atau tanggal 1970).
+     */
+    private function tanggalDariExcel($v): ?string
+    {
+        if ($v instanceof \DateTimeInterface) {
+            $d = \Carbon\Carbon::instance($v);
+        } elseif (is_numeric($v)) {
+            try {
+                $d = \Carbon\Carbon::instance(\PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float) $v));
+            } catch (\Throwable) {
+                return null;
+            }
+        } else {
+            $s = trim((string) $v);
+            if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})/', $s, $m)) {
+                [$y, $mo, $dd] = [(int) $m[1], (int) $m[2], (int) $m[3]];
+            } elseif (preg_match('/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/', $s, $m)) {
+                [$y, $mo, $dd] = [(int) $m[3], (int) $m[2], (int) $m[1]];   // hari/bulan/tahun
+            } else {
+                return null;
+            }
+            if (!checkdate($mo, $dd, $y)) return null;
+            $d = \Carbon\Carbon::create($y, $mo, $dd);
+        }
+
+        // Tahun di luar akal (mis. angka biasa yang bukan tanggal) → tolak
+        return ($d->year >= 2020 && $d->year <= 2100) ? $d->toDateString() : null;
     }
 }
